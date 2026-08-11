@@ -7,7 +7,6 @@ rules:
     severity: ERROR
     languages:
       - typescript
-      - javascript
     metadata:
       category: security
       confidence: MEDIUM
@@ -17,21 +16,10 @@ rules:
       subcategory:
         - vuln
     patterns:
-      - patterns:
-          - pattern-inside: |
-              interface $I { ... $M ... }
-          - metavariable-regex:
-              metavariable: $M
-              regex: (amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*\s*(?::|!)[A-Za-z\s|&\[\]?<>"',.]+number
-      - patterns:
-          - pattern-inside: |
-              type $A = { ... $M ... }
-          - metavariable-regex:
-              metavariable: $M
-              regex: (amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*\s*(?::|!)[A-Za-z\s|&\[\]?<>"',.]+number
-      - patterns:
-          - pattern-inside: |
-              class $C { ... $PROP ... }
-          - metavariable-regex:
-              metavariable: $PROP
-              regex: (amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*\s*[:=!][\s\S]{0,80}?number
+      - pattern-either:
+          - pattern: "$FIELD: number"
+          - pattern: "$FIELD?: number"
+          - pattern: "$FIELD!: number"
+      - metavariable-regex:
+          metavariable: $FIELD
+          regex: ^(amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*$

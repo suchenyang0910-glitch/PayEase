@@ -103,7 +103,9 @@ jobs:
             --severity ERROR \
             --timeout 30 \
             --max-memory 4096 \
-            --strict
+            --strict \
+            --metrics=off \
+            broker-platform lender-core employer-portal partner-contracts packages
 
       - name: CI-10 Money type guard bash
         run: |

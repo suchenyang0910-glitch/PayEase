@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run __tests__",
     "lint": "echo 'shared-security lint placeholder (S0.1 未引入 ESLint，不阻塞)'"
   },

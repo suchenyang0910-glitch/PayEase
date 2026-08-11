@@ -5,6 +5,9 @@
     "rootDir": "../..",
     "declaration": false,
     "declarationMap": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "paths": {
+      "@payease/shared-money": ["packages/shared-money/src/index.ts"]
+    }
   }
 }

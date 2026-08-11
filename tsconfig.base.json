@@ -21,10 +21,6 @@
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true,
     "composite": false,
-    "baseUrl": ".",
-    "paths": {
-      "@payease/shared-money": ["packages/shared-money/src/index.ts"],
-      "@payease/shared-security": ["packages/shared-security/src/index.ts"]
-    }
+    "baseUrl": "."
   }
 }

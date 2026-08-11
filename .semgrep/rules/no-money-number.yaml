@@ -18,8 +18,6 @@ rules:
     patterns:
       - pattern-either:
           - pattern: "$FIELD: number"
-          - pattern: "$FIELD?: number"
-          - pattern: "$FIELD!: number"
       - metavariable-regex:
           metavariable: $FIELD
           regex: ^(amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*$

@@ -76,7 +76,7 @@ jobs:
           # Semgrep 1.96 imports pkg_resources, which newer setuptools no longer ships.
           # Keep the scanner version deterministic and restore the compatible provider.
           pipx install semgrep==1.96.0
-          pipx inject semgrep "setuptools<81"
+          pipx inject --force semgrep "setuptools<81"
           semgrep --version
 
       - name: CI-04 Sast Semgrep PayEase 4 custom rules

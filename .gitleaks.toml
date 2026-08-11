@@ -1,5 +1,5 @@
 [allowlist]
-description = "PayEase gitleaks allowlist (S0.4) — 登记后豁免，须与 SECURITY_EXCEPTIONS.yml 同步"
+description = "PayEase gitleaks allowlist (S0.4) - 登记后豁免, 须与 SECURITY_EXCEPTIONS.yml 同步"
 commits = []
 paths = [
   '''\.git/''',
@@ -21,11 +21,3 @@ regexes = [
   '''(?i)placeholder|example|dummy|changeme|your-key|your-secret|xxxx-xxxx-xxxx-xxxx''',
   '''(?i)semgrep-rules-test''',
 ]
-
-[[rules]]
-id = "payease-disable-generic-api-key"
-description = "PayEase: 禁用 generic-api-key 的高误报模式；由 no-hardcoded-secrets.yaml + 专用密钥规则覆盖"
-regex = '''(?i)'''
-secretGroup = 1
-keywords = ["__DISABLED__"]
-entropy = ["3.5", "4.5"]

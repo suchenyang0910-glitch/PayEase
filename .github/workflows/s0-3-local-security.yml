@@ -1,0 +1,151 @@
+name: S0.3 - Local Security Gates (Semgrep / Money guard / License allowlist)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.semgrep/**'
+      - 'scripts/**'
+      - 'packages/**'
+      - 'broker-platform/**'
+      - 'lender-core/**'
+      - 'employer-portal/**'
+      - 'partner-contracts/**'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/**'
+      - 'SECURITY_EXCEPTIONS.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.semgrep/**'
+      - 'scripts/**'
+      - 'packages/**'
+      - 'broker-platform/**'
+      - 'lender-core/**'
+      - 'employer-portal/**'
+      - 'partner-contracts/**'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/**'
+      - 'SECURITY_EXCEPTIONS.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  NODE_VERSION: '20.17.0'
+  PNPM_VERSION: '9.12.0'
+
+jobs:
+  gate-local-security:
+    name: Gate Local — Semgrep · Money guard · License allowlist
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: semgrep/semgrep:1.96.0
+      env:
+        SEMGREP_RULES_DIR: /github/workspace/.semgrep/rules
+    steps:
+      - name: Checkout (inside Semgrep container)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm + Node (via actions inside container fallback)
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Setup Node.js inside container
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies frozen
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: CI-04 Sast Semgrep (4 custom rules + p/owasp-top-ten + p/typescript)
+        run: |
+          set -e
+          echo "=== Custom rules (PayEase 4 条) ==="
+          semgrep scan \
+            --config="${SEMGREP_RULES_DIR}" \
+            --severity ERROR \
+            --timeout 30 \
+            --max-memory 4096 \
+            --no-rewrite-rule-ids \
+            --strict || {
+              echo "Semgrep custom rules FAILED"
+              exit 1
+            }
+          echo "=== Upstream rules (OWASP top-10 / typescript) — S0.4 升级为 ERROR 阻断 ==="
+          semgrep scan \
+            --config=p/owasp-top-ten \
+            --config=p/typescript \
+            --severity ERROR \
+            --timeout 30 \
+            --max-memory 4096 \
+            --strict
+
+      - name: CI-10 Money type guard — bash version (Linux CI)
+        run: |
+          set -e
+          chmod +x ./scripts/check-money-type.sh
+          ./scripts/check-money-type.sh
+
+      - name: CI-05 License allowlist scan
+        run: |
+          set -e
+          chmod +x ./scripts/check-licenses.sh
+          ./scripts/check-licenses.sh
+
+      - name: S1-8.08 Schemathesis API 模糊测试占位（S0.4 本地非执行占位；S1.0 后联调真实 openapi-v1.yaml）
+        run: |
+          echo "[S0.4 占位] Schemathesis openapi fuzz 真实执行依赖："
+          echo "  1) partner-contracts/openapi-v1.stub.yaml 升级为真实 schema（S1.0 MVP 开发期产出）"
+          echo "  2) S0.2 ECS/ALB 或本地 docker compose 启动被测服务 (S1.0)"
+          echo "  3) 真实命令: schemathesis run docs/openapi-v1.yaml --base-url=http://localhost:3000 --checks all --hypothesis-max-examples=200"
+          echo "S0.4 占位完成，跳过真实执行。"
+
+      - name: S1 Nightly ZAP Baseline Scan 占位（S0.4 本地非执行占位；S0.2 ALB/WAF 到位后启用 Nightly）
+        run: |
+          echo "[S0.4 占位] OWASP ZAP Baseline 真实执行依赖："
+          echo "  1) S0.2 Staging ALB + WAFv2 部署完成（可访问 HTTPS 入口）"
+          echo "  2) docker run -t owasp/zap2docker-stable zap-baseline.py -t https://staging.payease.example -r zap-report.html -J zap-report.json"
+          echo "  3) 告警上报至 security events + 90 天 remediation SLA"
+          echo "S0.4 占位完成，跳过真实执行。"
+
+      - name: CI-10 / 05 报告 artifact (for audit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-security-gate-report
+          path: |
+            .semgrep/
+            scripts/
+          retention-days: 30
+
+  secret-scan:
+    name: Gate Secret Detection — Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: CI-07 Secret detection — Gitleaks
+        uses: zricethezav/gitleaks-action@v2
+        with:
+          config-path: .gitleaks.toml

@@ -1,0 +1,33 @@
+rules:
+  - id: payease-localstorage-token-disallowed
+    message: >-
+      [WEB-08] Do NOT store access tokens / sessions / credentials / idToken / bearer / JWT / initData / signing nonces
+      in `localStorage` or `sessionStorage`. They are accessible to any same-origin script and survive cross-tab
+      navigation. Use `HttpOnly; Secure; SameSite=Lax|None; Partitioned` cookies via Set-Cookie only.
+      See docs/BROWSER_SECURITY_HEADERS.md section B / WEB-03.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    metadata:
+      category: security
+      confidence: HIGH
+      references:
+        - docs/安全基线与上线验收清单.md#WEB-08
+        - https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies
+      subcategory:
+        - vuln
+    patterns:
+      - patterns:
+          - pattern-either:
+              - pattern: localStorage.setItem($KEY, ...)
+              - pattern: localStorage[$KEY] = ...
+              - pattern: localStorage.$KEY = ...
+              - pattern: sessionStorage.setItem($KEY, ...)
+              - pattern: sessionStorage[$KEY] = ...
+              - pattern: sessionStorage.$KEY = ...
+          - metavariable-regex:
+              metavariable: $KEY
+              regex: (?i).*(token|session|credential|secret|access|idToken|bearer|jwt|initData|nonce|signing|cookie|auth|refreshToken).*
+      - pattern: localStorage.setItem("=~/.*(token|session|credential|secret|access|idToken|bearer|jwt|initData|nonce|signing|cookie|auth|refreshToken).*/i", ...)
+      - pattern: sessionStorage.setItem("=~/.*(token|session|credential|secret|access|idToken|bearer|jwt|initData|nonce|signing|cookie|auth|refreshToken).*/i", ...)

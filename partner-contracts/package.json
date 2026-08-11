@@ -1,0 +1,17 @@
+{
+  "name": "@payease/partner-contracts",
+  "version": "0.1.0-s0.1",
+  "private": true,
+  "type": "module",
+  "description": "跨域 API 契约版本化、兼容性最小校验说明、OpenAPI3.1 stub。S0 阶段不部署，仅用于版本编号模板。",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo 'partner-contracts tests placeholder (S0.1 无测试)'"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

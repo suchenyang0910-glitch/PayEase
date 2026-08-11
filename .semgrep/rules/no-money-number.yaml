@@ -1,0 +1,37 @@
+rules:
+  - id: payease-money-number-disallowed
+    message: >-
+      [CI-10] Do NOT use TypeScript `number` to represent money / amounts / prices / fees / totals.
+      Money must be expressed as: `{ amountMinor: string; currency: Currency }` from `@payease/shared-money`.
+      Serialize over APIs as `amountMinor: string` (never JSON number) to avoid MAX_SAFE_INTEGER precision loss.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    metadata:
+      category: security
+      confidence: MEDIUM
+      references:
+        - docs/安全基线与上线验收清单.md#CI-10
+        - https://en.wikipedia.org/wiki/IEEE_754#Double_precision
+      subcategory:
+        - vuln
+    patterns:
+      - patterns:
+          - pattern-inside: |
+              interface $I { ... $M ... }
+          - metavariable-regex:
+              metavariable: $M
+              regex: (amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*\s*(?::|!)[A-Za-z\s|&\[\]?<>"',.]+number
+      - patterns:
+          - pattern-inside: |
+              type $A = { ... $M ... }
+          - metavariable-regex:
+              metavariable: $M
+              regex: (amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*\s*(?::|!)[A-Za-z\s|&\[\]?<>"',.]+number
+      - patterns:
+          - pattern-inside: |
+              class $C { ... $PROP ... }
+          - metavariable-regex:
+              metavariable: $PROP
+              regex: (amount|fee|total|price|principal|interest|balance|repay|discount|refund|rebate|tax|charge|commission|quota|credit|debit)[A-Za-z0-9_]*\s*[:=!][\s\S]{0,80}?number

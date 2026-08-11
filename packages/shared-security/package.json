@@ -1,0 +1,38 @@
+{
+  "name": "@payease/shared-security",
+  "version": "0.1.0-s0.1",
+  "private": true,
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run __tests__",
+    "lint": "echo 'shared-security lint placeholder (S0.1 未引入 ESLint，不阻塞)'"
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "@payease/shared-money": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1",
+    "tsup": "^8.3.0"
+  }
+}

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+coverage/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+**/*.md
+docs/
+**/__tests__/**
+**/*.test.ts
+**/*.spec.ts
+# S0.1 已锁交付：以下共享类型文件本身定义 Money=string，属于规则定义不是误用
+packages/shared-money/src/**
+packages/shared-security/src/__tests__/**
+packages/shared-money/__tests__/**

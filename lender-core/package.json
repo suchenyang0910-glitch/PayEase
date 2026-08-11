@@ -1,0 +1,10 @@
+{
+  "name": "@payease/lender-core",
+  "version": "0.1.0-s0.1",
+  "private": true,
+  "description": "S0.1 仅占位；持牌机构 lender 连接器与账本在 S4 阶段初始化。",
+  "scripts": {
+    "typecheck": "echo 'lender-core placeholder (S0.1)'; exit 0",
+    "test": "echo 'lender-core tests placeholder (S0.1)'; exit 0"
+  }
+}

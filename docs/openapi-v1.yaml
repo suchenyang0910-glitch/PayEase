@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: PayEase Partner API
+  version: 1.0.0
+  description: Broker-to-lender and employer verification contract. All write operations require mTLS, request signatures and idempotency.
+servers:
+  - url: https://api.partner.example.com
+paths:
+  /v1/loan-applications:
+    post:
+      summary: Submit a loan application to the lender
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TraceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoanApplicationRequest" }
+      responses:
+        "202":
+          {
+            description: Accepted,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/AcceptedResponse" } },
+              },
+          }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "409": { $ref: "#/components/responses/ConflictError" }
+  /v1/employment-verifications:
+    post:
+      summary: Create an employer verification task
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TraceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/EmploymentVerificationRequest" }
+      responses:
+        "202":
+          {
+            description: Accepted,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/AcceptedResponse" } },
+              },
+          }
+  /v1/webhooks/application-status:
+    post:
+      summary: Lender application status callback
+      parameters:
+        [
+          { $ref: "#/components/parameters/EventId" },
+          { $ref: "#/components/parameters/TraceId" },
+        ]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { $ref: "#/components/schemas/StatusCallback" } },
+          }
+      responses: { "204": { description: Received } }
+  /v1/webhooks/offers:
+    post:
+      summary: Lender immutable offer callback
+      parameters:
+        [
+          { $ref: "#/components/parameters/EventId" },
+          { $ref: "#/components/parameters/TraceId" },
+        ]
+      requestBody:
+        required: true
+        content:
+          {
+            application/json:
+              { schema: { $ref: "#/components/schemas/OfferSnapshot" } },
+          }
+      responses: { "204": { description: Received } }
+components:
+  parameters:
+    IdempotencyKey:
+      {
+        name: Idempotency-Key,
+        in: header,
+        required: true,
+        schema: { type: string, maxLength: 128 },
+      }
+    TraceId:
+      { name: X-Trace-Id, in: header, required: true, schema: { type: string } }
+    EventId:
+      { name: X-Event-Id, in: header, required: true, schema: { type: string } }
+  responses:
+    ValidationError: { description: Invalid request }
+    ConflictError: { description: Idempotency conflict }
+  schemas:
+    AcceptedResponse:
+      type: object
+      required: [external_reference, trace_id]
+      properties:
+        { external_reference: { type: string }, trace_id: { type: string } }
+    LoanApplicationRequest:
+      type: object
+      required:
+        [
+          application_id,
+          product_code,
+          requested_principal_minor,
+          currency,
+          term_count,
+          consent,
+        ]
+      properties:
+        application_id: { type: string }
+        product_code: { type: string }
+        requested_principal_minor: { type: integer, format: int64, minimum: 1 }
+        currency: { type: string, enum: [KHR, USD] }
+        term_count: { type: integer, minimum: 1 }
+        consent: { $ref: "#/components/schemas/ConsentReference" }
+        document_references:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/SecureReference" },
+          }
+    ConsentReference:
+      type: object
+      required: [consent_id, version, expires_at]
+      properties:
+        {
+          consent_id: { type: string },
+          version: { type: string },
+          expires_at: { type: string, format: date-time },
+        }
+    SecureReference:
+      type: object
+      required: [type, secure_ref]
+      properties: { type: { type: string }, secure_ref: { type: string } }
+    EmploymentVerificationRequest:
+      type: object
+      required: [verification_id, employer_id, consent_id, allowed_fields]
+      properties:
+        verification_id: { type: string }
+        employer_id: { type: string }
+        consent_id: { type: string }
+        allowed_fields:
+          {
+            type: array,
+            items:
+              {
+                type: string,
+                enum: [employment_status, joined_month, salary_range],
+              },
+          }
+    StatusCallback:
+      type: object
+      required: [application_id, status, occurred_at]
+      properties:
+        application_id: { type: string }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                LENDER_REVIEWING,
+                OFFERED,
+                CONTRACTING,
+                DISBURSING,
+                DISBURSED,
+                CLOSED,
+              ],
+          }
+        reason_codes: { type: array, items: { type: string } }
+        occurred_at: { type: string, format: date-time }
+    OfferSnapshot:
+      type: object
+      required:
+        [
+          offer_id,
+          application_id,
+          currency,
+          principal_minor,
+          repayment_total_minor,
+          expires_at,
+        ]
+      properties:
+        offer_id: { type: string }
+        application_id: { type: string }
+        currency: { type: string, enum: [KHR, USD] }
+        principal_minor: { type: integer, format: int64 }
+        nominal_rate: { type: number }
+        apr: { type: number }
+        disbursement_deduction_mode:
+          { type: string, enum: [NONE, DEDUCT_FROM_DISBURSEMENT] }
+        interest_basis: { type: string, enum: [DECLINING_BALANCE, FLAT_ADD_ON] }
+        repayment_method: { type: string, enum: [EQUAL_INSTALLMENT] }
+        disbursed_amount_minor: { type: integer, format: int64 }
+        repayment_total_minor: { type: integer, format: int64 }
+        fee_items:
+          {
+            type: array,
+            items:
+              {
+                type: object,
+                required: [fee_code, amount_minor, charging_entity],
+                properties:
+                  {
+                    fee_code: { type: string },
+                    amount_minor: { type: integer, format: int64 },
+                    charging_entity: { type: string },
+                  },
+              },
+          }
+        expires_at: { type: string, format: date-time }

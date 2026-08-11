@@ -1,0 +1,21 @@
+## PayEase 安全漏洞例外登记 (示例模板 — 每行一例，真实文件按条目追加)
+
+> 流程：
+> 1. 新建 PR 修改本文件新增条目；
+> 2. 必须 `工程Owner (signoff_by)` + `安全负责人 (security_signoff)` 二人签字；
+> 3. 超过 `expire_on` 未续期的例外自动视为失效，合入被 CI 阻断。
+
+entries:
+
+  - id: EX-0001-#issue
+    title: 示例: XX 第三方 SDK 高危 CVE-2026-XXXX 临时延迟
+    cvss: 8.9
+    level: High
+    component: partner-contracts | broker-platform | lender-core | employer-portal (选填)
+    introduced_in_pr: '#TODO'
+    mitigation: WAF 规则 #XX 挡住利用面；临时降级 SDK 调用频次；限制 IP 白名单到 XX
+    expires_on: '2026-08-31T23:59:59+07:00'
+    signoff_by: '@engineer-owner (TODO: 实名签字)'
+    security_signoff: '@security-owner (TODO: 实名签字)'
+
+  # 追加更多条目

@@ -1,0 +1,10 @@
+{
+  "name": "@payease/employer-portal",
+  "version": "0.1.0-s0.1",
+  "private": true,
+  "description": "S0.1 仅占位；employer-portal HR 侧 SSO + 工资单在 S2.2 阶段初始化。",
+  "scripts": {
+    "typecheck": "echo 'employer-portal placeholder (S0.1)'; exit 0",
+    "test": "echo 'employer-portal tests placeholder (S0.1)'; exit 0"
+  }
+}

@@ -1,0 +1,117 @@
+name: S0 - Shared packages & Gate (PR + main)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/shared-money/**"
+      - "packages/shared-security/**"
+      - "partner-contracts/**"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/shared-money/**"
+      - "packages/shared-security/**"
+      - "partner-contracts/**"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  NODE_VERSION: "20.17.0"
+  PNPM_VERSION: "9.12.0"
+
+jobs:
+  gate-shared:
+    name: Gate — format → typecheck → tests → build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@63c24ba6bd7ba022e85952c12c516f69cb2f33d1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: CI-01 Format check (Prettier)
+        run: pnpm format:check
+
+      - name: CI-02 Typecheck (tsc strict + noUncheckedIndexedAccess)
+        run: pnpm typecheck
+
+      - name: CI-03 Unit tests (Vitest) — 状态机/金额/幂等/加密/审计 为必测(后续 S1 起)
+        run: pnpm test
+
+      - name: CI-04 SAST placeholder (Semgrep/CodeQL) — S0.2 起落地
+        run: |
+          echo "S0.1 placeholder: Semgrep 自定义规则 (SQL拼接 / Money number 误用 / localStorage Token / 密钥模式) 将在 S0-3.3 接入"
+          echo "CodeQL 配置将在 S0-3.3 加入本工作流"
+
+      - name: CI-05 License scan placeholder — S0-3.1 check-licenses.sh
+        run: |
+          echo "S0.1 placeholder. license-checker-rseidelsohn or licensee allowlist 脚本在 S0-3.1 接入"
+
+      - name: CI-06 Build shared packages (tsup ESM+CJS)
+        run: pnpm build
+
+      - name: CI-07 Secret scan placeholder (trufflehog / gitleaks)
+        run: |
+          echo "S0.1 placeholder, gitleaks enable in S0-3 phase"
+
+      - name: CI-08 SBOM + SLSA provenance placeholder — S0-3.4
+        run: |
+          echo "S0.1 placeholder: Syft SBOM + GitHub slsa-github-generator provenance + Cosign KMS 签名 + Lambda 签名校验"
+          echo "镜像 latest 标签禁令: 见 S0-4.12 / 基线 §9.3 SUP-02"
+
+      - name: CI-09 Image scan + Cosign placeholder
+        run: |
+          echo "S0.1 placeholder: Trivy / ECR ScanOnPush 启用在 S0-2.8, 仅签名镜像允许部署"
+
+      - name: CI-10 Money type guard (S0.1 本地)
+        run: echo "S0.1 已实装 shared-security MoneyGuardSchema / assertMoneyShape，S1-8 验收测试 S1-8.12"
+
+      - name: CI-11 Nightly DAST + Fuzz placeholder — S0-3.7
+        run: |
+          echo "S0.1 placeholder: nightly ZAP API scan + Schemathesis Hypothesis stateful 模糊测试 + Dependabot Critical 24h 合入分组"
+
+      - name: Upload shared dist artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-packages-dist
+          path: |
+            packages/shared-money/dist/**
+            packages/shared-security/dist/**
+          retention-days: 7

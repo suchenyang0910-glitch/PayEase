@@ -1,0 +1,46 @@
+rules:
+  - id: payease-no-sql-string-concat
+    message: >-
+      [CI-09] Build SQL with parameterized queries / ORM query builders only. Never concatenate user input or
+      interpolated values into SQL strings. Use `?`, `$1`, ORM parameter binding, or nest `pg.Parameter`-like types.
+      If raw SQL is truly necessary, it MUST go through a reviewed wrapper function that has `ALLOW_RAW_SQL`
+      whitelist marker. Semgrep has false-positive far lower than keyword-regex scanning approach.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    metadata:
+      category: security
+      confidence: MEDIUM
+      cwe: "CWE-89: SQL Injection"
+      references:
+        - docs/安全基线与上线验收清单.md#CI-09
+        - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+      subcategory:
+        - vuln
+    patterns:
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  `SELECT $$$$...${$X}...`
+              - pattern: |
+                  `UPDATE $$$$...${$X}...`
+              - pattern: |
+                  `DELETE $$$$...${$X}...`
+              - pattern: |
+                  `INSERT $$$$...${$X}...`
+              - pattern: |
+                  `CALL $$$$...${$X}...`
+              - pattern: |
+                  `MERGE $$$$...${$X}...`
+              - pattern: $A + "SELECT " + ...
+              - pattern: $A + "UPDATE " + ...
+              - pattern: $A + "DELETE " + ...
+              - pattern: $A + "INSERT " + ...
+              - pattern: $A + "CALL " + ...
+          - pattern-not-inside: |
+              // ALLOW_RAW_SQL: reviewed ... ...
+              ...
+          - pattern-not-inside: |
+              /* ALLOW_RAW_SQL: reviewed ... */
+              ...

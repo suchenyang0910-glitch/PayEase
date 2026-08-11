@@ -1,0 +1,7 @@
+packages:
+  - "packages/shared-money"
+  - "packages/shared-security"
+  - "broker-platform"
+  - "lender-core"
+  - "employer-portal"
+  - "partner-contracts"

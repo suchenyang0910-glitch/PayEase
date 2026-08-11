@@ -1,0 +1,29 @@
+{
+  "name": "payease-monorepo",
+  "version": "0.1.0-s0.1",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "description": "PayEase 薪易贷助贷平台 monorepo（S0 阶段仅含共享包与骨架，不含真实云资源/密钥/业务数据）",
+  "engines": {
+    "node": ">=20.17.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter='./packages/*' run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,md,json,yaml,yml}\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1",
+    "prettier": "^3.3.3",
+    "zod": "^3.23.8",
+    "big.js": "^6.2.2",
+    "@types/big.js": "^6.2.2",
+    "tsup": "^8.3.0"
+  }
+}

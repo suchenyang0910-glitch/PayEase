@@ -1,15 +1,41 @@
-﻿# S0-3.1 CI-05 许可证 allowlist 扫描（PowerShell 5 Windows 原生版本）
+﻿# S0-3.1 CI-05 License allowlist scanner (PowerShell 5 Windows native)
 #
-# 对应脚本：scripts/check-licenses.sh
+# Pair: scripts/check-licenses.sh
 #
-# 退出码：0 成功，1 未授权许可，2 环境错误
+# Exit codes: 0=ok, 1=unapproved license, 2=environment error
 
-[CmdletBinding()]
 param(
-  [string]$RootDir = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
+  [string]$RootDir
 )
 
 $ErrorActionPreference = 'Stop'
+
+# RootDir resolution (4 call-site compatibility levels, pure ASCII, .NET-only path APIs to avoid PS5 Split-Path AmbiguousParameterSet):
+#   1. explicit -RootDir <path>
+#   2. direct / dot-source execution -> $PSScriptRoot (scripts/) parent = repo root
+#   3. traditional invocation      -> MyInvocation.MyCommand.Path 2x parent
+#   4. & sandbox / nested / empty  -> fallback Get-Location (cwd) with WARNING
+if ([string]::IsNullOrWhiteSpace($RootDir)) {
+  $candidate = $null
+  if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    try { $candidate = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($PSScriptRoot)) } catch { $candidate = $null }
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+    try {
+      $scriptDir = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($MyInvocation.MyCommand.Path))
+      if (-not [string]::IsNullOrWhiteSpace($scriptDir)) {
+        $candidate = [IO.Path]::GetDirectoryName($scriptDir)
+      }
+    } catch {
+      $candidate = $null
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate)) {
+    $candidate = (Get-Location).Path
+    Write-Host -ForegroundColor Yellow "[check-licenses PS] WARN: PSScriptRoot / MyInvocation.MyCommand.Path both unusable; fallback RootDir=<cwd>=$candidate"
+  }
+  $RootDir = $candidate
+}
 
 $Allowlist = @(
   'MIT','Apache-2.0','Apache 2.0','Apache 2','BSD-2-Clause','BSD-3-Clause',
@@ -28,14 +54,13 @@ if (-not (Test-Path -LiteralPath $RootDir)) {
   exit 2
 }
 if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
-  Write-Host -ForegroundColor Red "[check-licenses PS] ERR: node.exe not found. 需要 Node.js >= 20.17"
+  Write-Host -ForegroundColor Red "[check-licenses PS] ERR: node.exe not found. Node.js >= 22 required."
   exit 2
 }
 
 try {
   $scriptFile = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName() + '.mjs')
   $outFile = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName() + '.json')
-  $allowlistStr = ($Allowlist | ForEach-Object { '"' + $_.Replace('"','\"') + '"' }) -join ','
 
   $nodeCode = @'
 import fs from 'node:fs';
@@ -96,7 +121,7 @@ fs.writeFileSync(out, JSON.stringify(report, null, 2), 'utf8');
     & node.exe @cliArgs 2>&1 | Out-Null
     $nodeExit = $LASTEXITCODE
     if ($nodeExit -ne 0) {
-      Write-Host -ForegroundColor Red "[check-licenses PS] ERR: node script exit=$nodeExit"
+      Write-Host -ForegroundColor Red "[check-licenses PS] ERR: node scanner exit=$nodeExit"
       exit 2
     }
   } finally {
@@ -104,7 +129,7 @@ fs.writeFileSync(out, JSON.stringify(report, null, 2), 'utf8');
   }
 
   if (-not (Test-Path -LiteralPath $outFile)) {
-    Write-Host -ForegroundColor Red "[check-licenses PS] ERR: 未生成扫描结果"
+    Write-Host -ForegroundColor Red "[check-licenses PS] ERR: scanner did not produce report JSON"
     exit 2
   }
 
@@ -122,14 +147,14 @@ fs.writeFileSync(out, JSON.stringify(report, null, 2), 'utf8');
   Remove-Item -LiteralPath $outFile -ErrorAction SilentlyContinue
 
   if ($report.Count -eq 0) {
-    Write-Host "[check-licenses PS] OK: 全部外部依赖许可均在 allowlist"
+    Write-Host "[check-licenses PS] OK: all external licenses are in the allowlist"
     exit 0
   }
 
-  Write-Host -ForegroundColor Red "[check-licenses PS] FAIL: 发现 $($report.Count) 个未授权包："
+  Write-Host -ForegroundColor Red "[check-licenses PS] FAIL: $($report.Count) package(s) have unapproved license(s):"
   $report | Format-Table -AutoSize -Wrap | Out-String -Width 400 | Write-Host
   Write-Host
-  Write-Host "解决：1) 替换为 allowlist 内的替代；2) SECURITY_EXCEPTIONS.yml 双签字登记；3) 加入 allowlist 前法务审阅。"
+  Write-Host "Remediation (pick one): 1) replace with an allowlisted alternative; 2) dual owner sign-off in SECURITY_EXCEPTIONS.yml and re-run; 3) add to allowlist ONLY after legal review."
   exit 1
 } catch {
   Write-Host -ForegroundColor Red "[check-licenses PS] ERR: $_"

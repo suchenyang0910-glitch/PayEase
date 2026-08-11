@@ -57,3 +57,31 @@ export const assertContractVersion = (
 export const CONTRACT_COMPAT_NOTES = Object.freeze({
   v1: "broker ↔ lender / employer v1 契约：向后兼容的新增字段须 optional；删除/改名/必填升级须 bump major；跨域一律以 Zod 在入口 + 出口双重 parse。",
 } as const);
+
+export {
+  QuoteV1ParamsSchema,
+  QuoteV1ResultSchema,
+  QUOTE_V1_VERSION,
+  type QuoteV1Params,
+  type QuoteV1Result,
+} from "./templates/quote-v1.template";
+
+export {
+  HrEmploymentVerificationV1ParamsSchema,
+  HrEmploymentVerificationV1ResultSchema,
+  HR_EMPLOYMENT_VERIFICATION_V1_VERSION,
+  HR_EMPLOYMENT_VERIFICATION_V1_NOTES,
+  type HrEmploymentVerificationV1Params,
+  type HrEmploymentVerificationV1Result,
+} from "./templates/hr-employment-verification.template";
+
+export {
+  FinanceRepaymentReconV1ParamsSchema,
+  FinanceRepaymentReconV1ResultSchema,
+  FinanceRepaymentReconLineV1Schema,
+  FINANCE_REPAYMENT_RECON_V1_VERSION,
+  FINANCE_REPAYMENT_RECON_V1_NOTES,
+  type FinanceRepaymentReconV1Params,
+  type FinanceRepaymentReconV1Result,
+  type FinanceRepaymentReconLineV1,
+} from "./templates/finance-repayment-recon.template";

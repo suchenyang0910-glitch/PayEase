@@ -4,4 +4,6 @@ packages:
   - "broker-platform"
   - "lender-core"
   - "employer-portal"
+  - "hr-verify-portal"
+  - "finance-verify-portal"
   - "partner-contracts"

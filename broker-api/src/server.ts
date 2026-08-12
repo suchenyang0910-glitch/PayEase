@@ -140,6 +140,8 @@ type ApprovalCommand = Readonly<{
   reasonCode: string;
 }>;
 
+class DualControlConflictError extends Error {}
+
 async function lockApplication(
   client: PoolClient,
   applicationNo: string,
@@ -995,7 +997,9 @@ async function recordMakerApproval(
     "SELECT 1 FROM approval_events WHERE application_id = $1 AND stage = $2 LIMIT 1",
     [application.id, stage],
   );
-  if (existing.rowCount) throw new Error("Maker approval already recorded");
+  if (existing.rowCount) {
+    throw new DualControlConflictError("Maker approval already recorded");
+  }
   await client.query(
     `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
      VALUES ($1, $2, 'APPROVED', $3, $4, $5, now())`,
@@ -1032,10 +1036,13 @@ async function recordCheckerApproval(
     [application.id, makerStage],
   );
   const makerActor = maker.rows[0]?.actor_user_ref;
-  if (!makerActor)
-    throw new Error("Maker approval is required before checker approval");
+  if (!makerActor) {
+    throw new DualControlConflictError(
+      "Maker approval is required before checker approval",
+    );
+  }
   if (makerActor === actorUserRef) {
-    throw new Error(
+    throw new DualControlConflictError(
       "Dual control requires two distinct authenticated accounts",
     );
   }
@@ -1153,6 +1160,9 @@ app.post(
       return { applicationNo: params.applicationNo, status: "DISBURSED" };
     } catch (error) {
       await client.query("ROLLBACK");
+      if (error instanceof DualControlConflictError) {
+        return reply.code(409).send({ code: "DUAL_CONTROL_CONFLICT" });
+      }
       throw error;
     } finally {
       client.release();
@@ -1349,6 +1359,9 @@ app.post(
       return { applicationNo: params.applicationNo, status: "SETTLED" };
     } catch (error) {
       await client.query("ROLLBACK");
+      if (error instanceof DualControlConflictError) {
+        return reply.code(409).send({ code: "DUAL_CONTROL_CONFLICT" });
+      }
       throw error;
     } finally {
       client.release();

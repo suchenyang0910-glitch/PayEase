@@ -1348,14 +1348,14 @@ async function recordMakerApproval(
   actorUserRef: string,
   actorRole: string,
   reasonCode: string,
-  repaymentPeriodIndex?: number,
+  collectionSequence?: number,
 ): Promise<void> {
-  const existing = repaymentPeriodIndex
+  const existing = collectionSequence
     ? await client.query(
         `SELECT 1 FROM approval_events
          WHERE application_id = $1 AND stage = $2 AND repayment_installment_no = $3
          LIMIT 1`,
-        [application.id, stage, repaymentPeriodIndex],
+        [application.id, stage, collectionSequence],
       )
     : await client.query(
         "SELECT 1 FROM approval_events WHERE application_id = $1 AND stage = $2 LIMIT 1",
@@ -1373,7 +1373,7 @@ async function recordMakerApproval(
       actorUserRef,
       actorRole,
       reasonCode,
-      repaymentPeriodIndex ?? null,
+      collectionSequence ?? null,
     ],
   );
   await addAuditEvent(
@@ -1384,7 +1384,7 @@ async function recordMakerApproval(
     {
       stage,
       reasonCode,
-      repaymentPeriodIndex,
+      collectionSequence,
     },
   );
 }
@@ -1400,15 +1400,15 @@ async function recordCheckerApproval(
   evidenceReference: string,
   nextStatus: string,
   evidenceType: "DISBURSEMENT_RECEIPT" | "REPAYMENT_RECEIPT",
-  repaymentPeriodIndex?: number,
+  collectionSequence?: number,
 ): Promise<void> {
-  const maker = repaymentPeriodIndex
+  const maker = collectionSequence
     ? await client.query<{ actor_user_ref: string }>(
         `SELECT actor_user_ref FROM approval_events
          WHERE application_id = $1 AND stage = $2 AND decision = 'APPROVED'
            AND repayment_installment_no = $3
          ORDER BY occurred_at DESC LIMIT 1`,
-        [application.id, makerStage, repaymentPeriodIndex],
+        [application.id, makerStage, collectionSequence],
       )
     : await client.query<{ actor_user_ref: string }>(
         `SELECT actor_user_ref FROM approval_events
@@ -1436,7 +1436,7 @@ async function recordCheckerApproval(
       actorUserRef,
       actorRole,
       reasonCode,
-      repaymentPeriodIndex ?? null,
+      collectionSequence ?? null,
     ],
   );
   await updateStatus(client, application, nextStatus, actorUserRef, reasonCode);
@@ -1459,7 +1459,7 @@ async function recordCheckerApproval(
       makerStage,
       checkerStage,
       evidenceReference,
-      repaymentPeriodIndex,
+      collectionSequence,
     },
   );
 }

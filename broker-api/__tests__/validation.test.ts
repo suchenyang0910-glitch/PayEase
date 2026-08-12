@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createApplicationSchema } from "../src/validation.js";
+import {
+  createApplicationSchema,
+  disbursementDualControlSchema,
+} from "../src/validation.js";
 
 describe("controlled-pilot application validation", () => {
   it("accepts a USD request with minor-unit string and valid term", () => {
@@ -21,5 +24,38 @@ describe("controlled-pilot application validation", () => {
       tenorDays: 181,
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("requires distinct maker and checker roles for disbursement control", () => {
+    expect(
+      disbursementDualControlSchema.safeParse({
+        release: {
+          actorUserRef: "maker-001",
+          actorRole: "LENDER_DISBURSEMENT_MAKER",
+          reasonCode: "RELEASE_APPROVED",
+        },
+        confirmation: {
+          actorUserRef: "checker-001",
+          actorRole: "LENDER_DISBURSEMENT_CHECKER",
+          reasonCode: "RECEIPT_VERIFIED",
+        },
+        evidenceReference: "SIM-DISB-001",
+      }).success,
+    ).toBe(true);
+    expect(
+      disbursementDualControlSchema.safeParse({
+        release: {
+          actorUserRef: "maker-001",
+          actorRole: "LENDER_DISBURSEMENT_CHECKER",
+          reasonCode: "RELEASE_APPROVED",
+        },
+        confirmation: {
+          actorUserRef: "checker-001",
+          actorRole: "LENDER_DISBURSEMENT_CHECKER",
+          reasonCode: "RECEIPT_VERIFIED",
+        },
+        evidenceReference: "SIM-DISB-001",
+      }).success,
+    ).toBe(false);
   });
 });

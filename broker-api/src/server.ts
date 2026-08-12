@@ -76,9 +76,12 @@ async function requireOpsAdmin(
 }
 
 app.addHook("onRequest", async (request, reply) => {
+  const isPublicUserApplicationSubmission =
+    request.method === "POST" && request.url === "/v1/local/applications";
   if (
     !request.url.startsWith("/v1/local/") ||
-    request.url.startsWith("/v1/local/auth/")
+    request.url.startsWith("/v1/local/auth/") ||
+    isPublicUserApplicationSubmission
   )
     return;
   const token = sessionToken(request.headers.cookie);

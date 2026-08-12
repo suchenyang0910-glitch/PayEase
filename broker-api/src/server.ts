@@ -14,6 +14,11 @@ if (!databaseUrl) {
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const app = Fastify({ logger: true });
 
+app.addHook("onSend", async (_request, reply) => {
+  reply.header("X-PayEase-Environment", "controlled-preview");
+  reply.header("Cache-Control", "no-store");
+});
+
 function eventHash(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("|"), "utf8").digest("hex");
 }

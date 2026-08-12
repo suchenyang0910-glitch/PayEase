@@ -1,0 +1,10 @@
+.git
+.github
+.semgrep
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+prototype
+docs
+fixtures
+infra/local

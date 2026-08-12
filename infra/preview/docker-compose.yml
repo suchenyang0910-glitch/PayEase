@@ -29,7 +29,9 @@ services:
       DATABASE_URL: postgresql://payease_preview:${PAYEASE_PREVIEW_POSTGRES_PASSWORD:?Set a VPS-local preview password}@postgres:5432/payease_preview
       HOST: "0.0.0.0"
       PORT: "3100"
-      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?Set a VPS-local bootstrap password before first administrator creation}
+      # Optional after bootstrap: the API refuses bootstrap unless a deployment
+      # operator explicitly supplies this value.
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
     ports:
       - "127.0.0.1:3100:3100"
 

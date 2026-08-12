@@ -2,6 +2,7 @@ packages:
   - "packages/shared-money"
   - "packages/shared-security"
   - "packages/v1-domain"
+  - "broker-api"
   - "broker-platform"
   - "lender-core"
   - "employer-portal"

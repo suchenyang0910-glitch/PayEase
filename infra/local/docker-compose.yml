@@ -1,0 +1,20 @@
+services:
+  broker-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: payease_broker_local
+      POSTGRES_USER: payease_local
+      POSTGRES_PASSWORD: ${PAYEASE_LOCAL_POSTGRES_PASSWORD:?Set a local-only PostgreSQL password before starting Docker Compose}
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - broker_pgdata:/var/lib/postgresql/data
+      - ../../broker-platform/db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payease_local -d payease_broker_local"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  broker_pgdata:

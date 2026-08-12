@@ -41,6 +41,18 @@ if (!databaseUrl) {
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const app = Fastify({ logger: true });
 
+// Schema failures are client input errors.  Never surface them as a 500, which
+// would make malformed public submissions look like a service outage.
+app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({
+      code: "VALIDATION_ERROR",
+      fields: error.issues.map((issue) => issue.path.join(".")),
+    });
+  }
+  reply.send(error);
+});
+
 function sessionToken(cookieHeader: string | undefined): string | undefined {
   return cookieHeader
     ?.split(";")

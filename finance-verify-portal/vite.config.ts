@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [
     react(),
-    (): PluginOption => ({
+    ((): PluginOption => ({
       name: "payease-finance-verify-security-headers-s0-5",
       apply: "serve",
       configureServer(server) {
@@ -43,7 +43,7 @@ export default defineConfig({
           next();
         });
       },
-    }),
+    }))(),
   ],
   server: {
     port: 5174,

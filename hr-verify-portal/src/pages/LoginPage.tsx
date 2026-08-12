@@ -23,7 +23,15 @@ export function LoginPage(): JSX.Element {
     <main style={{ padding: 32, fontFamily: "system-ui, sans-serif" }}>
       <h1>PayEase HR Verification Portal — Login (S0.5 placeholder)</h1>
       <p style={{ color: "#555", maxWidth: 780 }}>{loginHint}</p>
-      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 380 }}>
+      <form
+        onSubmit={onSubmit}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          maxWidth: 380,
+        }}
+      >
         <label>
           Enterprise IdP (SAML/OIDC placeholder)
           <br />
@@ -60,8 +68,9 @@ export function LoginPage(): JSX.Element {
         </button>
       </form>
       <footer style={{ marginTop: 24, color: "#777", fontSize: 12 }}>
-        S0.5 constraints applied: X-Frame-Options DENY at vite headers; CSP frame-ancestors none;
-        no cross-enterprise API calls; no real credential exchange.
+        S0.5 constraints applied: X-Frame-Options DENY at vite headers; CSP
+        frame-ancestors none; no cross-enterprise API calls; no real credential
+        exchange.
       </footer>
     </main>
   );

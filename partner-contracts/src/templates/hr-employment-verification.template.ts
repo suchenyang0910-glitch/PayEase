@@ -51,5 +51,6 @@ export type HrEmploymentVerificationV1Result = z.infer<
 
 export const HR_EMPLOYMENT_VERIFICATION_V1_NOTES = Object.freeze({
   stub: "S0.5 Zod stub only; do NOT use as production contract. Upgrade to partner-contracts v1 real schema only when S0.2 isolation infrastructure is signed off and S1.0 MVP business rules are frozen.",
-  amountMinorRule: "All monetary fields are string integer minor units (KHR riel = 1, USD = cents); never a JS number, to avoid MAX_SAFE_INTEGER precision loss on KHR payroll values.",
+  amountMinorRule:
+    "All monetary fields are string integer minor units (KHR riel = 1, USD = cents); never a JS number, to avoid MAX_SAFE_INTEGER precision loss on KHR payroll values.",
 });

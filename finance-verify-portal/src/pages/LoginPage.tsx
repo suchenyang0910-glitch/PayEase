@@ -23,11 +23,24 @@ export function LoginPage(): JSX.Element {
     <main style={{ padding: 32, fontFamily: "system-ui, sans-serif" }}>
       <h1>PayEase Finance Verification Portal — Login (S0.5 placeholder)</h1>
       <p style={{ color: "#555", maxWidth: 820 }}>{loginHint}</p>
-      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 380 }}>
+      <form
+        onSubmit={onSubmit}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          maxWidth: 380,
+        }}
+      >
         <label>
           Finance IdP (SAML/OIDC placeholder)
           <br />
-          <input type="email" defaultValue={username} readOnly style={{ width: "100%", padding: 8, marginTop: 4 }} />
+          <input
+            type="email"
+            defaultValue={username}
+            readOnly
+            style={{ width: "100%", padding: 8, marginTop: 4 }}
+          />
         </label>
         <label>
           Password placeholder
@@ -55,8 +68,9 @@ export function LoginPage(): JSX.Element {
         </button>
       </form>
       <footer style={{ marginTop: 24, color: "#777", fontSize: 12 }}>
-        S0.5 constraints applied: X-Frame-Options DENY (finance back-office, per browser security headers baseline);
-        CSP frame-ancestors none; zero real bank/ERP/GL/Stripe/PayWay integration.
+        S0.5 constraints applied: X-Frame-Options DENY (finance back-office, per
+        browser security headers baseline); CSP frame-ancestors none; zero real
+        bank/ERP/GL/Stripe/PayWay integration.
       </footer>
     </main>
   );

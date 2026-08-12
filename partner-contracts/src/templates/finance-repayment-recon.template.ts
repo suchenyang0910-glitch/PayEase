@@ -30,7 +30,17 @@ export const FinanceRepaymentReconLineV1Schema = z.object({
   differenceAmountMinor: z.string().regex(/^-?\d+$/),
   differenceCurrency: z.enum(CURRENCY_ENUM),
   settlementReference: z.string().max(256).optional(),
-  settlementChannel: z.enum(["BANK_ABA", "BANK_WING", "BANK_ACLEDA", "STRIPE", "PAYWAY", "INTERNAL_NETTING", "OTHER"]).optional(),
+  settlementChannel: z
+    .enum([
+      "BANK_ABA",
+      "BANK_WING",
+      "BANK_ACLEDA",
+      "STRIPE",
+      "PAYWAY",
+      "INTERNAL_NETTING",
+      "OTHER",
+    ])
+    .optional(),
   reconStatus: z.enum(RECON_STATUS_ENUM),
   reconNotes: z.string().max(512).optional(),
 });
@@ -70,6 +80,8 @@ export type FinanceRepaymentReconV1Result = z.infer<
 
 export const FINANCE_REPAYMENT_RECON_V1_NOTES = Object.freeze({
   stub: "S0.5 Zod stub only; not a production contract. Real bank/ERP/GL/Stripe/PayWay integration must wait for S0.2 isolation infrastructure and S1.0 MVP sign-off.",
-  postingRule: "All reconciliation postings (to GL, to lender settlement accounts, to KHR VAT e-invoice) are deferred to S1.0 backend; this schema describes data shape only, not execution.",
-  amountMinorRule: "Every monetary column is a string integer minor unit. KHR = 1 riel; USD = 1 cent; no decimals; no JS number.",
+  postingRule:
+    "All reconciliation postings (to GL, to lender settlement accounts, to KHR VAT e-invoice) are deferred to S1.0 backend; this schema describes data shape only, not execution.",
+  amountMinorRule:
+    "Every monetary column is a string integer minor unit. KHR = 1 riel; USD = 1 cent; no decimals; no JS number.",
 });

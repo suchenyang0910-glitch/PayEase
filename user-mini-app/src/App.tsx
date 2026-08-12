@@ -45,7 +45,9 @@ export function App(): JSX.Element {
   const [phoneConsent, setPhoneConsent] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const text = copy[language];
+  // LanguageCode is a closed union; the fallback keeps strict CI sound if a
+  // browser returns an unexpected select value before React updates state.
+  const text = copy[language] ?? copy.en;
   const amount = { amountMinor: "25000", currency: "USD" as const };
   return (
     <main

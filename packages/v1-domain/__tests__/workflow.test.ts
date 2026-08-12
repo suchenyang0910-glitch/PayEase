@@ -48,6 +48,10 @@ describe("V1 controlled-pilot workflow", () => {
     );
     item = recordApproval(item, approval("BROKER_REVIEW", "broker-1"));
     item = recordApproval(item, approval("EMPLOYER_VERIFICATION", "hr-1"));
+    item = recordApproval(
+      item,
+      approval("EMPLOYER_FINANCE_VERIFICATION", "employer-finance-1"),
+    );
     item = recordApproval(item, approval("LENDER_INITIAL_REVIEW", "lender-1"));
     item = recordApproval(item, approval("LENDER_FINAL_REVIEW", "lender-2"));
     item = confirmContract(
@@ -95,6 +99,10 @@ describe("V1 controlled-pilot workflow", () => {
     );
     item = recordApproval(item, approval("BROKER_REVIEW", "broker-1"));
     item = recordApproval(item, approval("EMPLOYER_VERIFICATION", "hr-1"));
+    item = recordApproval(
+      item,
+      approval("EMPLOYER_FINANCE_VERIFICATION", "employer-finance-1"),
+    );
     item = recordApproval(item, approval("LENDER_INITIAL_REVIEW", "lender-1"));
     item = recordApproval(item, approval("LENDER_FINAL_REVIEW", "lender-2"));
     item = confirmContract(
@@ -135,6 +143,10 @@ describe("V1 controlled-pilot workflow", () => {
     );
     item = recordApproval(item, approval("BROKER_REVIEW", "broker-1"));
     item = recordApproval(item, approval("EMPLOYER_VERIFICATION", "hr-1"));
+    item = recordApproval(
+      item,
+      approval("EMPLOYER_FINANCE_VERIFICATION", "employer-finance-1"),
+    );
     item = recordApproval(item, approval("LENDER_INITIAL_REVIEW", "lender-1"));
     item = recordApproval(item, approval("LENDER_FINAL_REVIEW", "lender-2"));
     item = confirmContract(

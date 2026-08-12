@@ -13,34 +13,20 @@ export const createApplicationSchema = z.object({
 });
 
 export const brokerReviewSchema = z.object({
-  actorUserRef: z.string().min(3).max(128),
-  actorRole: z.literal("BROKER_OFFICER"),
   decision: z.enum(["APPROVED", "REJECTED", "RETURNED"]),
   reasonCode: z.string().min(1).max(64),
 });
 
 const approvalDecisionSchema = z.object({
-  actorUserRef: z.string().min(3).max(128),
-  actorRole: z.string().min(3).max(64),
   decision: z.enum(["APPROVED", "REJECTED", "RETURNED"]),
   reasonCode: z.string().min(1).max(64),
 });
 
-export const employerVerificationSchema = approvalDecisionSchema.extend({
-  actorRole: z.enum(["EMPLOYER_HR", "EMPLOYER_FINANCE"]),
-});
-
-export const lenderInitialReviewSchema = approvalDecisionSchema.extend({
-  actorRole: z.literal("LENDER_CREDIT_OFFICER"),
-});
-
-export const lenderFinalReviewSchema = approvalDecisionSchema.extend({
-  actorRole: z.literal("LENDER_CREDIT_REVIEWER"),
-});
+export const employerVerificationSchema = approvalDecisionSchema;
+export const lenderInitialReviewSchema = approvalDecisionSchema;
+export const lenderFinalReviewSchema = approvalDecisionSchema;
 
 export const contractConfirmationSchema = z.object({
-  actorUserRef: z.string().min(3).max(128),
-  actorRole: z.literal("LENDER_CONTRACT_OFFICER"),
   evidenceReference: z.string().min(3).max(160),
 });
 
@@ -71,7 +57,61 @@ export const repaymentDualControlSchema = z.object({
 });
 
 export const lifecycleActorSchema = z.object({
-  actorUserRef: z.string().min(3).max(128),
-  actorRole: z.string().min(3).max(64),
   reasonCode: z.string().min(1).max(64),
+});
+
+// The authenticated account is the actor of record. Request bodies only carry
+// the business reason/evidence required to perform the controlled action.
+export const makerApprovalSchema = z.object({
+  reasonCode: z.string().min(1).max(64),
+});
+
+export const checkerApprovalSchema = makerApprovalSchema.extend({
+  evidenceReference: z.string().min(3).max(160),
+});
+
+export const reconciliationAssignSchema = z.object({
+  assigneeLoginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+});
+
+export const reconciliationResolutionSchema = z.object({
+  reasonCode: z.string().min(1).max(128),
+});
+
+export const bootstrapAdminSchema = z.object({
+  loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+  password: z.string().min(16).max(128),
+  preferredLanguage: languageSchema,
+});
+
+export const loginSchema = z.object({
+  loginName: z.string().min(3).max(64),
+  password: z.string().min(1).max(128),
+});
+
+export const departmentCreateSchema = z.object({
+  domain: z.enum(["OPS", "BROKER", "LENDER", "EMPLOYER"]),
+  code: z.string().regex(/^[A-Z0-9_]{3,64}$/),
+  displayNameZh: z.string().min(1).max(80),
+  displayNameEn: z.string().min(1).max(80),
+  displayNameKm: z.string().min(1).max(160),
+});
+
+export const roleCreateSchema = z.object({
+  domain: z.enum(["OPS", "BROKER", "LENDER", "EMPLOYER"]),
+  code: z.string().regex(/^[A-Z0-9_]{3,64}$/),
+  displayNameZh: z.string().min(1).max(80),
+  displayNameEn: z.string().min(1).max(80),
+  displayNameKm: z.string().min(1).max(160),
+});
+
+export const adminAccountCreateSchema = z.object({
+  loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+  password: z.string().min(16).max(128),
+  departmentCode: z.string().regex(/^[A-Z0-9_]{3,64}$/),
+  roleCodes: z
+    .array(z.string().regex(/^[A-Z0-9_]{3,64}$/))
+    .min(1)
+    .max(4),
+  preferredLanguage: languageSchema,
 });

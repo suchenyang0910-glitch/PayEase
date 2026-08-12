@@ -1,276 +1,249 @@
-import { useState } from "react";
-import {
-  createDraftApplication,
-  markFundsEvent,
-  recordApproval,
-  recordDualControl,
-  transitionApplication,
-  type LoanApplication,
-} from "@payease/v1-domain";
-import { formatHuman } from "@payease/shared-money";
+import { useEffect, useState, type FormEvent } from "react";
 
-const initial = (): LoanApplication => {
-  let item = createDraftApplication({
-    id: "APP-20260812-0001",
-    applicantUserId: "telegram-1001",
-    preferredLanguage: "km",
-    requestedAmount: { amountMinor: "25000", currency: "USD" },
-    tenorDays: 30,
-  });
-  item = transitionApplication(
-    item,
-    "SUBMITTED",
-    "telegram-1001",
-    "2026-08-12T08:00:00.000Z",
-  );
-  item = transitionApplication(
-    item,
-    "BROKER_REVIEW",
-    "broker-01",
-    "2026-08-12T08:05:00.000Z",
-  );
-  item = recordApproval(item, {
-    stage: "BROKER_REVIEW",
-    decision: "APPROVED",
-    actorUserId: "broker-01",
-    actorRole: "BROKER_REVIEWER",
-    reasonCode: "DOCUMENTS_COMPLETE",
-    occurredAt: "2026-08-12T08:10:00.000Z",
-  });
-  item = recordApproval(item, {
-    stage: "EMPLOYER_VERIFICATION",
-    decision: "APPROVED",
-    actorUserId: "hr-01",
-    actorRole: "EMPLOYER_HR",
-    reasonCode: "EMPLOYMENT_CONFIRMED",
-    occurredAt: "2026-08-12T08:20:00.000Z",
-  });
-  return item;
+type Identity = {
+  loginName: string;
+  preferredLanguage: "zh-CN" | "en" | "km";
+  roles: string[];
 };
-
-const readyForDisbursement = (): LoanApplication => {
-  let item = initial();
-  item = recordApproval(item, {
-    stage: "LENDER_INITIAL_REVIEW",
-    decision: "APPROVED",
-    actorUserId: "lender-reviewer-01",
-    actorRole: "LENDER_INITIAL_REVIEWER",
-    reasonCode: "MANUAL_REVIEW_APPROVED",
-    occurredAt: "2026-08-12T08:30:00.000Z",
-  });
-  item = recordApproval(item, {
-    stage: "LENDER_FINAL_REVIEW",
-    decision: "APPROVED",
-    actorUserId: "lender-reviewer-02",
-    actorRole: "LENDER_FINAL_REVIEWER",
-    reasonCode: "FINAL_APPROVAL",
-    occurredAt: "2026-08-12T08:35:00.000Z",
-  });
-  item = transitionApplication(
-    item,
-    "CONTRACT_CONFIRMED",
-    "telegram-1001",
-    "2026-08-12T08:40:00.000Z",
-  );
-  return transitionApplication(
-    item,
-    "DISBURSEMENT_PENDING",
-    "lender-reviewer-02",
-    "2026-08-12T08:45:00.000Z",
-  );
-};
-
-const messages = {
-  en: {
-    title: "Lender approval console",
-    approve: "Approve initial review",
-    reject: "Reject",
-    notice:
-      "Local controlled-pilot simulation — no lender API, payment API or customer data.",
-  },
-  "zh-CN": {
-    title: "持牌机构审批后台",
-    approve: "同意初审",
-    reject: "拒绝",
-    notice: "本地受控试点模拟，不接入机构、支付或真实客户数据。",
-  },
-  km: {
-    title: "ផ្ទាំងអនុម័តស្ថាប័នផ្តល់កម្ចី",
-    approve: "យល់ព្រមការពិនិត្យដំបូង",
-    reject: "បដិសេធ",
-    notice: "ការសាកល្បងក្នុងមូលដ្ឋាន មិនភ្ជាប់ API ពិត ឬទិន្នន័យអតិថិជនពិត។",
-  },
+const shell = {
+  maxWidth: 960,
+  margin: "0 auto",
+  padding: 24,
+  fontFamily: "system-ui, sans-serif",
 } as const;
+const card = {
+  border: "1px solid #cbd5e1",
+  borderRadius: 10,
+  padding: 20,
+  marginTop: 20,
+} as const;
+const form = { display: "grid", gap: 10, maxWidth: 520 } as const;
+
+async function api(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`/api${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
+}
+
+function SignIn({
+  complete,
+}: {
+  complete: (identity: Identity) => void;
+}): JSX.Element {
+  const [loginName, setLoginName] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const login = await api("/v1/local/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ loginName, password }),
+    });
+    if (!login.ok) return setError("Login failed.");
+    const me = await api("/v1/local/auth/me");
+    if (!me.ok) return setError("Unable to establish session.");
+    complete((await me.json()) as Identity);
+  };
+  return (
+    <main style={shell}>
+      <section style={card}>
+        <h1>PayEase lender console</h1>
+        <form onSubmit={submit} style={form}>
+          <label>
+            Account
+            <input
+              autoComplete="username"
+              value={loginName}
+              onChange={(e) => setLoginName(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </label>
+          <button>Sign in</button>
+          {error ? <p role="alert">{error}</p> : null}
+        </form>
+      </section>
+    </main>
+  );
+}
+
+type Action = {
+  label: string;
+  route: string;
+  body: () => object;
+  roles: string[];
+};
 
 export function App(): JSX.Element {
-  const [language, setLanguage] = useState<keyof typeof messages>("en");
-  const [application, setApplication] = useState<LoanApplication>(initial);
-  const text = messages[language];
-  const decide = (decision: "APPROVED" | "REJECTED") => {
-    setApplication((current) =>
-      recordApproval(current, {
-        stage: "LENDER_INITIAL_REVIEW",
-        decision,
-        actorUserId: "lender-reviewer-01",
-        actorRole: "LENDER_INITIAL_REVIEWER",
-        reasonCode:
-          decision === "APPROVED"
-            ? "MANUAL_REVIEW_APPROVED"
-            : "MANUAL_REVIEW_REJECTED",
-        occurredAt: new Date().toISOString(),
-      }),
+  const [identity, setIdentity] = useState<Identity>();
+  const [checking, setChecking] = useState(true);
+  const [applicationNo, setApplicationNo] = useState("");
+  const [reasonCode, setReasonCode] = useState("MANUAL_APPROVAL");
+  const [evidenceReference, setEvidenceReference] = useState("MANUAL-RECEIPT-");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    api("/v1/local/auth/me")
+      .then(async (r) => {
+        if (r.ok) setIdentity((await r.json()) as Identity);
+      })
+      .finally(() => setChecking(false));
+  }, []);
+  if (checking) return <main style={shell}>Checking secure session…</main>;
+  if (!identity) return <SignIn complete={setIdentity} />;
+  const actions: Action[] = [
+    {
+      label: "Approve / return initial review",
+      route: "lender-initial-review",
+      body: () => ({ decision: "APPROVED", reasonCode }),
+      roles: ["LENDER_CREDIT_OFFICER"],
+    },
+    {
+      label: "Approve / return final review",
+      route: "lender-final-review",
+      body: () => ({ decision: "APPROVED", reasonCode }),
+      roles: ["LENDER_CREDIT_REVIEWER"],
+    },
+    {
+      label: "Confirm contract",
+      route: "contract-confirmation",
+      body: () => ({ evidenceReference }),
+      roles: ["LENDER_CONTRACT_OFFICER"],
+    },
+    {
+      label: "Open disbursement",
+      route: "open-disbursement",
+      body: () => ({ reasonCode }),
+      roles: ["LENDER_DISBURSEMENT_MAKER"],
+    },
+    {
+      label: "Record disbursement maker approval",
+      route: "disbursement-release",
+      body: () => ({ reasonCode }),
+      roles: ["LENDER_DISBURSEMENT_MAKER"],
+    },
+    {
+      label: "Confirm disbursement (different account)",
+      route: "disbursement-confirmation",
+      body: () => ({ reasonCode, evidenceReference }),
+      roles: ["LENDER_DISBURSEMENT_CHECKER"],
+    },
+    {
+      label: "Activate repayment",
+      route: "activate-repayment",
+      body: () => ({ reasonCode }),
+      roles: ["LENDER_REPAYMENT_MAKER"],
+    },
+    {
+      label: "Record repayment maker approval",
+      route: "repayment-write-off",
+      body: () => ({ reasonCode }),
+      roles: ["LENDER_REPAYMENT_MAKER"],
+    },
+    {
+      label: "Confirm repayment (different account)",
+      route: "repayment-confirmation",
+      body: () => ({ reasonCode, evidenceReference }),
+      roles: ["LENDER_REPAYMENT_CHECKER"],
+    },
+  ];
+  const available = actions.filter((item) =>
+    item.roles.some((role) => identity.roles.includes(role)),
+  );
+  const run = async (action: Action) => {
+    const response = await api(
+      `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
+      { method: "POST", body: JSON.stringify(action.body()) },
+    );
+    const payload = await response.json().catch(() => ({}));
+    setNotice(
+      response.ok
+        ? `Recorded: ${JSON.stringify(payload)}`
+        : `Blocked (${response.status}): ${JSON.stringify(payload)}`,
     );
   };
-  const pending = application.status === "LENDER_INITIAL_REVIEW";
-  const fundsPending = application.status === "DISBURSEMENT_PENDING";
-  const fundsReleased = application.status === "DISBURSED";
-  const prepareFunds = () => setApplication(readyForDisbursement());
-  const dualApproveFunds = () =>
-    setApplication((current) =>
-      recordDualControl(
-        current,
-        "DISBURSEMENT_RELEASE",
-        {
-          stage: "DISBURSEMENT_RELEASE",
-          decision: "APPROVED",
-          actorUserId: "finance-maker-01",
-          actorRole: "LENDER_FINANCE_MAKER",
-          reasonCode: "DISBURSEMENT_INSTRUCTION_CHECKED",
-          occurredAt: new Date().toISOString(),
-        },
-        {
-          stage: "DISBURSEMENT_CONFIRMATION",
-          decision: "APPROVED",
-          actorUserId: "finance-checker-01",
-          actorRole: "LENDER_FINANCE_CHECKER",
-          reasonCode: "DISBURSEMENT_DUAL_CONTROL_APPROVED",
-          occurredAt: new Date().toISOString(),
-        },
-      ),
-    );
-  const attachProof = () =>
-    setApplication((current) =>
-      markFundsEvent(
-        current,
-        "DISBURSEMENT_RECORDED",
-        "finance-checker-01",
-        new Date().toISOString(),
-        "manual-receipt:DEMO-ONLY",
-      ),
-    );
+  const logout = async () => {
+    await api("/v1/local/auth/logout", { method: "POST" });
+    setIdentity(undefined);
+  };
   return (
-    <main
-      style={{
-        maxWidth: 980,
-        margin: "0 auto",
-        padding: 24,
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
+    <main style={shell}>
       <header
-        style={{ display: "flex", justifyContent: "space-between", gap: 16 }}
+        style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
       >
         <div>
-          <h1>{text.title}</h1>
-          <p>{text.notice}</p>
+          <h1>PayEase lender console</h1>
+          <p>
+            {identity.loginName} · {identity.preferredLanguage}
+          </p>
         </div>
-        <label>
-          Language{" "}
-          <select
-            value={language}
-            onChange={(e) =>
-              setLanguage(e.target.value as keyof typeof messages)
-            }
-          >
-            <option value="en">English</option>
-            <option value="zh-CN">中文</option>
-            <option value="km">ខ្មែរ</option>
-          </select>
-        </label>
+        <button onClick={logout}>Sign out</button>
       </header>
-      <section
-        style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 20 }}
-      >
-        <h2>Application {application.id}</h2>
-        <dl
-          style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 8 }}
-        >
-          <dt>Current status</dt>
-          <dd data-testid="application-status">
-            <strong>{application.status}</strong>
-          </dd>
-          <dt>Requested amount</dt>
-          <dd>{formatHuman(application.requestedAmount)}</dd>
-          <dt>Tenor</dt>
-          <dd>{application.tenorDays} days</dd>
-          <dt>Applicant channel</dt>
-          <dd>Telegram (synthetic test record)</dd>
-        </dl>
-        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-          <button
-            data-testid="approve-initial"
-            disabled={!pending}
-            onClick={() => decide("APPROVED")}
-          >
-            {text.approve}
-          </button>
-          <button
-            data-testid="reject-initial"
-            disabled={!pending}
-            onClick={() => decide("REJECTED")}
-          >
-            {text.reject}
-          </button>
-        </div>
-      </section>
-      <section
-        style={{
-          border: "1px solid #cbd5e1",
-          borderRadius: 8,
-          padding: 20,
-          marginTop: 24,
-        }}
-      >
-        <h2>Manual disbursement (dual control)</h2>
+      <section style={card}>
+        <h2>Controlled manual approval</h2>
         <p>
-          Maker and checker must be two distinct lender accounts. Receipt
-          reference is mandatory before daily reconciliation.
+          Each action is permitted only to the server-side roles assigned to
+          this account. Disbursement and repayment require two different
+          accounts.
         </p>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button onClick={prepareFunds}>Load approved synthetic case</button>
-          <button
-            data-testid="funds-dual-approve"
-            disabled={!fundsPending}
-            onClick={dualApproveFunds}
-          >
-            Record maker + checker approval
-          </button>
-          <button
-            data-testid="funds-proof"
-            disabled={!fundsReleased}
-            onClick={attachProof}
-          >
-            Record disbursement receipt
-          </button>
+        <div style={form}>
+          <label>
+            Application number
+            <input
+              value={applicationNo}
+              onChange={(e) => setApplicationNo(e.target.value)}
+              placeholder="APP-…"
+              required
+            />
+          </label>
+          <label>
+            Reason code
+            <input
+              value={reasonCode}
+              onChange={(e) => setReasonCode(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Contract / funds evidence reference
+            <input
+              value={evidenceReference}
+              onChange={(e) => setEvidenceReference(e.target.value)}
+              required
+            />
+          </label>
         </div>
-        <p data-testid="funds-status">
-          {application.status === "DISBURSEMENT_PENDING"
-            ? "Waiting for two approvals"
-            : application.status === "DISBURSED"
-              ? "Funds released — receipt pending or recorded"
-              : "Load an approved synthetic case to start"}
-        </p>
-      </section>
-      <section style={{ marginTop: 24 }}>
-        <h2>Immutable local audit timeline</h2>
-        <ol>
-          {application.auditEvents.map((event, index) => (
-            <li key={`${event.occurredAt}-${index}`}>
-              {event.occurredAt} — {event.eventType} — {event.actorUserId}{" "}
-              {event.reasonCode ? `(${event.reasonCode})` : ""}
-            </li>
+        <div
+          style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}
+        >
+          {available.map((action) => (
+            <button
+              key={action.route}
+              disabled={!applicationNo}
+              onClick={() => run(action)}
+            >
+              {action.label}
+            </button>
           ))}
-        </ol>
+        </div>
+        {available.length === 0 ? (
+          <p>Your account has no lender-operation role.</p>
+        ) : null}
+        {notice ? (
+          <pre role="status" style={{ whiteSpace: "pre-wrap" }}>
+            {notice}
+          </pre>
+        ) : null}
       </section>
     </main>
   );

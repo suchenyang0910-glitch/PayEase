@@ -1,9 +1,13 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { Pool, type PoolClient } from "pg";
 import { z } from "zod";
 import {
   brokerReviewSchema,
+  bootstrapAdminSchema,
+  adminAccountCreateSchema,
+  departmentCreateSchema,
+  roleCreateSchema,
   contractConfirmationSchema,
   createApplicationSchema,
   disbursementDualControlSchema,
@@ -11,8 +15,20 @@ import {
   lenderFinalReviewSchema,
   lenderInitialReviewSchema,
   lifecycleActorSchema,
+  loginSchema,
+  makerApprovalSchema,
+  checkerApprovalSchema,
   repaymentDualControlSchema,
+  reconciliationAssignSchema,
+  reconciliationResolutionSchema,
 } from "./validation.js";
+import { hashPassword, verifyPassword } from "./passwords.js";
+
+declare module "fastify" {
+  interface FastifyRequest {
+    adminIdentity?: { loginName: string; roles: string[] };
+  }
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -23,6 +39,80 @@ if (!databaseUrl) {
 
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const app = Fastify({ logger: true });
+
+function sessionToken(cookieHeader: string | undefined): string | undefined {
+  return cookieHeader
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("payease_session="))
+    ?.slice("payease_session=".length);
+}
+
+async function hasRole(
+  cookieHeader: string | undefined,
+  roleCode: string,
+): Promise<boolean> {
+  const token = sessionToken(cookieHeader);
+  if (!token) return false;
+  const result = await pool.query(
+    `SELECT 1 FROM admin_sessions s
+     JOIN admin_account_roles ar ON ar.account_id = s.account_id
+     JOIN roles r ON r.id = ar.role_id
+     WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND r.code = $2`,
+    [eventHash([token]), roleCode],
+  );
+  return Boolean(result.rowCount);
+}
+
+async function requireOpsAdmin(
+  request: { headers: { cookie?: string } },
+  reply: any,
+): Promise<boolean> {
+  if (!(await hasRole(request.headers.cookie, "OPS_ADMIN"))) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
+app.addHook("onRequest", async (request, reply) => {
+  if (
+    !request.url.startsWith("/v1/local/") ||
+    request.url.startsWith("/v1/local/auth/")
+  )
+    return;
+  const token = sessionToken(request.headers.cookie);
+  const result = token
+    ? await pool.query(
+        `SELECT a.login_name, COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
+         FROM admin_sessions s JOIN admin_accounts a ON a.id = s.account_id
+         LEFT JOIN admin_account_roles ar ON ar.account_id = a.id
+         LEFT JOIN roles r ON r.id = ar.role_id
+         WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND a.is_active = true
+         GROUP BY a.login_name`,
+        [eventHash([token])],
+      )
+    : undefined;
+  if (!result?.rowCount)
+    return reply.code(401).send({ code: "UNAUTHENTICATED" });
+  const identity = result.rows[0] as { login_name: string; roles: string[] };
+  request.adminIdentity = {
+    loginName: identity.login_name,
+    roles: identity.roles,
+  };
+});
+
+function requireRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+  roleCode: string,
+): boolean {
+  if (!request.adminIdentity?.roles.includes(roleCode)) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
 
 app.addHook("onSend", async (_request, reply) => {
   reply.header("X-PayEase-Environment", "controlled-preview");
@@ -38,6 +128,11 @@ type ApplicationRow = Readonly<{ id: string; status: string }>;
 type SingleApproval = Readonly<{
   actorUserRef: string;
   actorRole: string;
+  decision: "APPROVED" | "REJECTED" | "RETURNED";
+  reasonCode: string;
+}>;
+
+type ApprovalCommand = Readonly<{
   decision: "APPROVED" | "REJECTED" | "RETURNED";
   reasonCode: string;
 }>;
@@ -147,17 +242,323 @@ app.get("/health", async () => {
   return { status: "ok", service: "broker-api", storage: "postgresql" };
 });
 
+app.post("/v1/local/auth/bootstrap", async (request, reply) => {
+  const input = bootstrapAdminSchema.parse(request.body);
+  const bootstrapPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+  if (
+    !bootstrapPassword ||
+    request.headers["x-bootstrap-password"] !== bootstrapPassword
+  ) {
+    return reply.code(403).send({ code: "BOOTSTRAP_FORBIDDEN" });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query("SELECT 1 FROM admin_accounts LIMIT 1");
+    if (existing.rowCount) {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({ code: "BOOTSTRAP_ALREADY_COMPLETED" });
+    }
+    const department = await client.query<{ id: string }>(
+      `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
+       VALUES ('OPS', 'OPS_ADMIN', '平台运营', 'Platform operations', 'Platform operations') RETURNING id`,
+    );
+    const role = await client.query<{ id: string }>(
+      `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
+       VALUES ('OPS', 'OPS_ADMIN', '平台管理员', 'Platform administrator', 'Platform administrator') RETURNING id`,
+    );
+    await client.query(
+      "INSERT INTO permissions (code, description) VALUES ('ADMIN_RBAC_MANAGE', 'Manage departments, roles and accounts')",
+    );
+    await client.query(
+      "INSERT INTO role_permissions (role_id, permission_code) VALUES ($1, 'ADMIN_RBAC_MANAGE')",
+      [role.rows[0]!.id],
+    );
+    const account = await client.query<{ id: string }>(
+      `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [
+        input.loginName,
+        await hashPassword(input.password),
+        department.rows[0]!.id,
+        input.preferredLanguage,
+      ],
+    );
+    await client.query(
+      "INSERT INTO admin_account_roles (account_id, role_id) VALUES ($1, $2)",
+      [account.rows[0]!.id, role.rows[0]!.id],
+    );
+    for (const [domain, code, zh, en] of [
+      ["BROKER", "BROKER_OFFICER", "助贷审核员", "Broker officer"],
+      [
+        "LENDER",
+        "LENDER_CREDIT_OFFICER",
+        "持牌初审员",
+        "Lender initial reviewer",
+      ],
+      [
+        "LENDER",
+        "LENDER_CREDIT_REVIEWER",
+        "持牌复审员",
+        "Lender final reviewer",
+      ],
+      ["LENDER", "LENDER_CONTRACT_OFFICER", "合同专员", "Contract officer"],
+      ["LENDER", "LENDER_DISBURSEMENT_MAKER", "放款经办", "Disbursement maker"],
+      [
+        "LENDER",
+        "LENDER_DISBURSEMENT_CHECKER",
+        "放款复核",
+        "Disbursement checker",
+      ],
+      ["LENDER", "LENDER_REPAYMENT_MAKER", "还款核销经办", "Repayment maker"],
+      [
+        "LENDER",
+        "LENDER_REPAYMENT_CHECKER",
+        "还款核销复核",
+        "Repayment checker",
+      ],
+      ["EMPLOYER", "EMPLOYER_HR", "企业 HR 核验员", "Employer HR verifier"],
+      [
+        "EMPLOYER",
+        "EMPLOYER_FINANCE",
+        "企业财务核验员",
+        "Employer finance verifier",
+      ],
+    ] as const) {
+      await client.query(
+        "INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km) VALUES ($1, $2, $3, $4, $4)",
+        [domain, code, zh, en],
+      );
+    }
+    await addAuditEvent(
+      client,
+      account.rows[0]!.id,
+      "ADMIN_BOOTSTRAPPED",
+      input.loginName,
+      { loginName: input.loginName },
+    );
+    await client.query("COMMIT");
+    return reply
+      .code(201)
+      .send({ loginName: input.loginName, role: "OPS_ADMIN" });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/v1/local/auth/login", async (request, reply) => {
+  const input = loginSchema.parse(request.body);
+  const account = await pool.query<{
+    id: string;
+    password_hash: string;
+    preferred_language: string;
+  }>(
+    "SELECT id, password_hash, preferred_language FROM admin_accounts WHERE login_name = $1 AND is_active = true",
+    [input.loginName],
+  );
+  const row = account.rows[0];
+  if (!row || !(await verifyPassword(input.password, row.password_hash))) {
+    return reply.code(401).send({ code: "INVALID_CREDENTIALS" });
+  }
+  const token = randomBytes(32).toString("base64url");
+  await pool.query(
+    "INSERT INTO admin_sessions (token_hash, account_id, expires_at) VALUES ($1, $2, now() + interval '8 hours')",
+    [eventHash([token]), row.id],
+  );
+  reply.header(
+    "Set-Cookie",
+    `payease_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
+  );
+  return {
+    loginName: input.loginName,
+    preferredLanguage: row.preferred_language,
+  };
+});
+
+app.post("/v1/local/auth/logout", async (request, reply) => {
+  const token = sessionToken(request.headers.cookie);
+  if (token) {
+    await pool.query(
+      "UPDATE admin_sessions SET revoked_at = now() WHERE token_hash = $1",
+      [eventHash([token])],
+    );
+  }
+  reply.header(
+    "Set-Cookie",
+    "payease_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
+  );
+  return reply.code(204).send();
+});
+
+app.get("/v1/local/auth/me", async (request, reply) => {
+  const token = sessionToken(request.headers.cookie);
+  const result = token
+    ? await pool.query<{
+        login_name: string;
+        preferred_language: string;
+        roles: string[];
+      }>(
+        `SELECT a.login_name, a.preferred_language,
+                COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
+         FROM admin_sessions s JOIN admin_accounts a ON a.id = s.account_id
+         LEFT JOIN admin_account_roles ar ON ar.account_id = a.id
+         LEFT JOIN roles r ON r.id = ar.role_id
+         WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND a.is_active = true
+         GROUP BY a.login_name, a.preferred_language`,
+        [eventHash([token])],
+      )
+    : undefined;
+  if (!result?.rowCount)
+    return reply.code(401).send({ code: "UNAUTHENTICATED" });
+  const identity = result.rows[0]!;
+  return {
+    loginName: identity.login_name,
+    preferredLanguage: identity.preferred_language,
+    roles: identity.roles,
+  };
+});
+
+app.get("/v1/local/admin/departments", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const result = await pool.query(
+    "SELECT code, domain, display_name_zh, display_name_en, display_name_km FROM departments ORDER BY domain, code",
+  );
+  return result.rows;
+});
+
+app.post("/v1/local/admin/departments", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const input = departmentCreateSchema.parse(request.body);
+  const result = await pool.query(
+    `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
+     VALUES ($1, $2, $3, $4, $5) RETURNING code, domain`,
+    [
+      input.domain,
+      input.code,
+      input.displayNameZh,
+      input.displayNameEn,
+      input.displayNameKm,
+    ],
+  );
+  return reply.code(201).send(result.rows[0]);
+});
+
+app.get("/v1/local/admin/roles", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const result = await pool.query(
+    `SELECT r.code, r.domain, r.display_name_zh, r.display_name_en, r.display_name_km,
+       COALESCE(array_agg(rp.permission_code) FILTER (WHERE rp.permission_code IS NOT NULL), '{}') AS permissions
+     FROM roles r LEFT JOIN role_permissions rp ON rp.role_id = r.id
+     GROUP BY r.id ORDER BY r.domain, r.code`,
+  );
+  return result.rows;
+});
+
+app.post("/v1/local/admin/roles", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const input = roleCreateSchema.parse(request.body);
+  await pool.query(
+    `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [
+      input.domain,
+      input.code,
+      input.displayNameZh,
+      input.displayNameEn,
+      input.displayNameKm,
+    ],
+  );
+  return reply.code(201).send({ code: input.code, domain: input.domain });
+});
+
+app.get("/v1/local/admin/accounts", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const result = await pool.query(
+    `SELECT a.login_name, a.preferred_language, a.is_active, d.code AS department_code,
+       COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
+     FROM admin_accounts a JOIN departments d ON d.id = a.department_id
+     LEFT JOIN admin_account_roles ar ON ar.account_id = a.id LEFT JOIN roles r ON r.id = ar.role_id
+     GROUP BY a.id, d.code ORDER BY a.created_at`,
+  );
+  return result.rows;
+});
+
+app.post("/v1/local/admin/accounts", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const input = adminAccountCreateSchema.parse(request.body);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const department = await client.query<{ id: string }>(
+      "SELECT id FROM departments WHERE code = $1",
+      [input.departmentCode],
+    );
+    const roles = await client.query<{ id: string; code: string }>(
+      "SELECT id, code FROM roles WHERE code = ANY($1::text[])",
+      [input.roleCodes],
+    );
+    if (!department.rows[0] || roles.rowCount !== input.roleCodes.length) {
+      await client.query("ROLLBACK");
+      return reply.code(422).send({ code: "UNKNOWN_DEPARTMENT_OR_ROLE" });
+    }
+    const account = await client.query<{ id: string }>(
+      `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [
+        input.loginName,
+        await hashPassword(input.password),
+        department.rows[0].id,
+        input.preferredLanguage,
+      ],
+    );
+    for (const role of roles.rows) {
+      await client.query(
+        "INSERT INTO admin_account_roles (account_id, role_id) VALUES ($1, $2)",
+        [account.rows[0]!.id, role.id],
+      );
+    }
+    await addAuditEvent(
+      client,
+      account.rows[0]!.id,
+      "ADMIN_ACCOUNT_CREATED",
+      input.loginName,
+      { roleCodes: input.roleCodes, departmentCode: input.departmentCode },
+    );
+    await client.query("COMMIT");
+    return reply.code(201).send({
+      loginName: input.loginName,
+      roleCodes: input.roleCodes,
+      preferredLanguage: input.preferredLanguage,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 const createStageHandler = (
   expectedStatus: string,
   stage: string,
   approvedStatus: string,
-  schema: z.ZodType<SingleApproval>,
+  requiredRole: string,
+  schema: z.ZodType<ApprovalCommand>,
 ) => {
   return async (request: { params: unknown; body: unknown }, reply: any) => {
+    if (!requireRole(request as any, reply, requiredRole)) return;
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = schema.parse(request.body);
+    const securedInput: SingleApproval = {
+      ...input,
+      actorUserRef: (request as any).adminIdentity.loginName,
+      actorRole: requiredRole,
+    };
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -177,14 +578,14 @@ const createStageHandler = (
         client,
         application,
         stage,
-        input,
+        securedInput,
         approvedStatus,
       );
       await client.query("COMMIT");
       return {
         applicationNo: params.applicationNo,
         status,
-        decision: input.decision,
+        decision: securedInput.decision,
       };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -280,10 +681,12 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
 app.post(
   "/v1/local/applications/:applicationNo/broker-review",
   async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = brokerReviewSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -315,8 +718,8 @@ app.post(
         [
           application.id,
           input.decision,
-          input.actorUserRef,
-          input.actorRole,
+          actorUserRef,
+          "BROKER_OFFICER",
           input.reasonCode,
         ],
       );
@@ -332,7 +735,7 @@ app.post(
             application.id,
             application.status,
             toStatus,
-            input.actorUserRef,
+            actorUserRef,
             input.reasonCode,
           ],
         );
@@ -341,8 +744,8 @@ app.post(
         client,
         application.id,
         "BROKER_REVIEW_RECORDED",
-        input.actorUserRef,
-        input,
+        actorUserRef,
+        { ...input, actorUserRef, actorRole: "BROKER_OFFICER" },
       );
       await client.query("COMMIT");
       return {
@@ -364,7 +767,19 @@ app.post(
   createStageHandler(
     "EMPLOYER_VERIFICATION",
     "EMPLOYER_VERIFICATION",
+    "EMPLOYER_FINANCE_VERIFICATION",
+    "EMPLOYER_HR",
+    employerVerificationSchema,
+  ),
+);
+
+app.post(
+  "/v1/local/applications/:applicationNo/employer-finance-verification",
+  createStageHandler(
+    "EMPLOYER_FINANCE_VERIFICATION",
+    "EMPLOYER_FINANCE_VERIFICATION",
     "LENDER_INITIAL_REVIEW",
+    "EMPLOYER_FINANCE",
     employerVerificationSchema,
   ),
 );
@@ -375,6 +790,7 @@ app.post(
     "LENDER_INITIAL_REVIEW",
     "LENDER_INITIAL_REVIEW",
     "LENDER_FINAL_REVIEW",
+    "LENDER_CREDIT_OFFICER",
     lenderInitialReviewSchema,
   ),
 );
@@ -385,6 +801,7 @@ app.post(
     "LENDER_FINAL_REVIEW",
     "LENDER_FINAL_REVIEW",
     "CONTRACT_PENDING",
+    "LENDER_CREDIT_REVIEWER",
     lenderFinalReviewSchema,
   ),
 );
@@ -392,10 +809,12 @@ app.post(
 app.post(
   "/v1/local/applications/:applicationNo/contract-confirmation",
   async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_CONTRACT_OFFICER")) return;
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = contractConfirmationSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -415,15 +834,15 @@ app.post(
         client,
         application,
         "CONTRACT_CONFIRMED",
-        input.actorUserRef,
+        actorUserRef,
         "CONTRACT_CONFIRMED",
       );
       await addAuditEvent(
         client,
         application.id,
         "CONTRACT_CONFIRMED",
-        input.actorUserRef,
-        input,
+        actorUserRef,
+        { ...input, actorUserRef, actorRole: "LENDER_CONTRACT_OFFICER" },
       );
       await client.query("COMMIT");
       return {
@@ -442,10 +861,12 @@ app.post(
 app.post(
   "/v1/local/applications/:applicationNo/open-disbursement",
   async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_DISBURSEMENT_MAKER")) return;
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = lifecycleActorSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -465,15 +886,15 @@ app.post(
         client,
         application,
         "DISBURSEMENT_PENDING",
-        input.actorUserRef,
+        actorUserRef,
         input.reasonCode,
       );
       await addAuditEvent(
         client,
         application.id,
         "DISBURSEMENT_OPENED",
-        input.actorUserRef,
-        input,
+        actorUserRef,
+        { ...input, actorUserRef, actorRole: "LENDER_DISBURSEMENT_MAKER" },
       );
       await client.query("COMMIT");
       return {
@@ -559,9 +980,192 @@ async function recordDualControl(
   );
 }
 
+async function recordMakerApproval(
+  client: PoolClient,
+  application: ApplicationRow,
+  stage: string,
+  actorUserRef: string,
+  actorRole: string,
+  reasonCode: string,
+): Promise<void> {
+  const existing = await client.query(
+    "SELECT 1 FROM approval_events WHERE application_id = $1 AND stage = $2 LIMIT 1",
+    [application.id, stage],
+  );
+  if (existing.rowCount) throw new Error("Maker approval already recorded");
+  await client.query(
+    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
+     VALUES ($1, $2, 'APPROVED', $3, $4, $5, now())`,
+    [application.id, stage, actorUserRef, actorRole, reasonCode],
+  );
+  await addAuditEvent(
+    client,
+    application.id,
+    `${stage}_RECORDED`,
+    actorUserRef,
+    {
+      stage,
+      reasonCode,
+    },
+  );
+}
+
+async function recordCheckerApproval(
+  client: PoolClient,
+  application: ApplicationRow,
+  makerStage: string,
+  checkerStage: string,
+  actorUserRef: string,
+  actorRole: string,
+  reasonCode: string,
+  evidenceReference: string,
+  nextStatus: string,
+  evidenceType: "DISBURSEMENT_RECEIPT" | "REPAYMENT_RECEIPT",
+): Promise<void> {
+  const maker = await client.query<{ actor_user_ref: string }>(
+    `SELECT actor_user_ref FROM approval_events
+     WHERE application_id = $1 AND stage = $2 AND decision = 'APPROVED'
+     ORDER BY occurred_at DESC LIMIT 1`,
+    [application.id, makerStage],
+  );
+  const makerActor = maker.rows[0]?.actor_user_ref;
+  if (!makerActor)
+    throw new Error("Maker approval is required before checker approval");
+  if (makerActor === actorUserRef) {
+    throw new Error(
+      "Dual control requires two distinct authenticated accounts",
+    );
+  }
+  await client.query(
+    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
+     VALUES ($1, $2, 'APPROVED', $3, $4, $5, now())`,
+    [application.id, checkerStage, actorUserRef, actorRole, reasonCode],
+  );
+  await updateStatus(client, application, nextStatus, actorUserRef, reasonCode);
+  await client.query(
+    `INSERT INTO funds_evidence (application_id, evidence_type, evidence_reference, recorded_by_user_ref, recorded_at)
+     VALUES ($1, $2, $3, $4, now())`,
+    [application.id, evidenceType, evidenceReference, actorUserRef],
+  );
+  await client.query(
+    `INSERT INTO reconciliation_work_items (application_id, evidence_type, evidence_reference)
+     VALUES ($1, $2, $3)`,
+    [application.id, evidenceType, evidenceReference],
+  );
+  await addAuditEvent(
+    client,
+    application.id,
+    `${evidenceType}_CHECKER_RECORDED`,
+    actorUserRef,
+    {
+      makerStage,
+      checkerStage,
+      evidenceReference,
+    },
+  );
+}
+
+app.post(
+  "/v1/local/applications/:applicationNo/disbursement-release",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_DISBURSEMENT_MAKER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = makerApprovalSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "DISBURSEMENT_PENDING") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      await recordMakerApproval(
+        client,
+        application,
+        "DISBURSEMENT_RELEASE",
+        request.adminIdentity!.loginName,
+        "LENDER_DISBURSEMENT_MAKER",
+        input.reasonCode,
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        status: "DISBURSEMENT_PENDING",
+        approval: "MAKER_RECORDED",
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/applications/:applicationNo/disbursement-confirmation",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_DISBURSEMENT_CHECKER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = checkerApprovalSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "DISBURSEMENT_PENDING") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      await recordCheckerApproval(
+        client,
+        application,
+        "DISBURSEMENT_RELEASE",
+        "DISBURSEMENT_CONFIRMATION",
+        request.adminIdentity!.loginName,
+        "LENDER_DISBURSEMENT_CHECKER",
+        input.reasonCode,
+        input.evidenceReference,
+        "DISBURSED",
+        "DISBURSEMENT_RECEIPT",
+      );
+      await client.query("COMMIT");
+      return { applicationNo: params.applicationNo, status: "DISBURSED" };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
 app.post(
   "/v1/local/applications/:applicationNo/disbursement-dual-control",
   async (request, reply) => {
+    return reply.code(410).send({
+      code: "LEGACY_DUAL_CONTROL_DISABLED",
+      message:
+        "Use disbursement-release and disbursement-confirmation with two authenticated accounts.",
+    });
+    /*
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
@@ -601,16 +1205,19 @@ app.post(
     } finally {
       client.release();
     }
+    */
   },
 );
 
 app.post(
   "/v1/local/applications/:applicationNo/activate-repayment",
   async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_REPAYMENT_MAKER")) return;
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = lifecycleActorSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -630,15 +1237,15 @@ app.post(
         client,
         application,
         "REPAYMENT_ACTIVE",
-        input.actorUserRef,
+        actorUserRef,
         input.reasonCode,
       );
       await addAuditEvent(
         client,
         application.id,
         "REPAYMENT_OPENED",
-        input.actorUserRef,
-        input,
+        actorUserRef,
+        { ...input, actorUserRef, actorRole: "LENDER_REPAYMENT_MAKER" },
       );
       await client.query("COMMIT");
       return {
@@ -655,8 +1262,106 @@ app.post(
 );
 
 app.post(
+  "/v1/local/applications/:applicationNo/repayment-write-off",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_REPAYMENT_MAKER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = makerApprovalSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "REPAYMENT_ACTIVE") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      await recordMakerApproval(
+        client,
+        application,
+        "REPAYMENT_WRITE_OFF",
+        request.adminIdentity!.loginName,
+        "LENDER_REPAYMENT_MAKER",
+        input.reasonCode,
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        status: "REPAYMENT_ACTIVE",
+        approval: "MAKER_RECORDED",
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/applications/:applicationNo/repayment-confirmation",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_REPAYMENT_CHECKER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = checkerApprovalSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "REPAYMENT_ACTIVE") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      await recordCheckerApproval(
+        client,
+        application,
+        "REPAYMENT_WRITE_OFF",
+        "REPAYMENT_CONFIRMATION",
+        request.adminIdentity!.loginName,
+        "LENDER_REPAYMENT_CHECKER",
+        input.reasonCode,
+        input.evidenceReference,
+        "SETTLED",
+        "REPAYMENT_RECEIPT",
+      );
+      await client.query("COMMIT");
+      return { applicationNo: params.applicationNo, status: "SETTLED" };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
   "/v1/local/applications/:applicationNo/repayment-dual-control",
   async (request, reply) => {
+    return reply.code(410).send({
+      code: "LEGACY_DUAL_CONTROL_DISABLED",
+      message:
+        "Use repayment-write-off and repayment-confirmation with two authenticated accounts.",
+    });
+    /*
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
@@ -696,12 +1401,15 @@ app.post(
     } finally {
       client.release();
     }
+    */
   },
 );
 
-app.get("/v1/local/reconciliation/open", async () => {
+app.get("/v1/local/reconciliation/open", async (request, reply) => {
+  if (!requireRole(request, reply, "EMPLOYER_FINANCE")) return;
   const result = await pool.query(
-    `SELECT r.id, a.application_no, r.evidence_type, r.evidence_reference, r.status, r.created_at
+    `SELECT r.id, a.application_no, r.evidence_type, r.evidence_reference, r.status,
+            r.assigned_to_user_ref, r.resolution_reason, r.created_at
      FROM reconciliation_work_items r
      JOIN applications a ON a.id = r.application_id
      WHERE r.status IN ('OPEN', 'DIFFERENCE')
@@ -709,6 +1417,164 @@ app.get("/v1/local/reconciliation/open", async () => {
   );
   return result.rows;
 });
+
+async function lockReconciliationWorkItem(
+  client: PoolClient,
+  workItemId: string,
+) {
+  const result = await client.query<{
+    id: string;
+    application_id: string;
+    assigned_to_user_ref: string | null;
+    status: string;
+  }>(
+    "SELECT id, application_id, assigned_to_user_ref, status FROM reconciliation_work_items WHERE id = $1 FOR UPDATE",
+    [workItemId],
+  );
+  return result.rows[0];
+}
+
+app.post(
+  "/v1/local/reconciliation/:workItemId/assign",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "EMPLOYER_FINANCE")) return;
+    const params = z
+      .object({ workItemId: z.string().uuid() })
+      .parse(request.params);
+    const input = reconciliationAssignSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const workItem = await lockReconciliationWorkItem(
+        client,
+        params.workItemId,
+      );
+      if (!workItem) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(404)
+          .send({ code: "RECONCILIATION_WORK_ITEM_NOT_FOUND" });
+      }
+      const assignee = await client.query(
+        `SELECT 1 FROM admin_accounts a JOIN admin_account_roles ar ON ar.account_id = a.id
+       JOIN roles r ON r.id = ar.role_id WHERE a.login_name = $1 AND a.is_active = true AND r.code = 'EMPLOYER_FINANCE'`,
+        [input.assigneeLoginName],
+      );
+      if (!assignee.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({ code: "INVALID_FINANCE_ASSIGNEE" });
+      }
+      await client.query(
+        "UPDATE reconciliation_work_items SET assigned_to_user_ref = $1 WHERE id = $2",
+        [input.assigneeLoginName, workItem.id],
+      );
+      await addAuditEvent(
+        client,
+        workItem.application_id,
+        "RECONCILIATION_ASSIGNED",
+        request.adminIdentity!.loginName,
+        { workItemId: workItem.id, assigneeLoginName: input.assigneeLoginName },
+      );
+      await client.query("COMMIT");
+      return {
+        workItemId: workItem.id,
+        assignedToUserRef: input.assigneeLoginName,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+function ensureAssignedToCurrentUser(
+  workItem: { assigned_to_user_ref: string | null },
+  identity: string,
+  reply: any,
+): boolean {
+  if (workItem.assigned_to_user_ref !== identity) {
+    reply.code(403).send({ code: "FORBIDDEN__RECONCILIATION_NOT_ASSIGNED" });
+    return false;
+  }
+  return true;
+}
+
+async function resolveReconciliation(
+  request: any,
+  reply: any,
+  targetStatus: "MATCHED" | "DIFFERENCE" | "CLOSED",
+) {
+  if (!requireRole(request, reply, "EMPLOYER_FINANCE")) return;
+  const params = z
+    .object({ workItemId: z.string().uuid() })
+    .parse(request.params);
+  const input = reconciliationResolutionSchema.parse(request.body);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const workItem = await lockReconciliationWorkItem(
+      client,
+      params.workItemId,
+    );
+    if (!workItem) {
+      await client.query("ROLLBACK");
+      return reply
+        .code(404)
+        .send({ code: "RECONCILIATION_WORK_ITEM_NOT_FOUND" });
+    }
+    if (
+      !ensureAssignedToCurrentUser(
+        workItem,
+        request.adminIdentity!.loginName,
+        reply,
+      )
+    ) {
+      await client.query("ROLLBACK");
+      return;
+    }
+    const permitted =
+      targetStatus === "CLOSED"
+        ? ["MATCHED", "DIFFERENCE"]
+        : ["OPEN", "DIFFERENCE"];
+    if (!permitted.includes(workItem.status)) {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({
+        code: "INVALID_RECONCILIATION_STATE",
+        currentStatus: workItem.status,
+      });
+    }
+    await client.query(
+      "UPDATE reconciliation_work_items SET status = $1, resolution_reason = $2, resolved_at = CASE WHEN $1 = 'CLOSED' THEN now() ELSE NULL END WHERE id = $3",
+      [targetStatus, input.reasonCode, workItem.id],
+    );
+    await addAuditEvent(
+      client,
+      workItem.application_id,
+      `RECONCILIATION_${targetStatus}`,
+      request.adminIdentity!.loginName,
+      { workItemId: workItem.id, reasonCode: input.reasonCode },
+    );
+    await client.query("COMMIT");
+    return { workItemId: workItem.id, status: targetStatus };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+app.post("/v1/local/reconciliation/:workItemId/match", (request, reply) =>
+  resolveReconciliation(request, reply, "MATCHED"),
+);
+app.post("/v1/local/reconciliation/:workItemId/difference", (request, reply) =>
+  resolveReconciliation(request, reply, "DIFFERENCE"),
+);
+app.post("/v1/local/reconciliation/:workItemId/close", (request, reply) =>
+  resolveReconciliation(request, reply, "CLOSED"),
+);
 
 const close = async (): Promise<void> => {
   await app.close();

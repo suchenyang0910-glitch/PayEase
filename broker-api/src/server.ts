@@ -227,7 +227,8 @@ const close = async (): Promise<void> => {
 
 if (process.env.NODE_ENV !== "test") {
   const port = Number(process.env.PORT ?? 3100);
-  app.listen({ host: "127.0.0.1", port }).catch(async (error) => {
+  const host = process.env.HOST ?? "127.0.0.1";
+  app.listen({ host, port }).catch(async (error) => {
     app.log.error(error);
     await close();
     process.exit(1);

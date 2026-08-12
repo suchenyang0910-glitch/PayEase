@@ -4,6 +4,48 @@ import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
 
+type UserSummary = {
+  application: {
+    applicationNo: string;
+    status: string;
+    requestedAmountMinor: string;
+    currency: string;
+    tenorDays: number;
+    approvedAmountMinor: string | null;
+  };
+  terms: null | {
+    approvedAmountMinor: string;
+    serviceFeeMinor: string;
+    totalRepayableMinor: string;
+    installmentCount: number;
+    firstDueDate: string;
+  };
+  repayment: {
+    totalPeriods: number;
+    paidPeriods: number;
+    unpaidPeriods: number;
+    totalDueMinor: string;
+    totalPaidMinor: string;
+    outstandingMinor: string;
+    nextInstallment: null | {
+      installmentNo: number;
+      dueDate: string;
+      amountDueMinor: string;
+    };
+    installments: Array<{
+      installmentNo: number;
+      dueDate: string;
+      amountDueMinor: string;
+      amountPaidMinor: string;
+      status: "PENDING" | "PAID";
+    }>;
+  };
+};
+
+function usd(minor: string | null | undefined): string {
+  return `$${(Number(minor ?? "0") / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 const labels: Record<LanguageCode, Record<string, string>> = {
   "zh-CN": {
     brand: "薪易贷",
@@ -137,6 +179,7 @@ export function App(): JSX.Element {
   const [consent, setConsent] = useState(false);
   const [applicationNo, setApplicationNo] = useState("");
   const [approvedAmountMinor, setApprovedAmountMinor] = useState<string>();
+  const [summary, setSummary] = useState<UserSummary>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -171,7 +214,9 @@ export function App(): JSX.Element {
     try {
       const response = await fetch("/api/v1/local/applications", {
         method: "POST",
-        credentials: "omit",
+        // Same-origin HttpOnly cookie retains the opaque application access
+        // token; it is never readable by JavaScript or placed in the URL.
+        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           telegramUserRef: telegramUserRef(),
@@ -217,11 +262,12 @@ export function App(): JSX.Element {
         `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}`,
         { credentials: "include" },
       );
-      const payload = (await response.json()) as {
-        approved_amount_minor?: string;
-      };
+      const payload = (await response.json()) as UserSummary;
       if (!response.ok) throw new Error("STATUS_FAILED");
-      setApprovedAmountMinor(payload.approved_amount_minor);
+      setApprovedAmountMinor(
+        payload.application.approvedAmountMinor ?? undefined,
+      );
+      setSummary(payload);
       setStage("offer");
     } catch {
       setError(
@@ -445,6 +491,174 @@ export function App(): JSX.Element {
           ) : (
             <p className="response-note">{t.expected}</p>
           )}
+          {summary ? (
+            <section className="loan-dashboard" aria-label="Loan dashboard">
+              <div className="dashboard-heading">
+                <strong>
+                  {language === "en"
+                    ? "Your loan information"
+                    : language === "km"
+                      ? "ព័ត៌មានឥណទានរបស់អ្នក"
+                      : "我的贷款信息"}
+                </strong>
+                <span>{summary.application.status}</span>
+              </div>
+              <div className="metric-grid">
+                <div>
+                  <span>
+                    {language === "en"
+                      ? "Requested"
+                      : language === "km"
+                        ? "បានស្នើ"
+                        : "申请金额"}
+                  </span>
+                  <b>{usd(summary.application.requestedAmountMinor)}</b>
+                </div>
+                <div>
+                  <span>
+                    {language === "en"
+                      ? "Approved"
+                      : language === "km"
+                        ? "បានអនុម័ត"
+                        : "审核额度"}
+                  </span>
+                  <b>
+                    {summary.terms
+                      ? usd(summary.terms.approvedAmountMinor)
+                      : "—"}
+                  </b>
+                </div>
+                <div>
+                  <span>
+                    {language === "en"
+                      ? "Service fee"
+                      : language === "km"
+                        ? "ថ្លៃសេវា"
+                        : "服务费"}
+                  </span>
+                  <b>
+                    {summary.terms ? usd(summary.terms.serviceFeeMinor) : "—"}
+                  </b>
+                </div>
+                <div>
+                  <span>
+                    {language === "en"
+                      ? "Total repayable"
+                      : language === "km"
+                        ? "សរុបត្រូវសង"
+                        : "应还总额"}
+                  </span>
+                  <b>
+                    {summary.terms
+                      ? usd(summary.terms.totalRepayableMinor)
+                      : "—"}
+                  </b>
+                </div>
+              </div>
+              {summary.repayment.totalPeriods > 0 ? (
+                <>
+                  <div className="repayment-summary">
+                    <div>
+                      <span>
+                        {language === "en"
+                          ? "Paid periods"
+                          : language === "km"
+                            ? "បង់រួច"
+                            : "已还期数"}
+                      </span>
+                      <b>
+                        {summary.repayment.paidPeriods} /{" "}
+                        {summary.repayment.totalPeriods}
+                      </b>
+                    </div>
+                    <div>
+                      <span>
+                        {language === "en"
+                          ? "Unpaid periods"
+                          : language === "km"
+                            ? "មិនទាន់បង់"
+                            : "未还期数"}
+                      </span>
+                      <b>{summary.repayment.unpaidPeriods}</b>
+                    </div>
+                    <div>
+                      <span>
+                        {language === "en"
+                          ? "Outstanding"
+                          : language === "km"
+                            ? "នៅសល់ត្រូវសង"
+                            : "待还金额"}
+                      </span>
+                      <b>{usd(summary.repayment.outstandingMinor)}</b>
+                    </div>
+                  </div>
+                  {summary.repayment.nextInstallment ? (
+                    <div className="next-payment">
+                      <span>
+                        {language === "en"
+                          ? "Next payment"
+                          : language === "km"
+                            ? "ការបង់បន្ទាប់"
+                            : "下一期还款"}
+                      </span>
+                      <strong>
+                        {usd(summary.repayment.nextInstallment.amountDueMinor)}
+                      </strong>
+                      <small>
+                        #{summary.repayment.nextInstallment.installmentNo} ·{" "}
+                        {summary.repayment.nextInstallment.dueDate}
+                      </small>
+                    </div>
+                  ) : (
+                    <div className="next-payment settled">
+                      <span>
+                        {language === "en"
+                          ? "All installments are recorded as paid"
+                          : language === "km"
+                            ? "បានកត់ត្រាការបង់គ្រប់កំណត់"
+                            : "全部期次已记录为已还"}
+                      </span>
+                    </div>
+                  )}
+                  <div className="installments">
+                    {summary.repayment.installments.map((item) => (
+                      <div key={item.installmentNo}>
+                        <span>
+                          #{item.installmentNo} · {item.dueDate}
+                        </span>
+                        <b>{usd(item.amountDueMinor)}</b>
+                        <em
+                          className={
+                            item.status === "PAID" ? "paid" : "pending"
+                          }
+                        >
+                          {item.status === "PAID"
+                            ? language === "en"
+                              ? "Paid"
+                              : language === "km"
+                                ? "បានបង់"
+                                : "已还"
+                            : language === "en"
+                              ? "Pending"
+                              : language === "km"
+                                ? "មិនទាន់បង់"
+                                : "待还"}
+                        </em>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p className="response-note">
+                  {language === "en"
+                    ? "Repayment periods and payment fees will be generated after the licensed lender confirms disbursement."
+                    : language === "km"
+                      ? "កាលវិភាគបង់ និងថ្លៃបង់នឹងបង្កើតបន្ទាប់ពីស្ថាប័នមានអាជ្ញាប័ណ្ណបញ្ជាក់ការបើកប្រាក់។"
+                      : "持牌机构确认放款后，系统将生成还款期次、费用及账单。"}
+                </p>
+              )}
+            </section>
+          ) : null}
         </section>
       )}
 

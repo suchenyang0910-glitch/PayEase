@@ -91,6 +91,10 @@ export function App(): JSX.Element {
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_APPROVAL");
   const [approvedAmountMinor, setApprovedAmountMinor] = useState("5000");
+  const [serviceFeeMinor, setServiceFeeMinor] = useState("0");
+  const [totalRepayableMinor, setTotalRepayableMinor] = useState("5000");
+  const [installmentCount, setInstallmentCount] = useState("1");
+  const [firstDueDate, setFirstDueDate] = useState("");
   const [evidenceReference, setEvidenceReference] = useState("MANUAL-RECEIPT-");
   const [notice, setNotice] = useState("");
   useEffect(() => {
@@ -112,7 +116,15 @@ export function App(): JSX.Element {
     {
       label: "Approve / return final review",
       route: "lender-final-review",
-      body: () => ({ decision: "APPROVED", reasonCode, approvedAmountMinor }),
+      body: () => ({
+        decision: "APPROVED",
+        reasonCode,
+        approvedAmountMinor,
+        serviceFeeMinor,
+        totalRepayableMinor,
+        installmentCount: Number(installmentCount),
+        firstDueDate,
+      }),
       roles: ["LENDER_CREDIT_REVIEWER"],
     },
     {
@@ -240,15 +252,57 @@ export function App(): JSX.Element {
             />
           </label>
           {identity.roles.includes("LENDER_CREDIT_REVIEWER") ? (
-            <label>
-              Approved amount (USD cents; 1000–50000)
-              <input
-                inputMode="numeric"
-                value={approvedAmountMinor}
-                onChange={(event) => setApprovedAmountMinor(event.target.value)}
-                required
-              />
-            </label>
+            <>
+              <label>
+                Approved amount (USD cents; 1000–50000)
+                <input
+                  inputMode="numeric"
+                  value={approvedAmountMinor}
+                  onChange={(event) =>
+                    setApprovedAmountMinor(event.target.value)
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Service fee (USD cents; may be 0)
+                <input
+                  inputMode="numeric"
+                  value={serviceFeeMinor}
+                  onChange={(event) => setServiceFeeMinor(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Total repayable (USD cents; principal + all approved charges)
+                <input
+                  inputMode="numeric"
+                  value={totalRepayableMinor}
+                  onChange={(event) =>
+                    setTotalRepayableMinor(event.target.value)
+                  }
+                  required
+                />
+              </label>
+              <label>
+                Installments (1–6)
+                <input
+                  inputMode="numeric"
+                  value={installmentCount}
+                  onChange={(event) => setInstallmentCount(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                First repayment due date
+                <input
+                  type="date"
+                  value={firstDueDate}
+                  onChange={(event) => setFirstDueDate(event.target.value)}
+                  required
+                />
+              </label>
+            </>
           ) : null}
           <label>
             Contract / funds evidence reference

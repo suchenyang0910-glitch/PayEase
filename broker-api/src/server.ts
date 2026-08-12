@@ -167,6 +167,14 @@ type ApprovalCommand = Readonly<{
   reasonCode: string;
 }>;
 
+type FinalReviewTerms = Readonly<{
+  approvedAmountMinor?: string;
+  serviceFeeMinor?: string;
+  totalRepayableMinor?: string;
+  installmentCount?: number;
+  firstDueDate?: string;
+}>;
+
 class DualControlConflictError extends Error {}
 
 async function lockApplication(
@@ -267,6 +275,49 @@ async function addAuditEvent(
      VALUES ('APPLICATION', $1, $2, $3, $4, $5, $6, now())`,
     [entityId, eventType, actorUserRef, payloadHash, previousHash, auditHash],
   );
+}
+
+async function createRepaymentSchedule(
+  client: PoolClient,
+  applicationId: string,
+): Promise<void> {
+  const terms = await client.query<{
+    total_repayable_minor: string;
+    installment_count: number;
+    first_due_date: string;
+  }>(
+    `SELECT total_repayable_minor::text, installment_count, first_due_date::text
+       FROM loan_terms WHERE application_id = $1`,
+    [applicationId],
+  );
+  const term = terms.rows[0];
+  if (!term) throw new Error("contractual loan terms are required");
+  const existing = await client.query(
+    "SELECT 1 FROM repayment_installments WHERE application_id = $1 LIMIT 1",
+    [applicationId],
+  );
+  if (existing.rowCount) return;
+  const total = BigInt(term.total_repayable_minor);
+  const count = BigInt(term.installment_count);
+  const base = total / count;
+  const remainder = total % count;
+  const firstDue = new Date(`${term.first_due_date}T00:00:00.000Z`);
+  for (let index = 1; index <= term.installment_count; index += 1) {
+    const due = new Date(firstDue);
+    due.setUTCDate(due.getUTCDate() + (index - 1) * 30);
+    const amountDue =
+      base + (index === term.installment_count ? remainder : 0n);
+    await client.query(
+      `INSERT INTO repayment_installments (application_id, installment_no, due_date, amount_due_minor)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        applicationId,
+        index,
+        due.toISOString().slice(0, 10),
+        amountDue.toString(),
+      ],
+    );
+  }
 }
 
 app.get("/health", async () => {
@@ -601,11 +652,11 @@ const createStageHandler = (
   stage: string,
   approvedStatus: string,
   requiredRole: string,
-  schema: z.ZodType<ApprovalCommand & { approvedAmountMinor?: string }>,
+  schema: z.ZodType<ApprovalCommand & FinalReviewTerms>,
   afterRecord?: (
     client: PoolClient,
     application: ApplicationRow,
-    input: ApprovalCommand & { approvedAmountMinor?: string },
+    input: ApprovalCommand & FinalReviewTerms,
   ) => Promise<void>,
 ) => {
   return async (request: { params: unknown; body: unknown }, reply: any) => {
@@ -741,9 +792,17 @@ app.get(
     if (!token || token.length < 32) {
       return reply.code(401).send({ code: "USER_APPLICATION_ACCESS_DENIED" });
     }
-    const result = await pool.query(
-      `SELECT application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status,
-            approved_amount_minor::text AS approved_amount_minor
+    const result = await pool.query<{
+      id: string;
+      application_no: string;
+      requested_amount_minor: string;
+      currency: string;
+      tenor_days: number;
+      status: string;
+      approved_amount_minor: string | null;
+    }>(
+      `SELECT id, application_no, requested_amount_minor::text, currency, tenor_days, status,
+            approved_amount_minor::text
        FROM applications WHERE application_no = $1 AND applicant_access_token_hash = $2`,
       [params.applicationNo, eventHash([token])],
     );
@@ -765,7 +824,83 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
   );
   if (result.rowCount === 0)
     return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
-  return result.rows[0];
+  const application = result.rows[0]!;
+  const terms = await pool.query<{
+    approved_amount_minor: string;
+    service_fee_minor: string;
+    total_repayable_minor: string;
+    installment_count: number;
+    first_due_date: string;
+  }>(
+    `SELECT approved_amount_minor::text, service_fee_minor::text,
+            total_repayable_minor::text, installment_count, first_due_date::text
+       FROM loan_terms WHERE application_id = $1`,
+    [application.id],
+  );
+  const installments = await pool.query<{
+    installment_no: number;
+    due_date: string;
+    amount_due_minor: string;
+    amount_paid_minor: string;
+    status: "PENDING" | "PAID";
+  }>(
+    `SELECT installment_no, due_date::text, amount_due_minor::text,
+            amount_paid_minor::text, status
+       FROM repayment_installments WHERE application_id = $1 ORDER BY installment_no ASC`,
+    [application.id],
+  );
+  const schedule = installments.rows;
+  const paidPeriods = schedule.filter((item) => item.status === "PAID").length;
+  const totalDueMinor = schedule.reduce(
+    (total, item) => total + BigInt(item.amount_due_minor),
+    0n,
+  );
+  const totalPaidMinor = schedule.reduce(
+    (total, item) => total + BigInt(item.amount_paid_minor),
+    0n,
+  );
+  const nextInstallment = schedule.find((item) => item.status === "PENDING");
+  return {
+    application: {
+      applicationNo: application.application_no,
+      status: application.status,
+      requestedAmountMinor: application.requested_amount_minor,
+      currency: application.currency,
+      tenorDays: application.tenor_days,
+      approvedAmountMinor: application.approved_amount_minor,
+    },
+    terms: terms.rows[0]
+      ? {
+          approvedAmountMinor: terms.rows[0].approved_amount_minor,
+          serviceFeeMinor: terms.rows[0].service_fee_minor,
+          totalRepayableMinor: terms.rows[0].total_repayable_minor,
+          installmentCount: terms.rows[0].installment_count,
+          firstDueDate: terms.rows[0].first_due_date,
+        }
+      : null,
+    repayment: {
+      totalPeriods: schedule.length,
+      paidPeriods,
+      unpaidPeriods: schedule.length - paidPeriods,
+      totalDueMinor: totalDueMinor.toString(),
+      totalPaidMinor: totalPaidMinor.toString(),
+      outstandingMinor: (totalDueMinor - totalPaidMinor).toString(),
+      nextInstallment: nextInstallment
+        ? {
+            installmentNo: nextInstallment.installment_no,
+            dueDate: nextInstallment.due_date,
+            amountDueMinor: nextInstallment.amount_due_minor,
+          }
+        : null,
+      installments: schedule.map((item) => ({
+        installmentNo: item.installment_no,
+        dueDate: item.due_date,
+        amountDueMinor: item.amount_due_minor,
+        amountPaidMinor: item.amount_paid_minor,
+        status: item.status,
+      })),
+    },
+  };
 });
 
 app.post(
@@ -894,14 +1029,42 @@ app.post(
     "LENDER_CREDIT_REVIEWER",
     lenderFinalReviewSchema,
     async (client, application, input) => {
-      if (input.decision !== "APPROVED" || !input.approvedAmountMinor) return;
+      if (input.decision !== "APPROVED") return;
+      if (
+        !input.approvedAmountMinor ||
+        !input.serviceFeeMinor ||
+        !input.totalRepayableMinor ||
+        !input.installmentCount ||
+        !input.firstDueDate
+      ) {
+        throw new Error("approved final review requires complete loan terms");
+      }
       const approvedAmountMinor = BigInt(input.approvedAmountMinor);
+      const serviceFeeMinor = BigInt(input.serviceFeeMinor);
+      const totalRepayableMinor = BigInt(input.totalRepayableMinor);
       if (approvedAmountMinor < 1000n || approvedAmountMinor > 50000n) {
         throw new Error("approved amount is outside the V1 range");
+      }
+      if (totalRepayableMinor < approvedAmountMinor + serviceFeeMinor) {
+        throw new Error("total repayable amount does not cover loan terms");
       }
       await client.query(
         "UPDATE applications SET approved_amount_minor = $1, updated_at = now() WHERE id = $2",
         [approvedAmountMinor.toString(), application.id],
+      );
+      await client.query(
+        `INSERT INTO loan_terms
+          (application_id, approved_amount_minor, service_fee_minor, total_repayable_minor, installment_count, first_due_date, created_by_user_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          application.id,
+          approvedAmountMinor.toString(),
+          serviceFeeMinor.toString(),
+          totalRepayableMinor.toString(),
+          input.installmentCount,
+          input.firstDueDate,
+          "LENDER_CREDIT_REVIEWER",
+        ],
       );
     },
   ),
@@ -1252,6 +1415,7 @@ app.post(
         "DISBURSED",
         "DISBURSEMENT_RECEIPT",
       );
+      await createRepaymentSchedule(client, application.id);
       await client.query("COMMIT");
       return { applicationNo: params.applicationNo, status: "DISBURSED" };
     } catch (error) {
@@ -1439,6 +1603,26 @@ app.post(
           currentStatus: application.status,
         });
       }
+      const installment = await client.query<{
+        id: string;
+        amount_due_minor: string;
+      }>(
+        `SELECT id, amount_due_minor::text FROM repayment_installments
+         WHERE application_id = $1 AND status = 'PENDING'
+         ORDER BY installment_no ASC LIMIT 1 FOR UPDATE`,
+        [application.id],
+      );
+      const nextInstallment = installment.rows[0];
+      if (!nextInstallment) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "NO_PENDING_INSTALLMENT" });
+      }
+      const remaining = await client.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM repayment_installments WHERE application_id = $1 AND status = 'PENDING'",
+        [application.id],
+      );
+      const nextStatus =
+        Number(remaining.rows[0]!.count) === 1 ? "SETTLED" : "REPAYMENT_ACTIVE";
       await recordCheckerApproval(
         client,
         application,
@@ -1448,11 +1632,17 @@ app.post(
         "LENDER_REPAYMENT_CHECKER",
         input.reasonCode,
         input.evidenceReference,
-        "SETTLED",
+        nextStatus,
         "REPAYMENT_RECEIPT",
       );
+      await client.query(
+        `UPDATE repayment_installments
+         SET status = 'PAID', amount_paid_minor = amount_due_minor, paid_at = now()
+         WHERE id = $1`,
+        [nextInstallment.id],
+      );
       await client.query("COMMIT");
-      return { applicationNo: params.applicationNo, status: "SETTLED" };
+      return { applicationNo: params.applicationNo, status: nextStatus };
     } catch (error) {
       await client.query("ROLLBACK");
       if (error instanceof DualControlConflictError) {

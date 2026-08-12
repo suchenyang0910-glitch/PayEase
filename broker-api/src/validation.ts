@@ -25,13 +25,42 @@ const approvalDecisionSchema = z.object({
 export const employerVerificationSchema = approvalDecisionSchema;
 export const lenderInitialReviewSchema = approvalDecisionSchema;
 export const lenderFinalReviewSchema = approvalDecisionSchema
-  .extend({ approvedAmountMinor: z.string().regex(/^\d+$/).optional() })
+  .extend({
+    approvedAmountMinor: z.string().regex(/^\d+$/).optional(),
+    serviceFeeMinor: z.string().regex(/^\d+$/).optional(),
+    totalRepayableMinor: z.string().regex(/^\d+$/).optional(),
+    installmentCount: z.number().int().min(1).max(6).optional(),
+    firstDueDate: z.string().date().optional(),
+  })
   .superRefine((value, context) => {
-    if (value.decision === "APPROVED" && !value.approvedAmountMinor) {
+    if (value.decision !== "APPROVED") return;
+    for (const field of [
+      "approvedAmountMinor",
+      "serviceFeeMinor",
+      "totalRepayableMinor",
+      "installmentCount",
+      "firstDueDate",
+    ] as const) {
+      if (value[field] === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: "An approved final review requires contractual terms.",
+        });
+      }
+    }
+    if (
+      value.approvedAmountMinor &&
+      value.serviceFeeMinor &&
+      value.totalRepayableMinor &&
+      BigInt(value.totalRepayableMinor) <
+        BigInt(value.approvedAmountMinor) + BigInt(value.serviceFeeMinor)
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["approvedAmountMinor"],
-        message: "An approved final review requires an approved amount.",
+        path: ["totalRepayableMinor"],
+        message:
+          "Total repayable amount must include principal and service fee.",
       });
     }
   });

@@ -72,6 +72,10 @@ describe("controlled-pilot application validation", () => {
         decision: "APPROVED",
         reasonCode: "FINAL_APPROVAL",
         approvedAmountMinor: "25000",
+        serviceFeeMinor: "0",
+        totalRepayableMinor: "25000",
+        installmentCount: 1,
+        firstDueDate: "2026-09-13",
       }).success,
     ).toBe(true);
   });

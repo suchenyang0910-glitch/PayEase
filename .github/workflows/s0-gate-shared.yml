@@ -6,7 +6,10 @@ on:
     paths:
       - "packages/shared-money/**"
       - "packages/shared-security/**"
+      - "broker-api/**"
       - "partner-contracts/**"
+      - "broker-platform/db/**"
+      - "infra/local/**"
       - "docs/**"
       - "fixtures/**"
       - "pnpm-workspace.yaml"
@@ -18,7 +21,10 @@ on:
     paths:
       - "packages/shared-money/**"
       - "packages/shared-security/**"
+      - "broker-api/**"
       - "partner-contracts/**"
+      - "broker-platform/db/**"
+      - "infra/local/**"
       - "docs/**"
       - "fixtures/**"
       - "pnpm-workspace.yaml"

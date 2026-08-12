@@ -7,6 +7,7 @@ on:
       - ".semgrep/**"
       - "scripts/**"
       - "packages/**"
+      - "broker-api/**"
       - "broker-platform/**"
       - "lender-core/**"
       - "employer-portal/**"
@@ -16,6 +17,7 @@ on:
       - "docs/**"
       - "fixtures/**"
       - "prototype/**"
+      - "infra/local/**"
       - "pnpm-workspace.yaml"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -27,6 +29,7 @@ on:
       - ".semgrep/**"
       - "scripts/**"
       - "packages/**"
+      - "broker-api/**"
       - "broker-platform/**"
       - "lender-core/**"
       - "employer-portal/**"
@@ -36,6 +39,7 @@ on:
       - "docs/**"
       - "fixtures/**"
       - "prototype/**"
+      - "infra/local/**"
       - "pnpm-workspace.yaml"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -115,7 +119,7 @@ jobs:
             --max-memory 4096 \
             --strict \
             --metrics=off \
-            broker-platform lender-core employer-portal partner-contracts packages
+            broker-api broker-platform lender-core employer-portal partner-contracts packages
 
       - name: CI-10 Money type guard bash
         run: |

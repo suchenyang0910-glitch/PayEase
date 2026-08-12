@@ -68,6 +68,9 @@ jobs:
       - name: CI-01 Format check (Prettier)
         run: pnpm format:check
 
+      - name: Prepare workspace package declarations for typecheck
+        run: pnpm --filter @payease/shared-money run build
+
       - name: CI-02 Typecheck (tsc strict + noUncheckedIndexedAccess)
         run: pnpm typecheck
 

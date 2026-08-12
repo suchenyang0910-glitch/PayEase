@@ -1,0 +1,55 @@
+{
+  "_schema_version": "rbac.payease.io/v1.0",
+  "fixture_id": "S1-RBAC-9001",
+  "description": "S1 mock: broker-officer requesting a red-card full salary field from the HR domain must receive 403 without any protected value.",
+  "tags": ["hr", "forbidden", "redcard", "cross-domain"],
+  "security_domain": "broker",
+  "actor": {
+    "role": "broker-officer",
+    "tenant_type": "broker",
+    "tenant_id_placeholder": "tenant-broker-000001",
+    "user_id_placeholder": "user-brk-000014"
+  },
+  "target": {
+    "system": "hr-verify-portal",
+    "page_or_endpoint": "/api/v1/hr/employment/verification-id-000002?expand=monthlyBaseSalaryAmountMinor",
+    "method": "GET",
+    "resource_id_placeholder": "verification-000002",
+    "action": "view",
+    "dual_control_required": false
+  },
+  "expected": {
+    "http_status_code": 403,
+    "response_body_presence": "empty",
+    "redirect_target_if_302": null,
+    "error_code_if_403": "FORBIDDEN__RED_CARD_FIELD",
+    "audit_event_code_if_success": "VIEW_SALARY_FULL_AMOUNT",
+    "audit_event_code_if_blocked": "DPI_EXPORT_DENIED"
+  },
+  "preconditions": [
+    "S1 mock session represents a valid broker-officer session.",
+    "The request explicitly asks for monthlyBaseSalaryAmountMinor, a red-card field.",
+    "Broker access to the field is denied by the data-classification matrix."
+  ],
+  "data_classification_notes": {
+    "t0_fields_in_response": [],
+    "t1_fields_in_response": [],
+    "redcard_never_appear_fields": [
+      "monthlyBaseSalaryAmountMinor",
+      "nationalIdFull",
+      "bankAccountNumberFull",
+      "phoneNumberE164Full"
+    ]
+  },
+  "source_matrix_ref": {
+    "doc": "docs/ROLE_RBAC_MATRIX.md + docs/DATA_CLASSIFICATION_DEIDENTIFICATION.md",
+    "section": "§2.1 broker operations and red-card matrix",
+    "row_label": "Broker requests full HR salary field",
+    "cell_expected": "403 FORBIDDEN__RED_CARD_FIELD"
+  },
+  "test_plan_notes_s1": {
+    "e2e_playwright": "Login as mock broker-officer, request the URL, assert 403 and assert the protected field never appears.",
+    "api_contract_hurl": "GET with a mock broker cookie; assert 403 and exact error code.",
+    "ci_blocker": true
+  }
+}

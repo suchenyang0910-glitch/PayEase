@@ -1,0 +1,55 @@
+{
+  "_schema_version": "rbac.payease.io/v1.0",
+  "fixture_id": "S1-RBAC-9101",
+  "description": "S1 mock: an unauthenticated request to a protected HR list redirects to login or receives 401 and never returns data.",
+  "tags": ["unauthenticated", "login-redirect", "all-protected"],
+  "security_domain": "shared",
+  "actor": {
+    "role": "unauthenticated",
+    "tenant_type": "none",
+    "tenant_id_placeholder": "tenant-none-000000",
+    "user_id_placeholder": "user-none-000000"
+  },
+  "target": {
+    "system": "hr-verify-portal",
+    "page_or_endpoint": "/employment/list",
+    "method": "GET",
+    "resource_id_placeholder": "none-000000",
+    "action": "view",
+    "dual_control_required": false
+  },
+  "expected": {
+    "http_status_code": 302,
+    "response_body_presence": "redirect",
+    "redirect_target_if_302": "/login",
+    "error_code_if_403": null,
+    "audit_event_code_if_success": "AUTH_SESSION_EXPIRED",
+    "audit_event_code_if_blocked": "AUTH_LOGIN_FAILURE"
+  },
+  "preconditions": [
+    "No cookie, authorization header, or PayEase session header is present.",
+    "No valid Telegram initData is present; Telegram flow is tested separately."
+  ],
+  "data_classification_notes": {
+    "t0_fields_in_response": [],
+    "t1_fields_in_response": [],
+    "redcard_never_appear_fields": [
+      "monthlyBaseSalaryAmountMinor",
+      "nationalIdFull",
+      "bankAccountNumberFull",
+      "phoneNumberE164Full",
+      "departmentName"
+    ]
+  },
+  "source_matrix_ref": {
+    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "section": "§2.5 authentication and session",
+    "row_label": "Unauthenticated access to a protected portal",
+    "cell_expected": "401 or 302 /login"
+  },
+  "test_plan_notes_s1": {
+    "e2e_playwright": "Clear cookies, visit /employment/list, and assert the route becomes /login.",
+    "api_contract_hurl": "GET /api/v1/hr/employment/list without a cookie; assert 401 and WWW-Authenticate.",
+    "ci_blocker": true
+  }
+}

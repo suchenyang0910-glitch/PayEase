@@ -1,0 +1,63 @@
+{
+  "_schema_version": "rbac.payease.io/v1.0",
+  "fixture_id": "S1-RBAC-0001",
+  "description": "S1 mock: employer-hr can view its employer employment-verification list; the response never contains T0 salary, phone, or full identity-number fields.",
+  "tags": ["hr", "list", "2xx", "same-tenant"],
+  "security_domain": "employer-hr",
+  "actor": {
+    "role": "employer-hr",
+    "tenant_type": "employer",
+    "tenant_id_placeholder": "tenant-employer-KHEM01",
+    "user_id_placeholder": "user-hr-000001"
+  },
+  "target": {
+    "system": "hr-verify-portal",
+    "page_or_endpoint": "/employment/list",
+    "method": "GET",
+    "resource_id_placeholder": "verification-000000",
+    "action": "view",
+    "dual_control_required": false
+  },
+  "expected": {
+    "http_status_code": 200,
+    "response_body_presence": "partial",
+    "redirect_target_if_302": null,
+    "error_code_if_403": null,
+    "audit_event_code_if_success": "VIEW_EMPLOYMENT_VERIFICATION_LIST",
+    "audit_event_code_if_blocked": "RBAC_ACCESS_BLOCKED"
+  },
+  "preconditions": [
+    "S1 mock session represents employer-hr authentication; no real IdP is contacted.",
+    "Actor tenant matches every returned resource tenant (tenant-employer-KHEM01).",
+    "No dual-control denial is pending for the actor."
+  ],
+  "data_classification_notes": {
+    "t0_fields_in_response": [],
+    "t1_fields_in_response": [
+      "requestedLoanAmountMinor",
+      "requestedLoanCurrency",
+      "nationalIdLast4",
+      "borrowerFullName",
+      "employerTaxIdTruncated"
+    ],
+    "redcard_never_appear_fields": [
+      "monthlyBaseSalaryAmountMinor",
+      "nationalIdFull",
+      "bankAccountNumberFull",
+      "phoneNumberE164Full",
+      "departmentName",
+      "hiredAt"
+    ]
+  },
+  "source_matrix_ref": {
+    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "section": "§2.3 employer HR verification pages",
+    "row_label": "/employment/list view own employer pending verifications",
+    "cell_expected": "200 (same employer tenant)"
+  },
+  "test_plan_notes_s1": {
+    "e2e_playwright": "Login as mock employer-hr, visit /employment/list, and assert red-card fields do not appear.",
+    "api_contract_hurl": "GET /api/v1/hr/employment/list with a mock HR cookie; assert 200 and Zod list schema.",
+    "ci_blocker": true
+  }
+}

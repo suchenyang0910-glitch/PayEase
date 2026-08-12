@@ -1,0 +1,56 @@
+{
+  "_schema_version": "rbac.payease.io/v1.0",
+  "fixture_id": "S1-RBAC-0000",
+  "description": "Copy this static template for S1 RBAC contract tests. Never place real IDs, tokens, PII, account IDs, or credentials here.",
+  "tags": ["fill-tag-1", "fill-tag-2"],
+  "security_domain": "employer-hr",
+  "actor": {
+    "role": "employer-hr",
+    "tenant_type": "employer",
+    "tenant_id_placeholder": "tenant-employer-AAAAAA",
+    "user_id_placeholder": "user-hr-000001"
+  },
+  "target": {
+    "system": "hr-verify-portal",
+    "page_or_endpoint": "/example/protected/page-or-endpoint",
+    "method": "GET",
+    "resource_id_placeholder": "resource-kind-000001",
+    "action": "view",
+    "dual_control_required": false
+  },
+  "expected": {
+    "http_status_code": 200,
+    "response_body_presence": "partial",
+    "redirect_target_if_302": null,
+    "error_code_if_403": null,
+    "audit_event_code_if_success": "VIEW_EXAMPLE_RESOURCE",
+    "audit_event_code_if_blocked": "RBAC_ACCESS_BLOCKED"
+  },
+  "preconditions": [
+    "S1 mock session is established; no real identity provider is contacted.",
+    "Actor tenant matches the target resource tenant.",
+    "No dual-control denial is pending for the actor."
+  ],
+  "data_classification_notes": {
+    "t0_fields_in_response": [],
+    "t1_fields_in_response": ["example-field-1", "example-field-2"],
+    "redcard_never_appear_fields": [
+      "monthlyBaseSalaryAmountMinor",
+      "nationalIdFull",
+      "bankAccountNumberFull",
+      "phoneNumberE164Full",
+      "departmentName"
+    ]
+  },
+  "source_matrix_ref": {
+    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "section": "§X.X <domain> page/action matrix",
+    "row_label": "/example/protected/page-or-endpoint example row",
+    "cell_expected": "200"
+  },
+  "test_plan_notes_s1": {
+    "e2e_playwright": "Login as mock <actor.role>, navigate to <page_or_endpoint>, and assert the response and red-card restrictions.",
+    "api_contract_hurl": "<method> <page_or_endpoint> with a mock session cookie; assert status and Zod schema.",
+    "ci_blocker": true
+  }
+}

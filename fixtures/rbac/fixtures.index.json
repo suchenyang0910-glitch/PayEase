@@ -1,0 +1,23 @@
+{
+  "index_version": "1.0",
+  "generated_at_note": "S0.5 阶段为静态人工维护；S1 启用后由 pnpm validate:fixtures 脚本生成",
+  "total_fixtures_by_expected": {
+    "200_2xx_fixtures": 1,
+    "401_fixtures": 1,
+    "403_fixtures": 1,
+    "total_fixtures_currently": 3
+  },
+  "s1_required_target_coverage_roles_pct": {
+    "ops-admin": 0,
+    "broker-officer": 0,
+    "lender-partner": 0,
+    "employer-hr": 0,
+    "employer-finance": 0
+  },
+  "paths": [
+    "fixtures/rbac/_template.json",
+    "fixtures/rbac/200_ok/hr-verify-portal/employment-list-view__employer-hr.json",
+    "fixtures/rbac/403_forbidden/salary-full-view__broker-officer.json",
+    "fixtures/rbac/401_unauthenticated/unauthenticated-user__hr-list__redirect-login.json"
+  ]
+}

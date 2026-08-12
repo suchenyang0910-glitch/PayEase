@@ -28,3 +28,21 @@ Thumbs.db
 .turbo
 .temp
 *.tsbuildinfo
+# TypeScript emits these beside vite.config.ts when a project has no separate build config.
+vite.config.js
+vite.config.js.map
+vite.config.d.ts
+vite.config.d.ts.map
+# Generated declarations and JavaScript emitted beside V1 TypeScript sources.
+broker-platform/src/*.js
+broker-platform/src/*.js.map
+broker-platform/src/*.d.ts
+broker-platform/src/*.d.ts.map
+lender-core/src/*.js
+lender-core/src/*.js.map
+lender-core/src/*.d.ts
+lender-core/src/*.d.ts.map
+user-mini-app/src/*.js
+user-mini-app/src/*.js.map
+user-mini-app/src/*.d.ts
+user-mini-app/src/*.d.ts.map

@@ -1,0 +1,33 @@
+{
+  "name": "@payease/v1-domain",
+  "version": "0.1.0-v1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "PayEase V1 controlled-pilot workflow and approval domain rules; no network or persistence adapter.",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --sourcemap --clean",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run __tests__",
+    "lint": "echo 'v1-domain lint placeholder'"
+  },
+  "dependencies": {
+    "@payease/shared-money": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
+  }
+}

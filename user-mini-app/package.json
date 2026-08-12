@@ -1,17 +1,15 @@
 {
-  "name": "@payease/broker-platform",
+  "name": "@payease/user-mini-app",
   "version": "0.1.0-v1",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
-  "description": "Broker controlled-pilot operations console; local mock only.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo 'broker-platform lint placeholder'"
+    "lint": "echo 'user-mini-app lint placeholder'"
   },
   "dependencies": {
     "@payease/shared-money": "workspace:*",

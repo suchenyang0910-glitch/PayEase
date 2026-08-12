@@ -9,6 +9,9 @@ import {
 
 export function ReconciliationPage(): JSX.Element {
   const [filter, setFilter] = useState<"ALL" | "MATCHED" | "DIFF">("ALL");
+  const [claimedDifferenceIds, setClaimedDifferenceIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
 
   const lines = useMemo(() => {
     return MOCK_RECON_LINES.map((l) => {
@@ -77,6 +80,7 @@ export function ReconciliationPage(): JSX.Element {
             <th style={{ padding: 10, textAlign: "right" }}>Settled</th>
             <th style={{ padding: 10, textAlign: "right" }}>Difference</th>
             <th style={{ padding: 10 }}>Status</th>
+            <th style={{ padding: 10 }}>Manual action</th>
           </tr>
         </thead>
         <tbody>
@@ -124,6 +128,25 @@ export function ReconciliationPage(): JSX.Element {
                 >
                   {l.status}
                 </span>
+              </td>
+              <td style={{ padding: 10 }}>
+                {!l._matched ? (
+                  <button
+                    data-testid={`claim-diff-${l.id}`}
+                    disabled={claimedDifferenceIds.has(l.id)}
+                    onClick={() =>
+                      setClaimedDifferenceIds(
+                        (current) => new Set([...current, l.id]),
+                      )
+                    }
+                  >
+                    {claimedDifferenceIds.has(l.id)
+                      ? "Difference assigned — evidence pending"
+                      : "Assign difference work item"}
+                  </button>
+                ) : (
+                  "No action required"
+                )}
               </td>
             </tr>
           ))}

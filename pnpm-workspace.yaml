@@ -1,9 +1,11 @@
 packages:
   - "packages/shared-money"
   - "packages/shared-security"
+  - "packages/v1-domain"
   - "broker-platform"
   - "lender-core"
   - "employer-portal"
   - "hr-verify-portal"
   - "finance-verify-portal"
+  - "user-mini-app"
   - "partner-contracts"

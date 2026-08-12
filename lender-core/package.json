@@ -1,10 +1,30 @@
 {
   "name": "@payease/lender-core",
-  "version": "0.1.0-s0.1",
+  "version": "0.1.0-v1",
   "private": true,
-  "description": "S0.1 仅占位；持牌机构 lender 连接器与账本在 S4 阶段初始化。",
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Lender controlled-pilot approval and manual funds console; local mock only.",
   "scripts": {
-    "typecheck": "echo 'lender-core placeholder (S0.1)'; exit 0",
-    "test": "echo 'lender-core tests placeholder (S0.1)'; exit 0"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lender-core lint placeholder'"
+  },
+  "dependencies": {
+    "@payease/shared-money": "workspace:*",
+    "@payease/v1-domain": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.1"
   }
 }

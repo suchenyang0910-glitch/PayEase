@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createApplicationSchema,
   disbursementDualControlSchema,
+  lenderFinalReviewSchema,
 } from "../src/validation.js";
 
 describe("controlled-pilot application validation", () => {
@@ -57,5 +58,21 @@ describe("controlled-pilot application validation", () => {
         evidenceReference: "SIM-DISB-001",
       }).success,
     ).toBe(false);
+  });
+
+  it("requires an approved amount when final lender review approves", () => {
+    expect(
+      lenderFinalReviewSchema.safeParse({
+        decision: "APPROVED",
+        reasonCode: "FINAL_APPROVAL",
+      }).success,
+    ).toBe(false);
+    expect(
+      lenderFinalReviewSchema.safeParse({
+        decision: "APPROVED",
+        reasonCode: "FINAL_APPROVAL",
+        approvedAmountMinor: "25000",
+      }).success,
+    ).toBe(true);
   });
 });

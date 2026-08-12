@@ -24,7 +24,17 @@ const approvalDecisionSchema = z.object({
 
 export const employerVerificationSchema = approvalDecisionSchema;
 export const lenderInitialReviewSchema = approvalDecisionSchema;
-export const lenderFinalReviewSchema = approvalDecisionSchema;
+export const lenderFinalReviewSchema = approvalDecisionSchema
+  .extend({ approvedAmountMinor: z.string().regex(/^\d+$/).optional() })
+  .superRefine((value, context) => {
+    if (value.decision === "APPROVED" && !value.approvedAmountMinor) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["approvedAmountMinor"],
+        message: "An approved final review requires an approved amount.",
+      });
+    }
+  });
 
 export const contractConfirmationSchema = z.object({
   evidenceReference: z.string().min(3).max(160),

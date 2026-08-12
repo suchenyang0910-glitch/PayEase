@@ -61,6 +61,16 @@ function sessionToken(cookieHeader: string | undefined): string | undefined {
     ?.slice("payease_session=".length);
 }
 
+function applicantAccessToken(
+  cookieHeader: string | undefined,
+): string | undefined {
+  return cookieHeader
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("payease_application="))
+    ?.slice("payease_application=".length);
+}
+
 async function hasRole(
   cookieHeader: string | undefined,
   roleCode: string,
@@ -91,10 +101,14 @@ async function requireOpsAdmin(
 app.addHook("onRequest", async (request, reply) => {
   const isPublicUserApplicationSubmission =
     request.method === "POST" && request.url === "/v1/local/applications";
+  const isPublicUserApplicationView = request.url.startsWith(
+    "/v1/local/public/applications/",
+  );
   if (
     !request.url.startsWith("/v1/local/") ||
     request.url.startsWith("/v1/local/auth/") ||
-    isPublicUserApplicationSubmission
+    isPublicUserApplicationSubmission ||
+    isPublicUserApplicationView
   )
     return;
   const token = sessionToken(request.headers.cookie);
@@ -587,7 +601,12 @@ const createStageHandler = (
   stage: string,
   approvedStatus: string,
   requiredRole: string,
-  schema: z.ZodType<ApprovalCommand>,
+  schema: z.ZodType<ApprovalCommand & { approvedAmountMinor?: string }>,
+  afterRecord?: (
+    client: PoolClient,
+    application: ApplicationRow,
+    input: ApprovalCommand & { approvedAmountMinor?: string },
+  ) => Promise<void>,
 ) => {
   return async (request: { params: unknown; body: unknown }, reply: any) => {
     if (!requireRole(request as any, reply, requiredRole)) return;
@@ -622,6 +641,7 @@ const createStageHandler = (
         securedInput,
         approvedStatus,
       );
+      if (afterRecord) await afterRecord(client, application, input);
       await client.query("COMMIT");
       return {
         applicationNo: params.applicationNo,
@@ -650,6 +670,7 @@ app.post("/v1/local/applications", async (request, reply) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const applicantAccessToken = randomBytes(32).toString("base64url");
     const user = await client.query<{ id: string }>(
       `INSERT INTO users (telegram_user_ref, preferred_language)
        VALUES ($1, $2)
@@ -663,14 +684,15 @@ app.post("/v1/local/applications", async (request, reply) => {
       application_no: string;
       status: string;
     }>(
-      `INSERT INTO applications (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
-       VALUES ($1, $2, $3, 'USD', $4, 'BROKER_REVIEW')
+      `INSERT INTO applications (application_no, user_id, requested_amount_minor, currency, tenor_days, status, applicant_access_token_hash)
+       VALUES ($1, $2, $3, 'USD', $4, 'BROKER_REVIEW', $5)
        RETURNING id, application_no, status`,
       [
         applicationNo,
         user.rows[0]!.id,
         amountMinor.toString(),
         input.tenorDays,
+        eventHash([applicantAccessToken]),
       ],
     );
     const application = created.rows[0]!;
@@ -693,6 +715,10 @@ app.post("/v1/local/applications", async (request, reply) => {
       },
     );
     await client.query("COMMIT");
+    reply.header(
+      "Set-Cookie",
+      `payease_application=${applicantAccessToken}; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/local/public/applications/; Max-Age=2592000`,
+    );
     return reply.code(201).send({
       applicationNo: application.application_no,
       status: application.status,
@@ -704,6 +730,29 @@ app.post("/v1/local/applications", async (request, reply) => {
     client.release();
   }
 });
+
+app.get(
+  "/v1/local/public/applications/:applicationNo",
+  async (request, reply) => {
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const token = applicantAccessToken(request.headers.cookie);
+    if (!token || token.length < 32) {
+      return reply.code(401).send({ code: "USER_APPLICATION_ACCESS_DENIED" });
+    }
+    const result = await pool.query(
+      `SELECT application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status,
+            approved_amount_minor::text AS approved_amount_minor
+       FROM applications WHERE application_no = $1 AND applicant_access_token_hash = $2`,
+      [params.applicationNo, eventHash([token])],
+    );
+    if (!result.rowCount) {
+      return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+    }
+    return result.rows[0];
+  },
+);
 
 app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
   const params = z
@@ -844,6 +893,17 @@ app.post(
     "CONTRACT_PENDING",
     "LENDER_CREDIT_REVIEWER",
     lenderFinalReviewSchema,
+    async (client, application, input) => {
+      if (input.decision !== "APPROVED" || !input.approvedAmountMinor) return;
+      const approvedAmountMinor = BigInt(input.approvedAmountMinor);
+      if (approvedAmountMinor < 1000n || approvedAmountMinor > 50000n) {
+        throw new Error("approved amount is outside the V1 range");
+      }
+      await client.query(
+        "UPDATE applications SET approved_amount_minor = $1, updated_at = now() WHERE id = $2",
+        [approvedAmountMinor.toString(), application.id],
+      );
+    },
   ),
 );
 

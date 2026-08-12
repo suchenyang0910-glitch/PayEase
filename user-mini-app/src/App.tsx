@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
 import "./app.css";
 
@@ -136,6 +136,7 @@ export function App(): JSX.Element {
   const [employer, setEmployer] = useState("");
   const [consent, setConsent] = useState(false);
   const [applicationNo, setApplicationNo] = useState("");
+  const [approvedAmountMinor, setApprovedAmountMinor] = useState<string>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -143,6 +144,16 @@ export function App(): JSX.Element {
     () => Math.ceil((amount * 1.03) / Math.max(1, term / 30)),
     [amount, term],
   );
+
+  useEffect(() => {
+    const existingApplication = new URLSearchParams(window.location.search).get(
+      "application",
+    );
+    if (existingApplication) {
+      setApplicationNo(existingApplication);
+      setStage("submitted");
+    }
+  }, []);
 
   async function submit() {
     if (!name.trim() || !phone.trim() || !employer.trim() || !consent) {
@@ -179,6 +190,11 @@ export function App(): JSX.Element {
       if (!response.ok || !payload.applicationNo)
         throw new Error(payload.code ?? "SUBMISSION_FAILED");
       setApplicationNo(payload.applicationNo);
+      window.history.replaceState(
+        null,
+        "",
+        `?application=${encodeURIComponent(payload.applicationNo)}`,
+      );
       setStage("submitted");
     } catch {
       setError(
@@ -187,6 +203,33 @@ export function App(): JSX.Element {
           : language === "km"
             ? "មិនអាចដាក់ពាក្យបានទេ។ សូមព្យាយាមម្ដងទៀត។"
             : "申请暂时未能提交，请稍后重试。",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function checkStatus() {
+    if (!applicationNo) return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}`,
+        { credentials: "include" },
+      );
+      const payload = (await response.json()) as {
+        approved_amount_minor?: string;
+      };
+      if (!response.ok) throw new Error("STATUS_FAILED");
+      setApprovedAmountMinor(payload.approved_amount_minor);
+      setStage("offer");
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not refresh the application status."
+          : language === "km"
+            ? "មិនអាចធ្វើបច្ចុប្បន្នភាពស្ថានភាពបានទេ។"
+            : "暂时无法刷新申请状态。",
       );
     } finally {
       setLoading(false);
@@ -361,8 +404,12 @@ export function App(): JSX.Element {
             <span className="pulse" />
             {t.review}: {t.reviewing}
           </div>
-          <button className="primary" onClick={() => setStage("offer")}>
-            {t.check}
+          <button
+            className="primary"
+            disabled={loading}
+            onClick={() => void checkStatus()}
+          >
+            {loading ? "…" : t.check}
             <span>→</span>
           </button>
         </section>
@@ -370,13 +417,34 @@ export function App(): JSX.Element {
       {stage === "offer" && (
         <section className="result-card">
           <div className="review-icon">⌛</div>
-          <h2>{t.reviewing}</h2>
-          <p>{t.noOffer}</p>
+          <h2>{approvedAmountMinor ? t.offer : t.reviewing}</h2>
+          <p>
+            {approvedAmountMinor
+              ? language === "en"
+                ? "The licensed lender has returned your approved limit."
+                : language === "km"
+                  ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
+                  : "持牌机构已返回你的审核额度。"
+              : t.noOffer}
+          </p>
           <div className="application-number">
             <span>{t.status}</span>
             <strong>{applicationNo}</strong>
           </div>
-          <p className="response-note">{t.expected}</p>
+          {approvedAmountMinor ? (
+            <p className="response-note">
+              {language === "en"
+                ? "Approved limit: "
+                : language === "km"
+                  ? "ទំហំបានអនុម័ត៖ "
+                  : "审核额度："}
+              <strong>
+                ${(Number(approvedAmountMinor) / 100).toLocaleString("en-US")}
+              </strong>
+            </p>
+          ) : (
+            <p className="response-note">{t.expected}</p>
+          )}
         </section>
       )}
 

@@ -90,6 +90,7 @@ export function App(): JSX.Element {
   const [checking, setChecking] = useState(true);
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_APPROVAL");
+  const [approvedAmountMinor, setApprovedAmountMinor] = useState("5000");
   const [evidenceReference, setEvidenceReference] = useState("MANUAL-RECEIPT-");
   const [notice, setNotice] = useState("");
   useEffect(() => {
@@ -111,7 +112,7 @@ export function App(): JSX.Element {
     {
       label: "Approve / return final review",
       route: "lender-final-review",
-      body: () => ({ decision: "APPROVED", reasonCode }),
+      body: () => ({ decision: "APPROVED", reasonCode, approvedAmountMinor }),
       roles: ["LENDER_CREDIT_REVIEWER"],
     },
     {
@@ -238,6 +239,17 @@ export function App(): JSX.Element {
               required
             />
           </label>
+          {identity.roles.includes("LENDER_CREDIT_REVIEWER") ? (
+            <label>
+              Approved amount (USD cents; 1000–50000)
+              <input
+                inputMode="numeric"
+                value={approvedAmountMinor}
+                onChange={(event) => setApprovedAmountMinor(event.target.value)}
+                required
+              />
+            </label>
+          ) : null}
           <label>
             Contract / funds evidence reference
             <input

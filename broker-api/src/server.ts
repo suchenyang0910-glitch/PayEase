@@ -657,6 +657,7 @@ const createStageHandler = (
     client: PoolClient,
     application: ApplicationRow,
     input: ApprovalCommand & FinalReviewTerms,
+    actorUserRef: string,
   ) => Promise<void>,
 ) => {
   return async (request: { params: unknown; body: unknown }, reply: any) => {
@@ -692,7 +693,13 @@ const createStageHandler = (
         securedInput,
         approvedStatus,
       );
-      if (afterRecord) await afterRecord(client, application, input);
+      if (afterRecord)
+        await afterRecord(
+          client,
+          application,
+          input,
+          securedInput.actorUserRef,
+        );
       await client.query("COMMIT");
       return {
         applicationNo: params.applicationNo,
@@ -1028,7 +1035,7 @@ app.post(
     "CONTRACT_PENDING",
     "LENDER_CREDIT_REVIEWER",
     lenderFinalReviewSchema,
-    async (client, application, input) => {
+    async (client, application, input, actorUserRef) => {
       if (input.decision !== "APPROVED") return;
       if (
         !input.approvedAmountMinor ||
@@ -1063,7 +1070,7 @@ app.post(
           totalRepayableMinor.toString(),
           input.installmentCount,
           input.firstDueDate,
-          "LENDER_CREDIT_REVIEWER",
+          actorUserRef,
         ],
       );
     },
@@ -1251,18 +1258,33 @@ async function recordMakerApproval(
   actorUserRef: string,
   actorRole: string,
   reasonCode: string,
+  repaymentInstallmentNo?: number,
 ): Promise<void> {
-  const existing = await client.query(
-    "SELECT 1 FROM approval_events WHERE application_id = $1 AND stage = $2 LIMIT 1",
-    [application.id, stage],
-  );
+  const existing = repaymentInstallmentNo
+    ? await client.query(
+        `SELECT 1 FROM approval_events
+         WHERE application_id = $1 AND stage = $2 AND repayment_installment_no = $3
+         LIMIT 1`,
+        [application.id, stage, repaymentInstallmentNo],
+      )
+    : await client.query(
+        "SELECT 1 FROM approval_events WHERE application_id = $1 AND stage = $2 LIMIT 1",
+        [application.id, stage],
+      );
   if (existing.rowCount) {
     throw new DualControlConflictError("Maker approval already recorded");
   }
   await client.query(
-    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
-     VALUES ($1, $2, 'APPROVED', $3, $4, $5, now())`,
-    [application.id, stage, actorUserRef, actorRole, reasonCode],
+    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, repayment_installment_no, occurred_at)
+     VALUES ($1, $2, 'APPROVED', $3, $4, $5, $6, now())`,
+    [
+      application.id,
+      stage,
+      actorUserRef,
+      actorRole,
+      reasonCode,
+      repaymentInstallmentNo ?? null,
+    ],
   );
   await addAuditEvent(
     client,
@@ -1272,6 +1294,7 @@ async function recordMakerApproval(
     {
       stage,
       reasonCode,
+      repaymentInstallmentNo,
     },
   );
 }
@@ -1287,13 +1310,22 @@ async function recordCheckerApproval(
   evidenceReference: string,
   nextStatus: string,
   evidenceType: "DISBURSEMENT_RECEIPT" | "REPAYMENT_RECEIPT",
+  repaymentInstallmentNo?: number,
 ): Promise<void> {
-  const maker = await client.query<{ actor_user_ref: string }>(
-    `SELECT actor_user_ref FROM approval_events
-     WHERE application_id = $1 AND stage = $2 AND decision = 'APPROVED'
-     ORDER BY occurred_at DESC LIMIT 1`,
-    [application.id, makerStage],
-  );
+  const maker = repaymentInstallmentNo
+    ? await client.query<{ actor_user_ref: string }>(
+        `SELECT actor_user_ref FROM approval_events
+         WHERE application_id = $1 AND stage = $2 AND decision = 'APPROVED'
+           AND repayment_installment_no = $3
+         ORDER BY occurred_at DESC LIMIT 1`,
+        [application.id, makerStage, repaymentInstallmentNo],
+      )
+    : await client.query<{ actor_user_ref: string }>(
+        `SELECT actor_user_ref FROM approval_events
+         WHERE application_id = $1 AND stage = $2 AND decision = 'APPROVED'
+         ORDER BY occurred_at DESC LIMIT 1`,
+        [application.id, makerStage],
+      );
   const makerActor = maker.rows[0]?.actor_user_ref;
   if (!makerActor) {
     throw new DualControlConflictError(
@@ -1306,9 +1338,16 @@ async function recordCheckerApproval(
     );
   }
   await client.query(
-    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
-     VALUES ($1, $2, 'APPROVED', $3, $4, $5, now())`,
-    [application.id, checkerStage, actorUserRef, actorRole, reasonCode],
+    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, repayment_installment_no, occurred_at)
+     VALUES ($1, $2, 'APPROVED', $3, $4, $5, $6, now())`,
+    [
+      application.id,
+      checkerStage,
+      actorUserRef,
+      actorRole,
+      reasonCode,
+      repaymentInstallmentNo ?? null,
+    ],
   );
   await updateStatus(client, application, nextStatus, actorUserRef, reasonCode);
   await client.query(
@@ -1330,6 +1369,7 @@ async function recordCheckerApproval(
       makerStage,
       checkerStage,
       evidenceReference,
+      repaymentInstallmentNo,
     },
   );
 }
@@ -1557,6 +1597,17 @@ app.post(
           currentStatus: application.status,
         });
       }
+      const installment = await client.query<{ installment_no: number }>(
+        `SELECT installment_no FROM repayment_installments
+         WHERE application_id = $1 AND status = 'PENDING'
+         ORDER BY installment_no ASC LIMIT 1 FOR UPDATE`,
+        [application.id],
+      );
+      const nextInstallment = installment.rows[0];
+      if (!nextInstallment) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "NO_PENDING_INSTALLMENT" });
+      }
       await recordMakerApproval(
         client,
         application,
@@ -1564,6 +1615,7 @@ app.post(
         request.adminIdentity!.loginName,
         "LENDER_REPAYMENT_MAKER",
         input.reasonCode,
+        nextInstallment.installment_no,
       );
       await client.query("COMMIT");
       return {
@@ -1606,6 +1658,7 @@ app.post(
       const installment = await client.query<{
         id: string;
         amount_due_minor: string;
+        installment_no: number;
       }>(
         `SELECT id, amount_due_minor::text FROM repayment_installments
          WHERE application_id = $1 AND status = 'PENDING'
@@ -1634,6 +1687,7 @@ app.post(
         input.evidenceReference,
         nextStatus,
         "REPAYMENT_RECEIPT",
+        nextInstallment.installment_no,
       );
       await client.query(
         `UPDATE repayment_installments

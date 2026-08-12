@@ -7,6 +7,7 @@ RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts \
+  && pnpm --filter @payease/shared-money run build \
   && pnpm --filter @payease/v1-domain run build \
   && pnpm --filter @payease/broker-api run build \
   && pnpm prune --prod

@@ -127,6 +127,16 @@ export function App(): JSX.Element {
     await request("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
   };
+  const updateLanguage = async (preferredLanguage: Language) => {
+    const response = await request("/v1/local/auth/me/preferred-language", {
+      method: "PATCH",
+      body: JSON.stringify({ preferredLanguage }),
+    });
+    if (response.ok)
+      setIdentity((current) =>
+        current ? { ...current, preferredLanguage } : current,
+      );
+  };
   const refreshDirectory = async () => {
     const [d, r] = await Promise.all([
       request("/v1/local/admin/departments"),
@@ -173,7 +183,14 @@ export function App(): JSX.Element {
           <h1>PayEase broker console</h1>
           <p>
             Signed in as {identity.loginName} · language:{" "}
-            {identity.preferredLanguage}
+            <select
+              value={identity.preferredLanguage}
+              onChange={(e) => void updateLanguage(e.target.value as Language)}
+            >
+              <option value="zh-CN">中文</option>
+              <option value="en">English</option>
+              <option value="km">ខ្មែរ</option>
+            </select>
           </p>
         </div>
         <button onClick={logout}>Sign out</button>

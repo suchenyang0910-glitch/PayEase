@@ -16,6 +16,7 @@ import {
   lenderInitialReviewSchema,
   lifecycleActorSchema,
   loginSchema,
+  preferredLanguageUpdateSchema,
   makerApprovalSchema,
   checkerApprovalSchema,
   repaymentDualControlSchema,
@@ -423,6 +424,29 @@ app.get("/v1/local/auth/me", async (request, reply) => {
     loginName: identity.login_name,
     preferredLanguage: identity.preferred_language,
     roles: identity.roles,
+  };
+});
+
+app.patch("/v1/local/auth/me/preferred-language", async (request, reply) => {
+  const input = preferredLanguageUpdateSchema.parse(request.body);
+  const token = sessionToken(request.headers.cookie);
+  if (!token) return reply.code(401).send({ code: "UNAUTHENTICATED" });
+  const updated = await pool.query<{
+    login_name: string;
+    preferred_language: string;
+  }>(
+    `UPDATE admin_accounts a SET preferred_language = $1, updated_at = now()
+     FROM admin_sessions s
+     WHERE s.account_id = a.id AND s.token_hash = $2 AND s.revoked_at IS NULL
+       AND s.expires_at > now() AND a.is_active = true
+     RETURNING a.login_name, a.preferred_language`,
+    [input.preferredLanguage, eventHash([token])],
+  );
+  if (!updated.rowCount)
+    return reply.code(401).send({ code: "UNAUTHENTICATED" });
+  return {
+    loginName: updated.rows[0]!.login_name,
+    preferredLanguage: updated.rows[0]!.preferred_language,
   };
 });
 

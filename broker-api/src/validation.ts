@@ -89,6 +89,10 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+export const preferredLanguageUpdateSchema = z.object({
+  preferredLanguage: languageSchema,
+});
+
 export const departmentCreateSchema = z.object({
   domain: z.enum(["OPS", "BROKER", "LENDER", "EMPLOYER"]),
   code: z.string().regex(/^[A-Z0-9_]{3,64}$/),

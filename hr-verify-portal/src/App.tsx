@@ -121,13 +121,37 @@ export function App(): JSX.Element {
     await api("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
   };
+  const updateLanguage = async (
+    preferredLanguage: Identity["preferredLanguage"],
+  ) => {
+    const response = await api("/v1/local/auth/me/preferred-language", {
+      method: "PATCH",
+      body: JSON.stringify({ preferredLanguage }),
+    });
+    if (response.ok)
+      setIdentity((current) =>
+        current ? { ...current, preferredLanguage } : current,
+      );
+  };
   return (
     <main style={layout}>
       <header style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
           <h1>Employer verification portal</h1>
           <p>
-            {identity.loginName} · {identity.preferredLanguage}
+            {identity.loginName} ·{" "}
+            <select
+              value={identity.preferredLanguage}
+              onChange={(e) =>
+                void updateLanguage(
+                  e.target.value as Identity["preferredLanguage"],
+                )
+              }
+            >
+              <option value="zh-CN">中文</option>
+              <option value="en">English</option>
+              <option value="km">ខ្មែរ</option>
+            </select>
           </p>
         </div>
         <button onClick={logout}>Sign out</button>

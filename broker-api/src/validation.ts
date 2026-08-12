@@ -3,13 +3,19 @@ import { z } from "zod";
 export const languageSchema = z.enum(["km", "en", "zh-CN"]);
 
 export const createApplicationSchema = z.object({
-  telegramUserRef: z.string().min(3).max(128),
+  // Only controlled-preview mode accepts this compatibility value. Production
+  // derives the reference solely from a verified Telegram Mini App session.
+  telegramUserRef: z.string().min(3).max(128).optional(),
   preferredLanguage: languageSchema,
   requestedAmount: z.object({
     amountMinor: z.string().regex(/^\d+$/),
     currency: z.literal("USD"),
   }),
   tenorDays: z.number().int().min(7).max(180),
+});
+
+export const telegramSessionSchema = z.object({
+  initData: z.string().min(32).max(8192),
 });
 
 export const brokerReviewSchema = z.object({

@@ -21,7 +21,7 @@ type UserSummary = {
     firstDueDate: string;
   };
   repayment: {
-    totalPeriods: number;
+    periodCount: number;
     paidPeriods: number;
     unpaidPeriods: number;
     totalDueMinor: string;
@@ -168,6 +168,15 @@ function telegramUserRef(): string {
   return id ? `telegram-${id}` : `preview-${crypto.randomUUID()}`;
 }
 
+function telegramInitData(): string | undefined {
+  const telegram = (
+    window as Window & {
+      Telegram?: { WebApp?: { initData?: string } };
+    }
+  ).Telegram;
+  return telegram?.WebApp?.initData || undefined;
+}
+
 export function App(): JSX.Element {
   const [language, setLanguage] = useState<LanguageCode>("km");
   const [stage, setStage] = useState<Stage>("welcome");
@@ -196,6 +205,17 @@ export function App(): JSX.Element {
       setApplicationNo(existingApplication);
       setStage("submitted");
     }
+  }, []);
+
+  useEffect(() => {
+    const initData = telegramInitData();
+    if (!initData) return;
+    void fetch("/api/v1/local/public/telegram-sessions", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ initData }),
+    });
   }, []);
 
   async function submit() {
@@ -555,7 +575,7 @@ export function App(): JSX.Element {
                   </b>
                 </div>
               </div>
-              {summary.repayment.totalPeriods > 0 ? (
+              {summary.repayment.periodCount > 0 ? (
                 <>
                   <div className="repayment-summary">
                     <div>
@@ -568,7 +588,7 @@ export function App(): JSX.Element {
                       </span>
                       <b>
                         {summary.repayment.paidPeriods} /{" "}
-                        {summary.repayment.totalPeriods}
+                        {summary.repayment.periodCount}
                       </b>
                     </div>
                     <div>

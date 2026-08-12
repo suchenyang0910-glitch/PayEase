@@ -22,8 +22,13 @@ import {
   repaymentDualControlSchema,
   reconciliationAssignSchema,
   reconciliationResolutionSchema,
+  telegramSessionSchema,
 } from "./validation.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
+import {
+  configuredTelegramBots,
+  verifyTelegramMiniAppInitData,
+} from "./telegram-auth.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -69,6 +74,34 @@ function applicantAccessToken(
     .map((part) => part.trim())
     .find((part) => part.startsWith("payease_application="))
     ?.slice("payease_application=".length);
+}
+
+function applicantSessionToken(
+  cookieHeader: string | undefined,
+): string | undefined {
+  return cookieHeader
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("payease_applicant_session="))
+    ?.slice("payease_applicant_session=".length);
+}
+
+async function authenticatedApplicant(
+  cookieHeader: string | undefined,
+): Promise<{ telegramUserRef: string } | undefined> {
+  const token = applicantSessionToken(cookieHeader);
+  if (!token) return undefined;
+  const result = await pool.query<{ telegram_user_ref: string }>(
+    `SELECT telegram_user_ref FROM telegram_auth_sessions
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
+    [eventHash([token])],
+  );
+  const identity = result.rows[0];
+  return identity ? { telegramUserRef: identity.telegram_user_ref } : undefined;
+}
+
+function requiresTelegramAuthentication(): boolean {
+  return process.env.REQUIRE_TELEGRAM_AUTH === "true";
 }
 
 async function hasRole(
@@ -715,8 +748,65 @@ const createStageHandler = (
   };
 };
 
+app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
+  const input = telegramSessionSchema.parse(request.body);
+  const bots = configuredTelegramBots();
+  if (!bots.some((bot) => bot.enabled)) {
+    return reply.code(503).send({ code: "TELEGRAM_AUTH_NOT_CONFIGURED" });
+  }
+  const identity = verifyTelegramMiniAppInitData(input.initData, bots);
+  if (!identity) {
+    return reply.code(401).send({ code: "TELEGRAM_INITDATA_INVALID" });
+  }
+  const sessionToken = randomBytes(32).toString("base64url");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const replay = await client.query(
+      `INSERT INTO telegram_initdata_replay_guards
+        (initdata_hash, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, now() + interval '5 minutes')
+       ON CONFLICT (initdata_hash) DO NOTHING`,
+      [identity.initDataHash, identity.authenticatedBotId],
+    );
+    if (!replay.rowCount) {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({ code: "TELEGRAM_INITDATA_REPLAYED" });
+    }
+    await client.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, $3, now() + interval '30 minutes')`,
+      [
+        eventHash([sessionToken]),
+        identity.telegramUserRef,
+        identity.authenticatedBotId,
+      ],
+    );
+    await client.query("COMMIT");
+    reply.header(
+      "Set-Cookie",
+      `payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=1800`,
+    );
+    return reply.code(201).send({ authenticated: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 app.post("/v1/local/applications", async (request, reply) => {
   const input = createApplicationSchema.parse(request.body);
+  const applicant = await authenticatedApplicant(request.headers.cookie);
+  if (requiresTelegramAuthentication() && !applicant) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const telegramUserRef = applicant?.telegramUserRef ?? input.telegramUserRef;
+  if (!telegramUserRef) {
+    return reply.code(400).send({ code: "TELEGRAM_USER_REFERENCE_REQUIRED" });
+  }
   const amountMinor = BigInt(input.requestedAmount.amountMinor);
   if (amountMinor < 1000n || amountMinor > 50000n) {
     return reply.code(422).send({
@@ -734,7 +824,7 @@ app.post("/v1/local/applications", async (request, reply) => {
        VALUES ($1, $2)
        ON CONFLICT (telegram_user_ref) DO UPDATE SET preferred_language = EXCLUDED.preferred_language, updated_at = now()
        RETURNING id`,
-      [input.telegramUserRef, input.preferredLanguage],
+      [telegramUserRef, input.preferredLanguage],
     );
     const applicationNo = `APP-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
     const created = await client.query<{
@@ -758,13 +848,13 @@ app.post("/v1/local/applications", async (request, reply) => {
       `INSERT INTO application_status_events (application_id, from_status, to_status, actor_user_ref, reason_code, occurred_at)
        VALUES ($1, 'DRAFT', 'SUBMITTED', $2, 'USER_SUBMITTED', now()),
               ($1, 'SUBMITTED', 'BROKER_REVIEW', 'system', 'QUEUE_BROKER_REVIEW', now())`,
-      [application.id, input.telegramUserRef],
+      [application.id, telegramUserRef],
     );
     await addAuditEvent(
       client,
       application.id,
       "APPLICATION_SUBMITTED",
-      input.telegramUserRef,
+      telegramUserRef,
       {
         applicationNo: application.application_no,
         amountMinor: input.requestedAmount.amountMinor,
@@ -886,7 +976,7 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
         }
       : null,
     repayment: {
-      totalPeriods: schedule.length,
+      periodCount: schedule.length,
       paidPeriods,
       unpaidPeriods: schedule.length - paidPeriods,
       totalDueMinor: totalDueMinor.toString(),
@@ -1258,14 +1348,14 @@ async function recordMakerApproval(
   actorUserRef: string,
   actorRole: string,
   reasonCode: string,
-  repaymentInstallmentNo?: number,
+  repaymentPeriodIndex?: number,
 ): Promise<void> {
-  const existing = repaymentInstallmentNo
+  const existing = repaymentPeriodIndex
     ? await client.query(
         `SELECT 1 FROM approval_events
          WHERE application_id = $1 AND stage = $2 AND repayment_installment_no = $3
          LIMIT 1`,
-        [application.id, stage, repaymentInstallmentNo],
+        [application.id, stage, repaymentPeriodIndex],
       )
     : await client.query(
         "SELECT 1 FROM approval_events WHERE application_id = $1 AND stage = $2 LIMIT 1",
@@ -1283,7 +1373,7 @@ async function recordMakerApproval(
       actorUserRef,
       actorRole,
       reasonCode,
-      repaymentInstallmentNo ?? null,
+      repaymentPeriodIndex ?? null,
     ],
   );
   await addAuditEvent(
@@ -1294,7 +1384,7 @@ async function recordMakerApproval(
     {
       stage,
       reasonCode,
-      repaymentInstallmentNo,
+      repaymentPeriodIndex,
     },
   );
 }
@@ -1310,15 +1400,15 @@ async function recordCheckerApproval(
   evidenceReference: string,
   nextStatus: string,
   evidenceType: "DISBURSEMENT_RECEIPT" | "REPAYMENT_RECEIPT",
-  repaymentInstallmentNo?: number,
+  repaymentPeriodIndex?: number,
 ): Promise<void> {
-  const maker = repaymentInstallmentNo
+  const maker = repaymentPeriodIndex
     ? await client.query<{ actor_user_ref: string }>(
         `SELECT actor_user_ref FROM approval_events
          WHERE application_id = $1 AND stage = $2 AND decision = 'APPROVED'
            AND repayment_installment_no = $3
          ORDER BY occurred_at DESC LIMIT 1`,
-        [application.id, makerStage, repaymentInstallmentNo],
+        [application.id, makerStage, repaymentPeriodIndex],
       )
     : await client.query<{ actor_user_ref: string }>(
         `SELECT actor_user_ref FROM approval_events
@@ -1346,7 +1436,7 @@ async function recordCheckerApproval(
       actorUserRef,
       actorRole,
       reasonCode,
-      repaymentInstallmentNo ?? null,
+      repaymentPeriodIndex ?? null,
     ],
   );
   await updateStatus(client, application, nextStatus, actorUserRef, reasonCode);
@@ -1369,7 +1459,7 @@ async function recordCheckerApproval(
       makerStage,
       checkerStage,
       evidenceReference,
-      repaymentInstallmentNo,
+      repaymentPeriodIndex,
     },
   );
 }

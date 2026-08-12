@@ -32,6 +32,11 @@ services:
       # Optional after bootstrap: the API refuses bootstrap unless a deployment
       # operator explicitly supplies this value.
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+      # Production must set both values in the VPS-local environment file. The
+      # JSON contains one or more enabled Bot ID/token pairs and is never
+      # committed; controlled preview stays explicitly disabled by default.
+      REQUIRE_TELEGRAM_AUTH: ${REQUIRE_TELEGRAM_AUTH:-false}
+      TELEGRAM_BOTS_JSON: ${TELEGRAM_BOTS_JSON:-}
     ports:
       - "127.0.0.1:3100:3100"
 

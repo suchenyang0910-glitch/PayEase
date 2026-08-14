@@ -346,6 +346,65 @@ integration("public applicant access", () => {
     expect(account.rowCount).toBe(0);
   });
 
+  it("replaces a different account's same-domain roles and revokes its sessions", async () => {
+    const opsCookie = await adminCookieForRole(database, "OPS_ADMIN", "OPS");
+    const opsMe = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: opsCookie },
+    });
+    const opsLoginName = (opsMe.json() as { loginName: string }).loginName;
+    const targetCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+    const targetMe = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: targetCookie },
+    });
+    const targetLoginName = (targetMe.json() as { loginName: string })
+      .loginName;
+    await adminCookieForRole(database, "BROKER_REVIEWER", "BROKER");
+
+    const changed = await brokerApi.app.inject({
+      method: "PUT",
+      url: `/v1/local/admin/accounts/${targetLoginName}/roles`,
+      headers: { cookie: opsCookie },
+      payload: { roleCodes: ["BROKER_REVIEWER"] },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      loginName: targetLoginName,
+      roleCodes: ["BROKER_REVIEWER"],
+      revokedSessions: 1,
+    });
+    const oldSession = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: targetCookie },
+    });
+    expect(oldSession.statusCode).toBe(401);
+    const assignedRoles = await database.query<{ code: string }>(
+      `SELECT r.code FROM admin_account_roles ar JOIN roles r ON r.id = ar.role_id
+        JOIN admin_accounts a ON a.id = ar.account_id
+       WHERE a.login_name = $1`,
+      [targetLoginName],
+    );
+    expect(assignedRoles.rows).toEqual([{ code: "BROKER_REVIEWER" }]);
+    const selfChange = await brokerApi.app.inject({
+      method: "PUT",
+      url: `/v1/local/admin/accounts/${opsLoginName}/roles`,
+      headers: { cookie: opsCookie },
+      payload: { roleCodes: ["OPS_ADMIN"] },
+    });
+    expect(selfChange.statusCode).toBe(409);
+    expect(selfChange.json()).toEqual({
+      code: "ADMIN_SELF_ROLE_CHANGE_BLOCKED",
+    });
+  });
+
   it("returns full loan and repayment details only to the application's opaque cookie", async () => {
     const created = await brokerApi.app.inject({
       method: "POST",

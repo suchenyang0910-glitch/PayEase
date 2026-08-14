@@ -7,6 +7,7 @@ import {
   bootstrapAdminSchema,
   adminAccountCreateSchema,
   adminAccountActivitySchema,
+  adminAccountRolesUpdateSchema,
   departmentCreateSchema,
   roleCreateSchema,
   contractConfirmationSchema,
@@ -999,6 +1000,92 @@ app.patch(
     }
   },
 );
+
+// A role set is a live authorization boundary. Do not allow an administrator
+// to self-escalate or self-demote; another OPS_ADMIN must perform the change.
+// Sessions are revoked atomically so a role change is always re-authenticated.
+app.put("/v1/local/admin/accounts/:loginName/roles", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const params = z
+    .object({ loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/) })
+    .parse(request.params);
+  const input = adminAccountRolesUpdateSchema.parse(request.body);
+  const actorLoginName = request.adminIdentity!.loginName;
+  if (params.loginName === actorLoginName) {
+    return reply.code(409).send({ code: "ADMIN_SELF_ROLE_CHANGE_BLOCKED" });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const account = await client.query<{
+      id: string;
+      login_name: string;
+      domain: string;
+    }>(
+      `SELECT a.id, a.login_name, d.domain
+           FROM admin_accounts a JOIN departments d ON d.id = a.department_id
+          WHERE a.login_name = $1 FOR UPDATE`,
+      [params.loginName],
+    );
+    const row = account.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ code: "ADMIN_ACCOUNT_NOT_FOUND" });
+    }
+    const roles = await client.query<{
+      id: string;
+      code: string;
+      domain: string;
+    }>("SELECT id, code, domain FROM roles WHERE code = ANY($1::text[])", [
+      input.roleCodes,
+    ]);
+    if (roles.rowCount !== input.roleCodes.length) {
+      await client.query("ROLLBACK");
+      return reply.code(422).send({ code: "UNKNOWN_ROLE" });
+    }
+    if (roles.rows.some((role) => role.domain !== row.domain)) {
+      await client.query("ROLLBACK");
+      return reply.code(422).send({ code: "ROLE_DOMAIN_MISMATCH" });
+    }
+    await client.query(
+      "DELETE FROM admin_account_roles WHERE account_id = $1",
+      [row.id],
+    );
+    for (const role of roles.rows) {
+      await client.query(
+        "INSERT INTO admin_account_roles (account_id, role_id) VALUES ($1, $2)",
+        [row.id, role.id],
+      );
+    }
+    const revokedSessions =
+      (
+        await client.query(
+          `UPDATE admin_sessions SET revoked_at = now()
+              WHERE account_id = $1 AND revoked_at IS NULL`,
+          [row.id],
+        )
+      ).rowCount ?? 0;
+    await addAuditEvent(
+      client,
+      row.id,
+      "ADMIN_ACCOUNT_ROLES_UPDATED",
+      actorLoginName,
+      { roleCodes: input.roleCodes, revokedSessions },
+      "ADMIN_ACCOUNT",
+    );
+    await client.query("COMMIT");
+    return {
+      loginName: row.login_name,
+      roleCodes: input.roleCodes,
+      revokedSessions,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
 
 const createStageHandler = (
   expectedStatus: string,

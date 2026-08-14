@@ -192,3 +192,13 @@ export const adminAccountCreateSchema = z.object({
 export const adminAccountActivitySchema = z.object({
   isActive: z.boolean(),
 });
+
+export const adminAccountRolesUpdateSchema = z.object({
+  roleCodes: z
+    .array(z.string().regex(/^[A-Z0-9_]{3,64}$/))
+    .min(1)
+    .max(4)
+    .refine((codes) => new Set(codes).size === codes.length, {
+      message: "Role codes must be unique.",
+    }),
+});

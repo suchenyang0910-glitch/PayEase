@@ -27,6 +27,16 @@ export type LenderCopy = Readonly<{
   manualApproval: string;
   manualApprovalDescription: string;
   applicationNumber: string;
+  loadApplication: string;
+  applicationLoadFailed: string;
+  applicationSnapshot: string;
+  applicationStatus: string;
+  requestedAmount: string;
+  tenor: string;
+  approvedAmountSummary: string;
+  loanTerms: string;
+  repaymentProgress: string;
+  noActionForCurrentStatus: string;
   reasonCode: string;
   creditDecision: string;
   approve: string;
@@ -132,6 +142,18 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     manualApprovalDescription:
       "Actions are permitted only to server-side roles. Disbursement and repayment require two different accounts.",
     applicationNumber: "Application number",
+    loadApplication: "Load application",
+    applicationLoadFailed:
+      "This application is unavailable or its returned data is incomplete.",
+    applicationSnapshot: "Authoritative application snapshot",
+    applicationStatus: "Current status",
+    requestedAmount: "Requested amount",
+    tenor: "Tenor (days)",
+    approvedAmountSummary: "Approved amount",
+    loanTerms: "Loan terms",
+    repaymentProgress: "Repayment (paid / unpaid; outstanding)",
+    noActionForCurrentStatus:
+      "No action assigned to your roles is available for this status.",
     reasonCode: "Reason code",
     creditDecision: "Credit review decision",
     approve: "Approve",
@@ -179,6 +201,16 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     manualApprovalDescription:
       "操作仅向服务端已授权角色开放；放款和还款核销必须由两个不同账号完成。",
     applicationNumber: "申请编号",
+    loadApplication: "读取申请",
+    applicationLoadFailed: "无法读取该申请，或返回的申请数据不完整。",
+    applicationSnapshot: "申请权威快照",
+    applicationStatus: "当前状态",
+    requestedAmount: "申请金额",
+    tenor: "期限（天）",
+    approvedAmountSummary: "批准金额",
+    loanTerms: "借款条款",
+    repaymentProgress: "还款（已还 / 未还；待还）",
+    noActionForCurrentStatus: "当前状态没有分配给你角色的可执行操作。",
     reasonCode: "原因代码",
     creditDecision: "授信审核决定",
     approve: "同意",
@@ -226,6 +258,18 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     manualApprovalDescription:
       "សកម្មភាពអនុញ្ញាតតែសម្រាប់តួនាទីដែលបានកំណត់នៅម៉ាស៊ីនមេ។ ការបញ្ចេញប្រាក់ និងការកត់ត្រាសងប្រាក់ត្រូវការគណនីពីរផ្សេងគ្នា។",
     applicationNumber: "លេខពាក្យស្នើសុំ",
+    loadApplication: "ផ្ទុកពាក្យស្នើសុំ",
+    applicationLoadFailed:
+      "មិនអាចផ្ទុកពាក្យស្នើសុំនេះ ឬទិន្នន័យដែលបានត្រឡប់មកវិញមិនពេញលេញ។",
+    applicationSnapshot: "ព័ត៌មានពាក្យស្នើសុំដែលមានសិទ្ធិអំណាច",
+    applicationStatus: "ស្ថានភាពបច្ចុប្បន្ន",
+    requestedAmount: "ចំនួនដែលបានស្នើ",
+    tenor: "រយៈពេល (ថ្ងៃ)",
+    approvedAmountSummary: "ចំនួនដែលបានអនុម័ត",
+    loanTerms: "លក្ខខណ្ឌឥណទាន",
+    repaymentProgress: "ការសង (បានសង / មិនទាន់សង; នៅសល់)",
+    noActionForCurrentStatus:
+      "មិនមានសកម្មភាពសម្រាប់តួនាទីរបស់អ្នកនៅក្នុងស្ថានភាពនេះទេ។",
     reasonCode: "កូដមូលហេតុ",
     creditDecision: "សេចក្តីសម្រេចពិនិត្យឥណទាន",
     approve: "អនុម័ត",

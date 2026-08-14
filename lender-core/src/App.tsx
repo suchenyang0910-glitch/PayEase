@@ -10,6 +10,12 @@ import {
   type LenderActionKey,
   type LenderLanguage,
 } from "./lender-copy.ts";
+import {
+  allowedLenderActionRoutes,
+  parseLenderApplicationSummary,
+  type LenderApplicationSummary,
+} from "./lender-application-summary.ts";
+import { formatHuman } from "@payease/shared-money";
 
 type Identity = {
   loginName: string;
@@ -196,6 +202,10 @@ export function App(): JSX.Element {
   const [identity, setIdentity] = useState<Identity>();
   const [checking, setChecking] = useState(true);
   const [applicationNo, setApplicationNo] = useState("");
+  const [applicationSummary, setApplicationSummary] =
+    useState<LenderApplicationSummary>();
+  const [applicationLoading, setApplicationLoading] = useState(false);
+  const [applicationNotice, setApplicationNotice] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_APPROVAL");
   const [reviewDecision, setReviewDecision] =
     useState<ReviewDecision>("APPROVED");
@@ -308,9 +318,45 @@ export function App(): JSX.Element {
       roles: ["LENDER_REPAYMENT_CHECKER"],
     },
   ];
-  const available = actions.filter((item) =>
+  const hasOperationRole = actions.some((item) =>
     item.roles.some((role) => identity.roles.includes(role)),
   );
+  const available = applicationSummary
+    ? actions.filter(
+        (item) =>
+          item.roles.some((role) => identity.roles.includes(role)) &&
+          allowedLenderActionRoutes(applicationSummary).includes(item.route),
+      )
+    : [];
+  const loadApplication = async () => {
+    const target = applicationNo.trim();
+    if (!target) return;
+    setApplicationLoading(true);
+    setApplicationNotice("");
+    try {
+      const response = await api(
+        `/v1/local/applications/${encodeURIComponent(target)}`,
+      );
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      const summary = response.ok
+        ? parseLenderApplicationSummary(payload)
+        : undefined;
+      if (!summary) {
+        setApplicationSummary(undefined);
+        setApplicationNotice(copy.applicationLoadFailed);
+        return;
+      }
+      setApplicationNo(summary.application.applicationNo);
+      setApplicationSummary(summary);
+    } finally {
+      setApplicationLoading(false);
+    }
+  };
   const run = async (action: Action) => {
     setRunningAction(action.route);
     setNotice("");
@@ -351,6 +397,9 @@ export function App(): JSX.Element {
         return;
       }
       setNotice(result.notice);
+      if (!result.deliveryUncertain && !result.sessionExpired) {
+        await loadApplication();
+      }
     } finally {
       // A client-side error after the request must not permanently lock the
       // manual approval console's controls.
@@ -487,11 +536,72 @@ export function App(): JSX.Element {
             {copy.applicationNumber}
             <input
               value={applicationNo}
-              onChange={(e) => setApplicationNo(e.target.value)}
+              onChange={(e) => {
+                setApplicationNo(e.target.value);
+                setApplicationSummary(undefined);
+                setApplicationNotice("");
+              }}
               placeholder="APP-…"
               required
             />
           </label>
+          <button
+            disabled={!applicationNo.trim() || applicationLoading}
+            onClick={() => void loadApplication()}
+          >
+            {applicationLoading ? "…" : copy.loadApplication}
+          </button>
+          {applicationNotice ? <p role="alert">{applicationNotice}</p> : null}
+          {applicationSummary ? (
+            <section style={{ ...card, marginTop: 0, background: "#f8fafc" }}>
+              <h3>{copy.applicationSnapshot}</h3>
+              <dl
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr",
+                  gap: 8,
+                }}
+              >
+                <dt>{copy.applicationStatus}</dt>
+                <dd>{applicationSummary.application.status}</dd>
+                <dt>{copy.requestedAmount}</dt>
+                <dd>
+                  {formatHuman(applicationSummary.application.requestedAmount)}
+                </dd>
+                <dt>{copy.tenor}</dt>
+                <dd>{applicationSummary.application.tenorDays}</dd>
+                {applicationSummary.application.approvedAmount ? (
+                  <>
+                    <dt>{copy.approvedAmountSummary}</dt>
+                    <dd>
+                      {formatHuman(
+                        applicationSummary.application.approvedAmount,
+                      )}
+                    </dd>
+                  </>
+                ) : null}
+                {applicationSummary.terms ? (
+                  <>
+                    <dt>{copy.loanTerms}</dt>
+                    <dd>
+                      {formatHuman(applicationSummary.terms.totalRepayable)} ·{" "}
+                      {applicationSummary.terms.installmentCount} ·{" "}
+                      {applicationSummary.terms.firstDueDate}
+                    </dd>
+                  </>
+                ) : null}
+                <dt>{copy.repaymentProgress}</dt>
+                <dd>
+                  {applicationSummary.repayment.paidPeriods} /{" "}
+                  {applicationSummary.repayment.unpaidPeriods} ·{" "}
+                  {formatHuman(applicationSummary.repayment.outstanding)}
+                </dd>
+              </dl>
+              {available.length === 0 ? (
+                <p>{copy.noActionForCurrentStatus}</p>
+              ) : null}
+            </section>
+          ) : null}
           <label>
             {copy.reasonCode}
             <input
@@ -587,7 +697,7 @@ export function App(): JSX.Element {
             <button
               key={action.route}
               disabled={
-                !applicationNo ||
+                !applicationSummary ||
                 Boolean(runningAction) ||
                 (action.route === "lender-final-review" &&
                   reviewDecision === "APPROVED" &&
@@ -601,7 +711,7 @@ export function App(): JSX.Element {
             </button>
           ))}
         </div>
-        {available.length === 0 ? <p>{copy.noRole}</p> : null}
+        {!hasOperationRole ? <p>{copy.noRole}</p> : null}
         {available.some((action) => action.route === "lender-final-review") &&
         reviewDecision === "APPROVED" &&
         !finalTermsValid ? (

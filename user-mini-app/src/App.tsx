@@ -35,9 +35,11 @@ type UserSummary = {
     periodCount: number;
     paidPeriods: number;
     unpaidPeriods: number;
+    overduePeriods: number;
     totalDueMinor: string;
     totalPaidMinor: string;
     outstandingMinor: string;
+    overdueOutstandingMinor: string;
     nextInstallment: null | {
       installmentNo: number;
       dueDate: string;
@@ -898,6 +900,19 @@ export function App(): JSX.Element {
                             : "待还金额"}
                       </span>
                       <b>{usd(summary.repayment.outstandingMinor)}</b>
+                    </div>
+                    <div>
+                      <span>
+                        {language === "en"
+                          ? "Past due"
+                          : language === "km"
+                            ? "ហួសកាលកំណត់"
+                            : "逾期期数 / 金额"}
+                      </span>
+                      <b>
+                        {summary.repayment.overduePeriods} ·{" "}
+                        {usd(summary.repayment.overdueOutstandingMinor)}
+                      </b>
                     </div>
                   </div>
                   {summary.repayment.nextInstallment ? (

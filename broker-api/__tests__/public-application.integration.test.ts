@@ -196,7 +196,9 @@ integration("public applicant access", () => {
         periodCount: 2,
         paidPeriods: 1,
         unpaidPeriods: 1,
+        overduePeriods: 0,
         outstandingMinor: "12750",
+        overdueOutstandingMinor: "0",
         nextInstallment: { installmentNo: 2, amountDueMinor: "12750" },
       },
     });

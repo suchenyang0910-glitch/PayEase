@@ -34,10 +34,39 @@ describe("repayment schedule", () => {
       periodCount: 2,
       paidPeriods: 1,
       unpaidPeriods: 1,
+      overduePeriods: 0,
       totalDueMinor: "25501",
       totalPaidMinor: "12750",
       outstandingMinor: "12751",
+      overdueOutstandingMinor: "0",
       nextInstallment: { installmentNo: 2, amountDueMinor: "12751" },
+    });
+  });
+
+  it("reports past-due pending installments without inventing a late fee", () => {
+    const summary = summarizeRepaymentSchedule(
+      [
+        {
+          installmentNo: 1,
+          dueDate: "2026-09-15",
+          amountDueMinor: "12750",
+          amountPaidMinor: "0",
+          status: "PENDING",
+        },
+        {
+          installmentNo: 2,
+          dueDate: "2026-10-15",
+          amountDueMinor: "12751",
+          amountPaidMinor: "0",
+          status: "PENDING",
+        },
+      ],
+      "2026-10-15",
+    );
+    expect(summary).toMatchObject({
+      overduePeriods: 1,
+      overdueOutstandingMinor: "12750",
+      outstandingMinor: "25501",
     });
   });
 

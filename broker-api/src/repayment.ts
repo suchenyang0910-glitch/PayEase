@@ -10,9 +10,11 @@ export type RepaymentScheduleSummary = Readonly<{
   periodCount: number;
   paidPeriods: number;
   unpaidPeriods: number;
+  overduePeriods: number;
   totalDueMinor: string;
   totalPaidMinor: string;
   outstandingMinor: string;
+  overdueOutstandingMinor: string;
   nextInstallment: null | Pick<
     RepaymentScheduleItem,
     "installmentNo" | "dueDate" | "amountDueMinor"
@@ -83,8 +85,15 @@ export function buildRepaymentSchedule(
 
 export function summarizeRepaymentSchedule(
   schedule: readonly RepaymentScheduleItem[],
+  asOfDate = new Date().toISOString().slice(0, 10),
 ): RepaymentScheduleSummary {
   const paidPeriods = schedule.filter((item) => item.status === "PAID").length;
+  // This is an informational, server-calculated view only. It deliberately
+  // does not add a late fee or mutate the loan status: those are lender and
+  // local-law policy decisions outside the applicant dashboard.
+  const overdueInstallments = schedule.filter(
+    (item) => item.status === "PENDING" && item.dueDate < asOfDate,
+  );
   const totalDue = schedule.reduce(
     (total, item) => total + BigInt(item.amountDueMinor),
     0n,
@@ -98,9 +107,13 @@ export function summarizeRepaymentSchedule(
     periodCount: schedule.length,
     paidPeriods,
     unpaidPeriods: schedule.length - paidPeriods,
+    overduePeriods: overdueInstallments.length,
     totalDueMinor: totalDue.toString(),
     totalPaidMinor: totalPaid.toString(),
     outstandingMinor: (totalDue - totalPaid).toString(),
+    overdueOutstandingMinor: overdueInstallments
+      .reduce((total, item) => total + BigInt(item.amountDueMinor), 0n)
+      .toString(),
     nextInstallment: nextInstallment
       ? {
           installmentNo: nextInstallment.installmentNo,

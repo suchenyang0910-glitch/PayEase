@@ -337,6 +337,10 @@ footer {
   font-size: 13px;
   font-weight: 700;
 }
+.refresh-status {
+  margin: -8px auto 4px;
+  min-height: 36px;
+}
 .application-card h2,
 .result-card h2 {
   margin: 16px 0 6px;

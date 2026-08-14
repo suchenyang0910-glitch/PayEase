@@ -185,6 +185,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     usd: "USD",
     expected: "预计处理：工作时段 0–1.5 小时响应",
     status: "申请编号",
+    refresh: "刷新状态",
     installments: "还款期数",
     firstDueDate: "首期还款日",
     telegramLogin: "使用 Telegram 继续",
@@ -223,6 +224,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     usd: "USD",
     expected: "Expected response during business hours: 0–1.5 hours",
     status: "Application number",
+    refresh: "Refresh status",
     installments: "Installments",
     firstDueDate: "First repayment date",
     telegramLogin: "Continue with Telegram",
@@ -261,6 +263,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     usd: "USD",
     expected: "ពេលឆ្លើយតបក្នុងម៉ោងធ្វើការ៖ 0–1.5 ម៉ោង",
     status: "លេខពាក្យ",
+    refresh: "ធ្វើបច្ចុប្បន្នភាពស្ថានភាព",
     installments: "ចំនួនវគ្គសង",
     firstDueDate: "កាលបរិច្ឆេទសងលើកដំបូង",
     telegramLogin: "បន្តជាមួយ Telegram",
@@ -1058,6 +1061,14 @@ export function App(): JSX.Element {
             <span>{t.status}</span>
             <strong>{applicationNo}</strong>
           </div>
+          <button
+            className="back-link refresh-status"
+            aria-label={t.refresh}
+            disabled={loading}
+            onClick={() => void checkStatus()}
+          >
+            {t.refresh}
+          </button>
           {canWithdraw ? (
             <section className="next-payment" aria-label="Withdraw application">
               <strong>

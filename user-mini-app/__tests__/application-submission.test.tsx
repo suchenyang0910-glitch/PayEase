@@ -309,6 +309,58 @@ describe("applicant submission", () => {
     ]);
   });
 
+  it("lets an applicant refresh the displayed decision without reopening Telegram", async () => {
+    window.history.replaceState(null, "", "/?application=APP-REFRESH-001");
+    const summaryResponse = () =>
+      new Response(
+        JSON.stringify({
+          application: {
+            applicationNo: "APP-REFRESH-001",
+            status: "LENDER_FINAL_REVIEW",
+            requestedAmountMinor: "5000",
+            currency: "USD",
+            tenorDays: 30,
+            approvedAmountMinor: null,
+            rejectionConditionResolved: false,
+            rejectionNoticeCode: null,
+            supplementRequested: false,
+          },
+          terms: null,
+          repayment: {
+            periodCount: 0,
+            paidPeriods: 0,
+            unpaidPeriods: 0,
+            overduePeriods: 0,
+            totalDueMinor: "0",
+            totalPaidMinor: "0",
+            outstandingMinor: "0",
+            overdueOutstandingMinor: "0",
+            nextInstallment: null,
+            installments: [],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const fetchMock = vi.fn(() => Promise.resolve(summaryResponse()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+    expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/v1/local/public/applications/APP-REFRESH-001",
+      { credentials: "include" },
+    ]);
+  });
+
   it("shows a retryable status error after an application was submitted", async () => {
     const fetchMock = vi
       .fn()

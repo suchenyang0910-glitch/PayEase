@@ -12,6 +12,7 @@ import {
 import {
   applicantResult,
   canWithdrawApplicantApplication,
+  type ApplicantResult,
 } from "./application-result.ts";
 import { applicantSessionRecoveryMessage } from "./applicant-session-message.ts";
 import { shouldKeepApplicantSessionAlive } from "./applicant-session-keepalive.ts";
@@ -201,6 +202,83 @@ function applicantPhaseLabel(
   return labelsByLanguage[language][phase];
 }
 
+function applicantLifecycleCopy(
+  result: ApplicantResult,
+  language: LanguageCode,
+): { title: string; message: string } | undefined {
+  const copy: Partial<
+    Record<
+      ApplicantResult,
+      Record<LanguageCode, { title: string; message: string }>
+    >
+  > = {
+    "contract-processing": {
+      en: {
+        title: "Contract and disbursement in progress",
+        message:
+          "Your confirmation is recorded. The licensed lender is completing its contract and disbursement process.",
+      },
+      "zh-CN": {
+        title: "签约与放款处理中",
+        message: "你的确认已记录，持牌机构正在完成合同与放款流程。",
+      },
+      km: {
+        title: "កំពុងដំណើរការកិច្ចសន្យា និងបើកប្រាក់",
+        message:
+          "ការបញ្ជាក់របស់អ្នកត្រូវបានកត់ត្រា។ ស្ថាប័នមានអាជ្ញាប័ណ្ណកំពុងបំពេញកិច្ចសន្យា និងដំណើរការបើកប្រាក់។",
+      },
+    },
+    funded: {
+      en: {
+        title: "Loan disbursed",
+        message:
+          "The licensed lender has recorded the disbursement. Your repayment schedule will appear when it becomes active.",
+      },
+      "zh-CN": {
+        title: "贷款已放款",
+        message: "持牌机构已记录放款；还款计划生效后将在此显示。",
+      },
+      km: {
+        title: "បានបើកប្រាក់កម្ចី",
+        message:
+          "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានកត់ត្រាការបើកប្រាក់។ តារាងសងប្រាក់នឹងបង្ហាញនៅទីនេះពេលចាប់ផ្តើមមានសុពលភាព។",
+      },
+    },
+    "repayment-active": {
+      en: {
+        title: "Repayment in progress",
+        message: "Review the paid, unpaid and next-payment details below.",
+      },
+      "zh-CN": {
+        title: "还款进行中",
+        message: "请在下方查看已还、未还及下一期还款信息。",
+      },
+      km: {
+        title: "កំពុងសងប្រាក់",
+        message:
+          "សូមពិនិត្យព័ត៌មានការបង់រួច មិនទាន់បង់ និងការបង់បន្ទាប់ខាងក្រោម។",
+      },
+    },
+    settled: {
+      en: {
+        title: "Loan settled",
+        message:
+          "All recorded repayment obligations for this loan are complete.",
+      },
+      "zh-CN": {
+        title: "贷款已结清",
+        message: "该笔贷款的已记录还款义务均已完成。",
+      },
+      km: {
+        title: "កម្ចីបានបិទបញ្ចប់",
+        message:
+          "កាតព្វកិច្ចសងប្រាក់ដែលបានកត់ត្រាទាំងអស់សម្រាប់កម្ចីនេះត្រូវបានបំពេញ។",
+      },
+    },
+  };
+  return copy[result]?.[language];
+}
+
 const labels: Record<LanguageCode, Record<string, string>> = {
   "zh-CN": {
     brand: "薪易贷",
@@ -371,6 +449,7 @@ export function App(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const t = labels[language];
   const result = applicantResult(summary?.application);
+  const lifecycleCopy = applicantLifecycleCopy(result, language);
   const visiblePhase = summary
     ? applicantPhase(summary.application.status)
     : undefined;
@@ -1061,27 +1140,28 @@ export function App(): JSX.Element {
         <section className="result-card">
           <div className="review-icon">⌛</div>
           <h2>
-            {result === "withdrawn"
-              ? language === "en"
-                ? "Application withdrawn"
-                : language === "zh-CN"
-                  ? "申请已撤回"
-                  : "ពាក្យសុំត្រូវបានដកវិញ"
-              : result === "approved"
-                ? t.offer
-                : result.startsWith("rejected")
-                  ? language === "en"
-                    ? "Application not approved"
-                    : language === "zh-CN"
-                      ? "申请未获批准"
-                      : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
-                  : result === "supplement-requested"
+            {lifecycleCopy?.title ??
+              (result === "withdrawn"
+                ? language === "en"
+                  ? "Application withdrawn"
+                  : language === "zh-CN"
+                    ? "申请已撤回"
+                    : "ពាក្យសុំត្រូវបានដកវិញ"
+                : result === "approved"
+                  ? t.offer
+                  : result.startsWith("rejected")
                     ? language === "en"
-                      ? "Additional information needed"
+                      ? "Application not approved"
                       : language === "zh-CN"
-                        ? "需要补充资料"
-                        : "ត្រូវការព័ត៌មានបន្ថែម"
-                    : t.reviewing}
+                        ? "申请未获批准"
+                        : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
+                    : result === "supplement-requested"
+                      ? language === "en"
+                        ? "Additional information needed"
+                        : language === "zh-CN"
+                          ? "需要补充资料"
+                          : "ត្រូវការព័ត៌មានបន្ថែម"
+                      : t.reviewing)}
           </h2>
           {error ? (
             <ApplicantError
@@ -1091,37 +1171,38 @@ export function App(): JSX.Element {
             />
           ) : null}
           <p>
-            {result === "withdrawn"
-              ? language === "en"
-                ? "This application is closed and will not continue to review or contract processing."
-                : language === "zh-CN"
-                  ? "该申请已关闭，不会继续进入审核或合同处理。"
-                  : "ពាក្យសុំនេះត្រូវបានបិទ ហើយនឹងមិនបន្តទៅការពិនិត្យ ឬដំណើរការកិច្ចសន្យាទេ។"
-              : result === "approved"
+            {lifecycleCopy?.message ??
+              (result === "withdrawn"
                 ? language === "en"
-                  ? "The licensed lender has returned your approved limit."
-                  : language === "km"
-                    ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
-                    : "持牌机构已返回你的审核额度。"
-                : result === "rejected-resolved"
+                  ? "This application is closed and will not continue to review or contract processing."
+                  : language === "zh-CN"
+                    ? "该申请已关闭，不会继续进入审核或合同处理。"
+                    : "ពាក្យសុំនេះត្រូវបានបិទ ហើយនឹងមិនបន្តទៅការពិនិត្យ ឬដំណើរការកិច្ចសន្យាទេ។"
+                : result === "approved"
                   ? language === "en"
-                    ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
-                    : language === "zh-CN"
-                      ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
-                      : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
-                  : result === "rejected-pending"
+                    ? "The licensed lender has returned your approved limit."
+                    : language === "km"
+                      ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
+                      : "持牌机构已返回你的审核额度。"
+                  : result === "rejected-resolved"
                     ? language === "en"
-                      ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
+                      ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
                       : language === "zh-CN"
-                        ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
-                        : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
-                    : result === "supplement-requested"
+                        ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
+                        : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
+                    : result === "rejected-pending"
                       ? language === "en"
-                        ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
+                        ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
                         : language === "zh-CN"
-                          ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
-                          : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
-                      : t.noOffer}
+                          ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
+                          : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
+                      : result === "supplement-requested"
+                        ? language === "en"
+                          ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
+                          : language === "zh-CN"
+                            ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
+                            : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
+                        : t.noOffer)}
           </p>
           {result.startsWith("rejected") ? (
             <p className="response-note" aria-label="Reapplication guidance">

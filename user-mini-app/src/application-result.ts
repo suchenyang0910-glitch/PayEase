@@ -13,6 +13,10 @@ export type ApplicantApplication = Readonly<{
 
 export type ApplicantResult =
   | "approved"
+  | "contract-processing"
+  | "funded"
+  | "repayment-active"
+  | "settled"
   | "supplement-requested"
   | "rejected-resolved"
   | "rejected-pending"
@@ -41,6 +45,16 @@ export function applicantResult(
   application: ApplicantApplication | undefined,
 ): ApplicantResult {
   if (application?.status === "CLOSED") return "withdrawn";
+  if (application?.status === "SETTLED") return "settled";
+  if (application?.status === "REPAYMENT_ACTIVE") return "repayment-active";
+  if (application?.status === "DISBURSED") return "funded";
+  if (
+    application?.status === "USER_CONTRACT_CONFIRMED" ||
+    application?.status === "CONTRACT_CONFIRMED" ||
+    application?.status === "DISBURSEMENT_PENDING"
+  ) {
+    return "contract-processing";
+  }
   if (application?.status === "REJECTED") {
     return application.rejectionConditionResolved
       ? "rejected-resolved"

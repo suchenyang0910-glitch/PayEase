@@ -637,6 +637,10 @@ describe("applicant submission", () => {
     );
 
     expect(await screen.findByText("Your loan information")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Repayment in progress" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Offer result" })).toBeNull();
     expect(screen.getByText("Service fee")).toBeVisible();
     expect(screen.getByText("$5.00")).toBeVisible();
     expect(screen.getByText("Total repayable")).toBeVisible();

@@ -49,6 +49,24 @@ describe("applicant result display state", () => {
     ).toBe("reviewing");
   });
 
+  it.each([
+    ["USER_CONTRACT_CONFIRMED", "contract-processing"],
+    ["CONTRACT_CONFIRMED", "contract-processing"],
+    ["DISBURSEMENT_PENDING", "contract-processing"],
+    ["DISBURSED", "funded"],
+    ["REPAYMENT_ACTIVE", "repayment-active"],
+    ["SETTLED", "settled"],
+  ] as const)("shows %s as its actual loan lifecycle", (status, expected) => {
+    expect(
+      applicantResult({
+        status,
+        approvedAmountMinor: "25000",
+        rejectionConditionResolved: false,
+        supplementRequested: false,
+      }),
+    ).toBe(expected);
+  });
+
   it("explains a supplement request before considering an offer or rejection", () => {
     expect(
       applicantResult({

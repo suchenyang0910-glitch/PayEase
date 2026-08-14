@@ -55,6 +55,7 @@ import {
   decryptPersonalValue,
   encryptPersonalProfile,
   encryptPersonalValue,
+  personalDataEncryptionPreflight,
   personalDataKeyVersion,
 } from "./personal-profile.js";
 import { runDatabaseMigrations } from "./database-migrations.js";
@@ -3732,6 +3733,10 @@ if (process.env.NODE_ENV !== "test") {
   if (requiresTelegramAuthentication()) {
     requireTelegramRecoveryTopology();
     requireConfiguredApplicantOrigins();
+    // The same invariant is checked by the deployment command, but retaining
+    // it at process startup prevents an operator from accidentally bypassing
+    // that command and accepting applicant PII without an active AES key.
+    personalDataEncryptionPreflight();
   }
   await runDatabaseMigrations(pool);
   const port = Number(process.env.PORT ?? 3100);

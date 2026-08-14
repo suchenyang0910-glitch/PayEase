@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   decryptPersonalProfile,
   encryptPersonalProfile,
+  personalDataEncryptionPreflight,
 } from "../src/personal-profile.js";
 
 const originalKey = process.env.PAYEASE_PII_ENCRYPTION_KEY;
@@ -74,5 +75,22 @@ describe("personal profile encryption", () => {
     expect(decryptPersonalProfile(existing).fullName).toBe(
       "Existing applicant",
     );
+  });
+
+  it("validates the active keyring entry without returning any key material", () => {
+    const key = Buffer.alloc(32, 5).toString("base64");
+    expect(
+      personalDataEncryptionPreflight({
+        PAYEASE_PII_ENCRYPTION_KEYS_JSON: JSON.stringify({ v2: key }),
+        PAYEASE_PII_ENCRYPTION_KEY_VERSION: "v2",
+      }),
+    ).toEqual({ activeKeyVersion: "v2" });
+
+    expect(() =>
+      personalDataEncryptionPreflight({
+        PAYEASE_PII_ENCRYPTION_KEYS_JSON: JSON.stringify({ v1: key }),
+        PAYEASE_PII_ENCRYPTION_KEY_VERSION: "v2",
+      }),
+    ).toThrow("No personal-data encryption key is configured for version v2");
   });
 });

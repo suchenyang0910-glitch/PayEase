@@ -249,6 +249,7 @@ export function App(): JSX.Element {
   const [applicationHistory, setApplicationHistory] = useState<
     ApplicationListEntry[]
   >([]);
+  const [applicantSession, setApplicantSession] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -293,6 +294,7 @@ export function App(): JSX.Element {
       });
       if (!applications.ok) return;
       const payload = (await applications.json()) as ApplicationList;
+      setApplicantSession(true);
       if (payload.preferredLanguage) setLanguage(payload.preferredLanguage);
       setApplicationHistory(payload.applications);
       const latest = payload.applications[0];
@@ -417,6 +419,34 @@ export function App(): JSX.Element {
     });
   }
 
+  async function logoutApplicant() {
+    setLoading(true);
+    try {
+      const response = await fetch(
+        "/api/v1/local/public/telegram-sessions/logout",
+        { method: "POST", credentials: "include" },
+      );
+      if (!response.ok) throw new Error("LOGOUT_FAILED");
+      setApplicantSession(false);
+      setApplicationHistory([]);
+      setSummary(undefined);
+      setApprovedAmountMinor(undefined);
+      setApplicationNo("");
+      window.history.replaceState(null, "", window.location.pathname);
+      setStage("welcome");
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not sign you out. Please try again."
+          : language === "km"
+            ? "មិនអាចចាកចេញបានទេ។ សូមព្យាយាមម្ដងទៀត។"
+            : "暂时无法退出，请重试。",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const currentStep = visiblePhase
     ? progressStepForPhase(visiblePhase)
     : stage === "welcome" || stage === "details"
@@ -433,6 +463,19 @@ export function App(): JSX.Element {
         </div>
         <div className="top-actions">
           <span className="preview-pill">{t.demo}</span>
+          {applicantSession ? (
+            <button
+              className="logout-button"
+              disabled={loading}
+              onClick={() => void logoutApplicant()}
+            >
+              {language === "en"
+                ? "Sign out"
+                : language === "zh-CN"
+                  ? "退出"
+                  : "ចាកចេញ"}
+            </button>
+          ) : null}
           <select
             aria-label="Language"
             value={language}

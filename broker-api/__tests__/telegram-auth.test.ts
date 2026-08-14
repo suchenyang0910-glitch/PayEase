@@ -114,15 +114,31 @@ describe("Telegram multi-bot Mini App verification", () => {
   });
 
   it("treats a disabled bot as unavailable without disabling a healthy fallback bot", () => {
+    const disabledToken = "f".repeat(24);
+    const fallbackToken = "g".repeat(24);
     const bots = configuredTelegramBots(
       JSON.stringify([
-        { botId: "666666666", botToken: "f".repeat(24), enabled: false },
-        { botId: "777777777", botToken: "g".repeat(24), enabled: true },
+        { botId: "666666666", botToken: disabledToken, enabled: false },
+        { botId: "777777777", botToken: fallbackToken, enabled: true },
       ]),
     );
 
     expect(isTelegramBotEnabled("666666666", bots)).toBe(false);
     expect(isTelegramBotEnabled("777777777", bots)).toBe(true);
     expect(isTelegramBotEnabled("missing-bot", bots)).toBe(false);
+    expect(
+      verifyTelegramMiniAppInitData(
+        signedInitData(disabledToken),
+        bots,
+        2000000001,
+      ),
+    ).toBeUndefined();
+    expect(
+      verifyTelegramMiniAppInitData(
+        signedInitData(fallbackToken),
+        bots,
+        2000000001,
+      ),
+    ).toMatchObject({ authenticatedBotId: "777777777" });
   });
 });

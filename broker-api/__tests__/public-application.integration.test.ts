@@ -538,6 +538,7 @@ integration("public applicant access", () => {
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
           personalProfile,
+          personalDataAndPhoneConsent: true,
         },
       });
       expect(created.statusCode).toBe(201);
@@ -655,6 +656,7 @@ integration("public applicant access", () => {
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
           personalProfile,
+          personalDataAndPhoneConsent: true,
         },
       });
       expect(activeApplicationRetry.statusCode).toBe(409);
@@ -679,6 +681,7 @@ integration("public applicant access", () => {
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
           personalProfile,
+          personalDataAndPhoneConsent: true,
         },
       });
       expect(unresolvedRejectionRetry.statusCode).toBe(409);
@@ -718,6 +721,7 @@ integration("public applicant access", () => {
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
           personalProfile,
+          personalDataAndPhoneConsent: true,
         },
       });
       expect(eligibleRetry.statusCode).toBe(201);

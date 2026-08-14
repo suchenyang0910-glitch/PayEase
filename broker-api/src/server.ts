@@ -91,6 +91,8 @@ const apiSecurityHeaders = {
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
 } as const;
+const maxConsecutiveAdminLoginFailures = 5;
+const adminLoginFailureWindowMinutes = 15;
 
 function traceIdForRequest(header: string | string[] | undefined): string {
   const candidate = typeof header === "string" ? header.trim() : "";
@@ -684,6 +686,34 @@ async function addAuthenticationAuditEvent(
   );
 }
 
+async function hasExceededAdminLoginFailureLimit(
+  client: PoolClient,
+  loginNameHash: string,
+): Promise<boolean> {
+  // The audit ledger is append-only, so the latest success naturally resets
+  // the consecutive-failure sequence without a mutable lockout column. This
+  // remains consistent across replacement containers in the controlled pilot.
+  const recent = await client.query<{ event_type: string }>(
+    `SELECT event_type
+       FROM audit_events
+      WHERE entity_type = 'ADMIN_AUTH'
+        AND actor_user_ref = $1
+        AND occurred_at > now() - ($2::text || ' minutes')::interval
+        AND event_type IN ('AUTH_LOGIN_FAILURE', 'AUTH_LOGIN_SUCCESS')
+      ORDER BY occurred_at DESC, id DESC
+      LIMIT $3`,
+    [
+      loginNameHash,
+      String(adminLoginFailureWindowMinutes),
+      maxConsecutiveAdminLoginFailures,
+    ],
+  );
+  return (
+    recent.rows.length === maxConsecutiveAdminLoginFailures &&
+    recent.rows.every((event) => event.event_type === "AUTH_LOGIN_FAILURE")
+  );
+}
+
 async function createRepaymentSchedule(
   client: PoolClient,
   applicationId: string,
@@ -962,6 +992,11 @@ app.post("/v1/local/auth/login", async (request, reply) => {
       sourceIp: request.ip,
       userAgentHash: eventHash([request.headers["user-agent"] ?? ""]),
     };
+    if (await hasExceededAdminLoginFailureLimit(client, loginNameHash)) {
+      await client.query("COMMIT");
+      reply.header("Retry-After", String(adminLoginFailureWindowMinutes * 60));
+      return reply.code(429).send({ code: "LOGIN_RATE_LIMITED" });
+    }
     if (!(await verifyLoginPassword(input.password, row?.password_hash))) {
       await addAuthenticationAuditEvent(
         client,

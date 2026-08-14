@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0021__audit_trace_id.sql",
+      filename: "V0022__admin_login_failure_lookup.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -341,6 +341,49 @@ integration("public applicant access", () => {
         ORDER BY occurred_at DESC, id DESC LIMIT 1`,
     );
     expect(persistedTrace.rows).toEqual([{ trace_id: loginTraceId }]);
+  });
+
+  it("throttles a run of failed administrator logins before another password check", async () => {
+    const department = await database.query<{ id: string }>(
+      `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
+       VALUES ('OPS', 'THROTTLE_TEST', '节流测试', 'Throttle test', 'Throttle test')
+       RETURNING id`,
+    );
+    await database.query(
+      `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)
+       VALUES ($1, $2, $3, 'en')`,
+      [
+        "login-throttle-test",
+        await hashPassword("correct-throttle-password"),
+        department.rows[0]!.id,
+      ],
+    );
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const failed = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/auth/login",
+        payload: {
+          loginName: "login-throttle-test",
+          password: "wrong-throttle-password",
+        },
+      });
+      expect(failed.statusCode).toBe(401);
+      expect(failed.json()).toEqual({ code: "INVALID_CREDENTIALS" });
+    }
+
+    const limited = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/login",
+      payload: {
+        loginName: "login-throttle-test",
+        password: "correct-throttle-password",
+      },
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBe("900");
+    expect(limited.json()).toEqual({ code: "LOGIN_RATE_LIMITED" });
+    expect(limited.headers["set-cookie"]).toBeUndefined();
   });
 
   it("rejects a protected back-office mutation without the double-submit CSRF token", async () => {

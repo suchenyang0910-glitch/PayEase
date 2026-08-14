@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
 import {
   applicantPhase,
@@ -258,10 +258,6 @@ export function App(): JSX.Element {
   const visiblePhase = summary
     ? applicantPhase(summary.application.status)
     : undefined;
-  const repaymentHint = useMemo(
-    () => Math.ceil((amount * 1.03) / Math.max(1, term / 30)),
-    [amount, term],
-  );
 
   useEffect(() => {
     const existingApplication = new URLSearchParams(window.location.search).get(
@@ -589,19 +585,7 @@ export function App(): JSX.Element {
                   </button>
                 ))}
               </div>
-              <div className="estimate">
-                <div>
-                  <span>
-                    {language === "en"
-                      ? "Estimated monthly payment"
-                      : language === "km"
-                        ? "ការបង់ប្រចាំខែប៉ាន់ស្មាន"
-                        : "预估月还款"}
-                  </span>
-                  <strong>${repaymentHint.toLocaleString("en-US")}</strong>
-                </div>
-                <span className="estimate-note">{t.noOffer}</span>
-              </div>
+              <p className="estimate-note">{t.noOffer}</p>
               <button className="primary" onClick={() => setStage("details")}>
                 {t.start}
                 <span>→</span>

@@ -66,9 +66,13 @@ select {
 }
 .repayment-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 7px;
   margin-top: 13px;
+}
+.metric-grid div:last-child,
+.repayment-summary div:last-child {
+  grid-column: 1 / -1;
 }
 .repayment-summary b {
   font-size: 12px;

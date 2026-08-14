@@ -837,6 +837,23 @@ export function App(): JSX.Element {
                       : "—"}
                   </b>
                 </div>
+                <div>
+                  <span>
+                    {language === "en"
+                      ? "Loan term"
+                      : language === "km"
+                        ? "រយៈពេលកម្ចី"
+                        : "贷款期限"}
+                  </span>
+                  <b>
+                    {summary.application.tenorDays}{" "}
+                    {language === "en"
+                      ? "days"
+                      : language === "km"
+                        ? "ថ្ងៃ"
+                        : "天"}
+                  </b>
+                </div>
               </div>
               {summary.application.status === "CONTRACT_PENDING" ? (
                 <section
@@ -915,6 +932,16 @@ export function App(): JSX.Element {
                       <b>
                         {formatUsdMinor(summary.repayment.outstandingMinor)}
                       </b>
+                    </div>
+                    <div>
+                      <span>
+                        {language === "en"
+                          ? "Total paid"
+                          : language === "km"
+                            ? "សរុបបានបង់"
+                            : "已还金额"}
+                      </span>
+                      <b>{formatUsdMinor(summary.repayment.totalPaidMinor)}</b>
                     </div>
                     <div>
                       <span>

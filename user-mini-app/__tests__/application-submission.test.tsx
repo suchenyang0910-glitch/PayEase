@@ -189,8 +189,14 @@ describe("applicant submission", () => {
     expect(screen.getByText("$5.00")).toBeVisible();
     expect(screen.getByText("Total repayable")).toBeVisible();
     expect(screen.getByText("$255.00")).toBeVisible();
+    expect(screen.getByText("Loan term")).toBeVisible();
+    expect(screen.getByText("30 days")).toBeVisible();
     expect(screen.getByText("Paid periods")).toBeVisible();
     expect(screen.getByText("Unpaid periods")).toBeVisible();
+    expect(screen.getByText("Total paid")).toBeVisible();
+    expect(screen.getByText("Total paid").parentElement).toHaveTextContent(
+      "$127.50",
+    );
     expect(screen.getByText("Next payment")).toBeVisible();
     expect(screen.getAllByText(/#2.*2026-10-15/)).toHaveLength(2);
     expect(screen.getByText("Paid")).toBeVisible();

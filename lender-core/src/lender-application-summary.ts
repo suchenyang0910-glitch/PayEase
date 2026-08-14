@@ -1,5 +1,73 @@
 import { MoneySchema, formatHuman, type Money } from "@payease/shared-money";
 
+type LenderDisplayLanguage = "zh-CN" | "en" | "km";
+
+const APPLICATION_STATUS_LABELS: Readonly<
+  Record<LenderDisplayLanguage, Readonly<Record<string, string>>>
+> = {
+  en: {
+    DRAFT: "Draft",
+    SUBMITTED: "Submitted",
+    BROKER_REVIEW: "Broker review",
+    EMPLOYER_VERIFICATION: "Employer verification",
+    EMPLOYER_FINANCE_VERIFICATION: "Employer finance verification",
+    LENDER_INITIAL_REVIEW: "Initial credit review",
+    LENDER_FINAL_REVIEW: "Final credit review",
+    CONTRACT_PENDING: "Awaiting applicant confirmation",
+    USER_CONTRACT_CONFIRMED: "Applicant confirmed contract",
+    CONTRACT_CONFIRMED: "Contract confirmed",
+    DISBURSEMENT_PENDING: "Disbursement pending",
+    DISBURSED: "Disbursed",
+    REPAYMENT_ACTIVE: "Repayment active",
+    SETTLED: "Settled",
+    REJECTED: "Rejected",
+    CLOSED: "Closed",
+  },
+  "zh-CN": {
+    DRAFT: "草稿",
+    SUBMITTED: "已提交",
+    BROKER_REVIEW: "助贷审核中",
+    EMPLOYER_VERIFICATION: "企业在职核验中",
+    EMPLOYER_FINANCE_VERIFICATION: "企业财务核验中",
+    LENDER_INITIAL_REVIEW: "初审中",
+    LENDER_FINAL_REVIEW: "终审中",
+    CONTRACT_PENDING: "待用户确认合同",
+    USER_CONTRACT_CONFIRMED: "用户已确认合同",
+    CONTRACT_CONFIRMED: "合同已确认",
+    DISBURSEMENT_PENDING: "待放款",
+    DISBURSED: "已放款",
+    REPAYMENT_ACTIVE: "还款中",
+    SETTLED: "已结清",
+    REJECTED: "已拒绝",
+    CLOSED: "已关闭",
+  },
+  km: {
+    DRAFT: "សេចក្តីព្រាង",
+    SUBMITTED: "បានដាក់ស្នើ",
+    BROKER_REVIEW: "កំពុងត្រួតពិនិត្យដោយដៃគូជំនួយឥណទាន",
+    EMPLOYER_VERIFICATION: "កំពុងផ្ទៀងផ្ទាត់និយោជក",
+    EMPLOYER_FINANCE_VERIFICATION: "កំពុងផ្ទៀងផ្ទាត់ហិរញ្ញវត្ថុនិយោជក",
+    LENDER_INITIAL_REVIEW: "កំពុងពិនិត្យឥណទានដំបូង",
+    LENDER_FINAL_REVIEW: "កំពុងពិនិត្យឥណទានចុងក្រោយ",
+    CONTRACT_PENDING: "រង់ចាំការបញ្ជាក់កិច្ចសន្យាពីអ្នកប្រើ",
+    USER_CONTRACT_CONFIRMED: "អ្នកប្រើបានបញ្ជាក់កិច្ចសន្យា",
+    CONTRACT_CONFIRMED: "កិច្ចសន្យាបានបញ្ជាក់",
+    DISBURSEMENT_PENDING: "រង់ចាំការបញ្ចេញប្រាក់",
+    DISBURSED: "បានបញ្ចេញប្រាក់",
+    REPAYMENT_ACTIVE: "កំពុងសងប្រាក់",
+    SETTLED: "បានទូទាត់រួច",
+    REJECTED: "បានបដិសេធ",
+    CLOSED: "បានបិទ",
+  },
+};
+
+export function lenderApplicationStatusLabel(
+  status: string,
+  language: LenderDisplayLanguage,
+): string {
+  return APPLICATION_STATUS_LABELS[language][status] ?? status;
+}
+
 export type LenderApplicationSummary = Readonly<{
   application: Readonly<{
     applicationNo: string;

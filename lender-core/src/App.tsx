@@ -12,6 +12,7 @@ import {
 } from "./lender-copy.ts";
 import {
   allowedLenderActionRoutes,
+  lenderApplicationStatusLabel,
   parseLenderApplicationSummary,
   type LenderApplicationSummary,
 } from "./lender-application-summary.ts";
@@ -563,7 +564,12 @@ export function App(): JSX.Element {
                 }}
               >
                 <dt>{copy.applicationStatus}</dt>
-                <dd>{applicationSummary.application.status}</dd>
+                <dd>
+                  {lenderApplicationStatusLabel(
+                    applicationSummary.application.status,
+                    identity.preferredLanguage,
+                  )}
+                </dd>
                 <dt>{copy.requestedAmount}</dt>
                 <dd>
                   {formatHuman(applicationSummary.application.requestedAmount)}

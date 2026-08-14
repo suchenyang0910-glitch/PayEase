@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allowedLenderActionRoutes,
+  lenderApplicationStatusLabel,
   lenderSummaryLines,
   parseLenderApplicationSummary,
 } from "../src/lender-application-summary.ts";
@@ -88,5 +89,20 @@ describe("lender application summary", () => {
         },
       }),
     ).toBeUndefined();
+  });
+
+  it("renders application statuses in the operator's selected language", () => {
+    expect(lenderApplicationStatusLabel("DISBURSEMENT_PENDING", "en")).toBe(
+      "Disbursement pending",
+    );
+    expect(lenderApplicationStatusLabel("DISBURSEMENT_PENDING", "zh-CN")).toBe(
+      "待放款",
+    );
+    expect(lenderApplicationStatusLabel("DISBURSEMENT_PENDING", "km")).toBe(
+      "រង់ចាំការបញ្ចេញប្រាក់",
+    );
+    expect(lenderApplicationStatusLabel("FUTURE_STATUS", "en")).toBe(
+      "FUTURE_STATUS",
+    );
   });
 });

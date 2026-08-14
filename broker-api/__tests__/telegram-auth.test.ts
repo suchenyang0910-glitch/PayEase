@@ -142,7 +142,7 @@ describe("Telegram multi-bot Mini App verification", () => {
     ).toHaveLength(1);
   });
 
-  it("requires two configured Bots for production recovery while allowing one to be disabled", () => {
+  it("requires two configured Bots and public recovery links for enabled Bots", () => {
     expect(() =>
       requireTelegramRecoveryTopology(
         JSON.stringify([
@@ -153,11 +153,29 @@ describe("Telegram multi-bot Mini App verification", () => {
     expect(
       requireTelegramRecoveryTopology(
         JSON.stringify([
-          { botId: "100000002", botToken: "k".repeat(24), enabled: true },
+          {
+            botId: "100000002",
+            botToken: "k".repeat(24),
+            enabled: true,
+            entryUrl: "https://t.me/payease_primary?startapp=apply",
+          },
           { botId: "100000003", botToken: "l".repeat(24), enabled: false },
         ]),
       ),
     ).toHaveLength(2);
+    expect(() =>
+      requireTelegramRecoveryTopology(
+        JSON.stringify([
+          { botId: "100000004", botToken: "m".repeat(24), enabled: true },
+          {
+            botId: "100000005",
+            botToken: "n".repeat(24),
+            enabled: true,
+            entryUrl: "https://t.me/payease_recovery?startapp=apply",
+          },
+        ]),
+      ),
+    ).toThrow("public recovery entry URL");
   });
 
   it("treats a disabled bot as unavailable without disabling a healthy fallback bot", () => {

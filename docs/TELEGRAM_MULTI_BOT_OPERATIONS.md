@@ -14,8 +14,9 @@ Bot 签名、且在有效期内的 Mini App `initData`。用户记录以 Telegra
 ## 2. 多 Bot 配置
 
 在 API 服务的受控部署环境配置 `TELEGRAM_BOTS_JSON`。生产启动要求至少配置两个不同
-Bot，且至少一个处于 `enabled: true`；事故期间可停用其中一个，同时保留健康入口。每个
-Bot 都应设置同一个 PayEase Mini App URL。
+Bot，且至少一个处于 `enabled: true`；**每个已启用 Bot 必须有合法的公开 `entryUrl`**，否则
+预检和 API 启动都会失败。事故期间可停用其中一个，同时保留健康入口。每个 Bot 都应设置
+同一个 PayEase Mini App URL。
 
 ```json
 [
@@ -34,9 +35,9 @@ Bot 都应设置同一个 PayEase Mini App URL。
 ]
 ```
 
-`entryUrl` 可选，但生产建议为每个 Bot 填写其公开 HTTPS `t.me` 深链接；格式不合法会阻止
-API 启动。用户会话失效时，Mini App 只请求并展示 **已启用** Bot 的这些公开入口，以便用户
-立即切换；此接口绝不返回 Bot ID、Token 或任何申请资料。
+对已启用 Bot，`entryUrl` 是必填项；它必须是该 Bot 的公开 HTTPS `t.me` 深链接，格式不合法
+会阻止 API 启动。用户会话失效时，Mini App 只请求并展示 **已启用** Bot 的这些公开入口，以便
+用户立即切换；此接口绝不返回 Bot ID、Token 或任何申请资料。
 
 还必须设置：
 
@@ -95,7 +96,7 @@ PII 活跃密钥版本与 `ready` 状态，**不会**输出 Token 或加密密�
 
 当 Telegram 认证开启时，预检同时要求：
 
-- 至少两个不同的已配置 Bot（其中至少一个启用）；
+- 至少两个不同的已配置 Bot，且每个已启用 Bot 都有合法的公开 `entryUrl`；
 - `PAYEASE_PII_ENCRYPTION_KEY`，或当前
   `PAYEASE_PII_ENCRYPTION_KEY_VERSION` 在 `PAYEASE_PII_ENCRYPTION_KEYS_JSON`
   中对应的有效 Base64 32-byte AES-256-GCM 密钥。

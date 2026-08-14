@@ -9,11 +9,13 @@ const validRecoveryBots = JSON.stringify([
     botId: "123456789",
     botToken: "preflight-token-one-not-real-00001",
     enabled: true,
+    entryUrl: "https://t.me/payease_primary?startapp=apply",
   },
   {
     botId: "987654321",
     botToken: "preflight-token-two-not-real-00002",
     enabled: true,
+    entryUrl: "https://t.me/payease_recovery?startapp=apply",
   },
 ]);
 const validPiiKey = Buffer.alloc(32, 4).toString("base64");
@@ -46,6 +48,7 @@ describe("Telegram deployment preflight", () => {
           botId: "123456789",
           botToken: "preflight-token-one-not-real-00001",
           enabled: true,
+          entryUrl: "https://t.me/payease_primary?startapp=apply",
         },
       ]),
       PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,

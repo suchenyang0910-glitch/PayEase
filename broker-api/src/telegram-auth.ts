@@ -130,6 +130,16 @@ export function requireTelegramRecoveryTopology(
       "TELEGRAM_BOTS_JSON must contain at least two distinct Telegram bots for recovery",
     );
   }
+  // A second configured Bot is not a usable recovery path unless the Mini App
+  // can safely show a public deep link to it after a session is invalidated.
+  // Require this only for enabled Bots: during an incident an operator may
+  // deliberately disable the affected Bot while retaining its configuration
+  // for audit and rotation.
+  if (bots.some((bot) => bot.enabled && !bot.entryUrl)) {
+    throw new Error(
+      "Every enabled Telegram bot must configure a public recovery entry URL",
+    );
+  }
   return bots;
 }
 

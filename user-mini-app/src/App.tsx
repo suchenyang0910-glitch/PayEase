@@ -16,6 +16,7 @@ import {
 } from "./application-result.ts";
 import { applicantSessionRecoveryMessage } from "./applicant-session-message.ts";
 import { shouldKeepApplicantSessionAlive } from "./applicant-session-keepalive.ts";
+import { isControlledPreviewBuild } from "./deployment-mode.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
 import "./app.css";
 
@@ -448,6 +449,9 @@ export function App(): JSX.Element {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
+  const showPreviewBadge = isControlledPreviewBuild(
+    import.meta.env.VITE_PAYEASE_DEPLOYMENT_MODE,
+  );
   const result = applicantResult(summary?.application);
   const lifecycleCopy = applicantLifecycleCopy(result, language);
   const visiblePhase = summary
@@ -978,7 +982,9 @@ export function App(): JSX.Element {
           <strong>{t.brand}</strong>
         </div>
         <div className="top-actions">
-          <span className="preview-pill">{t.demo}</span>
+          {showPreviewBadge ? (
+            <span className="preview-pill">{t.demo}</span>
+          ) : null}
           {applicantSession ? (
             <button
               className="logout-button"

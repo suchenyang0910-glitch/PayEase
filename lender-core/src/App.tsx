@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { finalReviewPayload, type ReviewDecision } from "./review-payload";
+import { LENDER_COPY, type LenderActionKey } from "./lender-copy";
 
 type Identity = {
   loginName: string;
@@ -80,7 +81,7 @@ function SignIn({
 }
 
 type Action = {
-  label: string;
+  labelKey: LenderActionKey;
   route: string;
   body: () => object;
   roles: string[];
@@ -109,15 +110,16 @@ export function App(): JSX.Element {
   }, []);
   if (checking) return <main style={shell}>Checking secure session…</main>;
   if (!identity) return <SignIn complete={setIdentity} />;
+  const copy = LENDER_COPY[identity.preferredLanguage];
   const actions: Action[] = [
     {
-      label: "Record initial review decision",
+      labelKey: "initialReview",
       route: "lender-initial-review",
       body: () => ({ decision: reviewDecision, reasonCode }),
       roles: ["LENDER_CREDIT_OFFICER"],
     },
     {
-      label: "Record final review decision",
+      labelKey: "finalReview",
       route: "lender-final-review",
       body: () =>
         finalReviewPayload(reviewDecision, reasonCode, {
@@ -130,49 +132,49 @@ export function App(): JSX.Element {
       roles: ["LENDER_CREDIT_REVIEWER"],
     },
     {
-      label: "Confirm reapplication condition resolved",
+      labelKey: "resolveReapplication",
       route: "reapplication-condition-resolved",
       body: () => ({ reasonCode }),
       roles: ["LENDER_CREDIT_OFFICER"],
     },
     {
-      label: "Confirm contract",
+      labelKey: "confirmContract",
       route: "contract-confirmation",
       body: () => ({ evidenceReference }),
       roles: ["LENDER_CONTRACT_OFFICER"],
     },
     {
-      label: "Open disbursement",
+      labelKey: "openDisbursement",
       route: "open-disbursement",
       body: () => ({ reasonCode }),
       roles: ["LENDER_DISBURSEMENT_MAKER"],
     },
     {
-      label: "Record disbursement maker approval",
+      labelKey: "disbursementMaker",
       route: "disbursement-release",
       body: () => ({ reasonCode }),
       roles: ["LENDER_DISBURSEMENT_MAKER"],
     },
     {
-      label: "Confirm disbursement (different account)",
+      labelKey: "disbursementChecker",
       route: "disbursement-confirmation",
       body: () => ({ reasonCode, evidenceReference }),
       roles: ["LENDER_DISBURSEMENT_CHECKER"],
     },
     {
-      label: "Activate repayment",
+      labelKey: "activateRepayment",
       route: "activate-repayment",
       body: () => ({ reasonCode }),
       roles: ["LENDER_REPAYMENT_MAKER"],
     },
     {
-      label: "Record repayment maker approval",
+      labelKey: "repaymentMaker",
       route: "repayment-write-off",
       body: () => ({ reasonCode }),
       roles: ["LENDER_REPAYMENT_MAKER"],
     },
     {
-      label: "Confirm repayment (different account)",
+      labelKey: "repaymentChecker",
       route: "repayment-confirmation",
       body: () => ({ reasonCode, evidenceReference }),
       roles: ["LENDER_REPAYMENT_CHECKER"],
@@ -189,8 +191,8 @@ export function App(): JSX.Element {
     const payload = await response.json().catch(() => ({}));
     setNotice(
       response.ok
-        ? `Recorded: ${JSON.stringify(payload)}`
-        : `Blocked (${response.status}): ${JSON.stringify(payload)}`,
+        ? `${copy.recorded}: ${JSON.stringify(payload)}`
+        : `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
     );
   };
   const logout = async () => {
@@ -215,7 +217,7 @@ export function App(): JSX.Element {
         style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
       >
         <div>
-          <h1>PayEase lender console</h1>
+          <h1>{copy.title}</h1>
           <p>
             {identity.loginName} ·{" "}
             <select
@@ -232,18 +234,14 @@ export function App(): JSX.Element {
             </select>
           </p>
         </div>
-        <button onClick={logout}>Sign out</button>
+        <button onClick={logout}>{copy.signOut}</button>
       </header>
       <section style={card}>
-        <h2>Controlled manual approval</h2>
-        <p>
-          Each action is permitted only to the server-side roles assigned to
-          this account. Disbursement and repayment require two different
-          accounts.
-        </p>
+        <h2>{copy.manualApproval}</h2>
+        <p>{copy.manualApprovalDescription}</p>
         <div style={form}>
           <label>
-            Application number
+            {copy.applicationNumber}
             <input
               value={applicationNo}
               onChange={(e) => setApplicationNo(e.target.value)}
@@ -252,7 +250,7 @@ export function App(): JSX.Element {
             />
           </label>
           <label>
-            Reason code
+            {copy.reasonCode}
             <input
               value={reasonCode}
               onChange={(e) => setReasonCode(e.target.value)}
@@ -263,16 +261,16 @@ export function App(): JSX.Element {
             ["LENDER_CREDIT_OFFICER", "LENDER_CREDIT_REVIEWER"].includes(role),
           ) ? (
             <label>
-              Credit review decision
+              {copy.creditDecision}
               <select
                 value={reviewDecision}
                 onChange={(event) =>
                   setReviewDecision(event.target.value as ReviewDecision)
                 }
               >
-                <option value="APPROVED">Approve</option>
-                <option value="REJECTED">Reject</option>
-                <option value="RETURNED">Return for correction</option>
+                <option value="APPROVED">{copy.approve}</option>
+                <option value="REJECTED">{copy.reject}</option>
+                <option value="RETURNED">{copy.returnForCorrection}</option>
               </select>
             </label>
           ) : null}
@@ -280,7 +278,7 @@ export function App(): JSX.Element {
           reviewDecision === "APPROVED" ? (
             <>
               <label>
-                Approved amount (USD cents; 1000–50000)
+                {copy.approvedAmount}
                 <input
                   inputMode="numeric"
                   value={approvedAmountMinor}
@@ -291,7 +289,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Service fee (USD cents; may be 0)
+                {copy.serviceFee}
                 <input
                   inputMode="numeric"
                   value={serviceFeeMinor}
@@ -300,7 +298,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Total repayable (USD cents; principal + all approved charges)
+                {copy.totalRepayable}
                 <input
                   inputMode="numeric"
                   value={totalRepayableMinor}
@@ -311,7 +309,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Installments (1–6)
+                {copy.installments}
                 <input
                   inputMode="numeric"
                   value={installmentCount}
@@ -320,7 +318,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                First repayment due date
+                {copy.firstDueDate}
                 <input
                   type="date"
                   value={firstDueDate}
@@ -331,7 +329,7 @@ export function App(): JSX.Element {
             </>
           ) : null}
           <label>
-            Contract / funds evidence reference
+            {copy.evidenceReference}
             <input
               value={evidenceReference}
               onChange={(e) => setEvidenceReference(e.target.value)}
@@ -348,13 +346,11 @@ export function App(): JSX.Element {
               disabled={!applicationNo}
               onClick={() => run(action)}
             >
-              {action.label}
+              {copy.actions[action.labelKey]}
             </button>
           ))}
         </div>
-        {available.length === 0 ? (
-          <p>Your account has no lender-operation role.</p>
-        ) : null}
+        {available.length === 0 ? <p>{copy.noRole}</p> : null}
         {notice ? (
           <pre role="status" style={{ whiteSpace: "pre-wrap" }}>
             {notice}

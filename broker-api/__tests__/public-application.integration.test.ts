@@ -189,6 +189,14 @@ integration("public applicant access", () => {
     expect(valid.statusCode).toBe(200);
     expect(valid.headers["set-cookie"]).toContain("HttpOnly");
 
+    const logout = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/logout",
+      headers: { cookie: String(valid.headers["set-cookie"]).split(";")[0]! },
+    });
+    expect(logout.statusCode).toBe(204);
+    expect(logout.headers["set-cookie"]).toContain("Max-Age=0");
+
     const loginAudit = await database.query<{
       event_type: string;
       actor_user_ref: string;
@@ -212,6 +220,12 @@ integration("public applicant access", () => {
       },
       {
         event_type: "AUTH_LOGIN_SUCCESS",
+        actor_user_ref: createHash("sha256")
+          .update("login-boundary-test")
+          .digest("hex"),
+      },
+      {
+        event_type: "AUTH_LOGOUT",
         actor_user_ref: createHash("sha256")
           .update("login-boundary-test")
           .digest("hex"),

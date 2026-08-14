@@ -393,7 +393,7 @@ async function addAuditEvent(
 async function addAuthenticationAuditEvent(
   client: PoolClient,
   entityId: string,
-  eventType: "AUTH_LOGIN_SUCCESS" | "AUTH_LOGIN_FAILURE",
+  eventType: "AUTH_LOGIN_SUCCESS" | "AUTH_LOGIN_FAILURE" | "AUTH_LOGOUT",
   actorUserRef: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
@@ -691,11 +691,45 @@ app.post("/v1/local/auth/login", async (request, reply) => {
 
 app.post("/v1/local/auth/logout", async (request, reply) => {
   const token = sessionToken(request.headers.cookie);
-  if (token) {
-    await pool.query(
-      "UPDATE admin_sessions SET revoked_at = now() WHERE token_hash = $1",
+  if (!token) {
+    reply.header(
+      "Set-Cookie",
+      "payease_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
+    );
+    return reply.code(204).send();
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const revoked = await client.query<{
+      account_id: string;
+      login_name: string;
+    }>(
+      `UPDATE admin_sessions AS session
+          SET revoked_at = now()
+         FROM admin_accounts AS account
+        WHERE session.token_hash = $1
+          AND session.account_id = account.id
+          AND session.revoked_at IS NULL
+        RETURNING session.account_id, account.login_name`,
       [eventHash([token])],
     );
+    const row = revoked.rows[0];
+    if (row) {
+      await addAuthenticationAuditEvent(
+        client,
+        row.account_id,
+        "AUTH_LOGOUT",
+        eventHash([row.login_name]),
+        { reason: "USER_INITIATED_LOGOUT" },
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
   reply.header(
     "Set-Cookie",

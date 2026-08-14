@@ -68,7 +68,7 @@ function Login({
           const preference = await request(
             "/v1/local/auth/me/preferred-language",
             {
-              method: "PUT",
+              method: "PATCH",
               body: JSON.stringify({ preferredLanguage: language }),
             },
           );

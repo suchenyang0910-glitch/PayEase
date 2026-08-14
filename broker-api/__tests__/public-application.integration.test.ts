@@ -191,7 +191,7 @@ integration("public applicant access", () => {
     const sessionCookie = String(valid.headers["set-cookie"]).split(";")[0]!;
 
     const languagePreference = await brokerApi.app.inject({
-      method: "PUT",
+      method: "PATCH",
       url: "/v1/local/auth/me/preferred-language",
       headers: { cookie: sessionCookie },
       payload: { preferredLanguage: "zh-CN" },

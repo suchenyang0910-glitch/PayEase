@@ -58,7 +58,7 @@ function SignIn({
       if (identity.preferredLanguage !== language) {
         try {
           const preference = await api("/v1/local/auth/me/preferred-language", {
-            method: "PUT",
+            method: "PATCH",
             body: JSON.stringify({ preferredLanguage: language }),
           });
           if (preference.ok) {

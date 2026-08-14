@@ -390,6 +390,40 @@ async function addAuditEvent(
   );
 }
 
+async function addAuthenticationAuditEvent(
+  client: PoolClient,
+  entityId: string,
+  eventType: "AUTH_LOGIN_SUCCESS" | "AUTH_LOGIN_FAILURE",
+  actorUserRef: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  // The immutable audit table stores a payload commitment rather than the
+  // payload itself. Keep raw login names, user agents and credentials out of
+  // the ledger; operators can correlate events through the opaque actor hash.
+  const payloadHash = eventHash([JSON.stringify(payload), randomUUID()]);
+  const previous = await client.query<{ event_hash: string }>(
+    `SELECT event_hash FROM audit_events
+      WHERE entity_type = 'ADMIN_AUTH' AND entity_id = $1
+      ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+    [entityId],
+  );
+  const previousHash = previous.rows[0]?.event_hash ?? null;
+  const auditHash = eventHash([
+    "ADMIN_AUTH",
+    entityId,
+    eventType,
+    actorUserRef,
+    payloadHash,
+    previousHash ?? "",
+  ]);
+  await client.query(
+    `INSERT INTO audit_events
+      (entity_type, entity_id, event_type, actor_user_ref, payload_hash, previous_event_hash, event_hash, occurred_at)
+     VALUES ('ADMIN_AUTH', $1, $2, $3, $4, $5, $6, now())`,
+    [entityId, eventType, actorUserRef, payloadHash, previousHash, auditHash],
+  );
+}
+
 async function createRepaymentSchedule(
   client: PoolClient,
   applicationId: string,
@@ -598,31 +632,61 @@ app.post("/v1/local/auth/bootstrap", async (request, reply) => {
 
 app.post("/v1/local/auth/login", async (request, reply) => {
   const input = loginSchema.parse(request.body);
-  const account = await pool.query<{
-    id: string;
-    password_hash: string;
-    preferred_language: string;
-  }>(
-    "SELECT id, password_hash, preferred_language FROM admin_accounts WHERE login_name = $1 AND is_active = true",
-    [input.loginName],
-  );
-  const row = account.rows[0];
-  if (!(await verifyLoginPassword(input.password, row?.password_hash))) {
-    return reply.code(401).send({ code: "INVALID_CREDENTIALS" });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const account = await client.query<{
+      id: string;
+      password_hash: string;
+      preferred_language: string;
+    }>(
+      "SELECT id, password_hash, preferred_language FROM admin_accounts WHERE login_name = $1 AND is_active = true",
+      [input.loginName],
+    );
+    const row = account.rows[0];
+    const loginNameHash = eventHash([input.loginName]);
+    const authPayload = {
+      sourceIp: request.ip,
+      userAgentHash: eventHash([request.headers["user-agent"] ?? ""]),
+    };
+    if (!(await verifyLoginPassword(input.password, row?.password_hash))) {
+      await addAuthenticationAuditEvent(
+        client,
+        row?.id ?? randomUUID(),
+        "AUTH_LOGIN_FAILURE",
+        loginNameHash,
+        authPayload,
+      );
+      await client.query("COMMIT");
+      return reply.code(401).send({ code: "INVALID_CREDENTIALS" });
+    }
+    const token = randomBytes(32).toString("base64url");
+    await client.query(
+      "INSERT INTO admin_sessions (token_hash, account_id, expires_at) VALUES ($1, $2, now() + interval '8 hours')",
+      [eventHash([token]), row.id],
+    );
+    await addAuthenticationAuditEvent(
+      client,
+      row.id,
+      "AUTH_LOGIN_SUCCESS",
+      loginNameHash,
+      authPayload,
+    );
+    await client.query("COMMIT");
+    reply.header(
+      "Set-Cookie",
+      `payease_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
+    );
+    return {
+      loginName: input.loginName,
+      preferredLanguage: row.preferred_language,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-  const token = randomBytes(32).toString("base64url");
-  await pool.query(
-    "INSERT INTO admin_sessions (token_hash, account_id, expires_at) VALUES ($1, $2, now() + interval '8 hours')",
-    [eventHash([token]), row.id],
-  );
-  reply.header(
-    "Set-Cookie",
-    `payease_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
-  );
-  return {
-    loginName: input.loginName,
-    preferredLanguage: row.preferred_language,
-  };
 });
 
 app.post("/v1/local/auth/logout", async (request, reply) => {

@@ -177,6 +177,46 @@ integration("public applicant access", () => {
     expect(wrongPassword.json()).toEqual({ code: "INVALID_CREDENTIALS" });
     expect(unknown.headers["set-cookie"]).toBeUndefined();
     expect(wrongPassword.headers["set-cookie"]).toBeUndefined();
+
+    const valid = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/login",
+      payload: {
+        loginName: "login-boundary-test",
+        password: "correct-login-password",
+      },
+    });
+    expect(valid.statusCode).toBe(200);
+    expect(valid.headers["set-cookie"]).toContain("HttpOnly");
+
+    const loginAudit = await database.query<{
+      event_type: string;
+      actor_user_ref: string;
+    }>(
+      `SELECT event_type, actor_user_ref FROM audit_events
+        WHERE entity_type = 'ADMIN_AUTH'
+        ORDER BY occurred_at ASC, id ASC`,
+    );
+    expect(loginAudit.rows).toEqual([
+      {
+        event_type: "AUTH_LOGIN_FAILURE",
+        actor_user_ref: createHash("sha256")
+          .update("missing-login-account")
+          .digest("hex"),
+      },
+      {
+        event_type: "AUTH_LOGIN_FAILURE",
+        actor_user_ref: createHash("sha256")
+          .update("login-boundary-test")
+          .digest("hex"),
+      },
+      {
+        event_type: "AUTH_LOGIN_SUCCESS",
+        actor_user_ref: createHash("sha256")
+          .update("login-boundary-test")
+          .digest("hex"),
+      },
+    ]);
   });
 
   it("returns full loan and repayment details only to the application's opaque cookie", async () => {

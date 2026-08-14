@@ -424,9 +424,20 @@ integration("public applicant access", () => {
       botId: "987654321",
       botToken: "987654321:integration-bot-token-bravo-123456",
     };
-    process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
     process.env.REQUIRE_TELEGRAM_AUTH = "true";
     try {
+      // A deployment configuration error may be logged for operators, but its
+      // parser detail must never reach a public client response.
+      process.env.TELEGRAM_BOTS_JSON = "{not-valid-json";
+      const malformedConfig = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions",
+        payload: { initData: "x".repeat(32) },
+      });
+      expect(malformedConfig.statusCode).toBe(500);
+      expect(malformedConfig.json()).toEqual({ code: "INTERNAL_ERROR" });
+
+      process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
       const personalProfile = {
         fullName: "Authenticated Applicant",
         phone: "+85512345678",

@@ -65,14 +65,18 @@ const app = Fastify({ logger: true });
 
 // Schema failures are client input errors.  Never surface them as a 500, which
 // would make malformed public submissions look like a service outage.
-app.setErrorHandler((error, _request, reply) => {
+app.setErrorHandler((error, request, reply) => {
   if (error instanceof z.ZodError) {
     return reply.code(400).send({
       code: "VALIDATION_ERROR",
       fields: error.issues.map((issue) => issue.path.join(".")),
     });
   }
-  reply.send(error);
+  // Internal errors can contain database constraint names, ciphertext parsing
+  // details, or other operational context. Log them for operators, but do not
+  // expose that detail to an applicant or back-office browser.
+  request.log.error({ err: error }, "Unhandled PayEase API error");
+  return reply.code(500).send({ code: "INTERNAL_ERROR" });
 });
 
 function sessionToken(cookieHeader: string | undefined): string | undefined {

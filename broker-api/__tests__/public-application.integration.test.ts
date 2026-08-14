@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { createHash, createHmac } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { decryptPersonalProfile } from "../src/personal-profile.js";
+import {
+  decryptPersonalProfile,
+  decryptPersonalValue,
+} from "../src/personal-profile.js";
 import { hashPassword } from "../src/passwords.js";
 
 // Never infer a destructive test target from a developer's generic
@@ -113,6 +116,7 @@ integration("public applicant access", () => {
       "V0015__manual_action_idempotency.sql",
       "V0016__telegram_session_idle_timeout.sql",
       "V0017__allow_precontract_applicant_withdrawal.sql",
+      "V0018__applicant_service_cases.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -1551,5 +1555,174 @@ integration("public applicant access", () => {
       [applicationNo],
     );
     expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(11);
+  });
+
+  it("keeps complaint text encrypted while routing the final outcome to the licensed lender", async () => {
+    const applicantRef = "telegram-service-case-applicant";
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ($1, 'km') RETURNING id`,
+      [applicantRef],
+    );
+    const applicationNo = "APP-20260815-SERVICE";
+    const application = await database.query<{ id: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ($1, $2, 10000, 'USD', 30, 'REPAYMENT_ACTIVE') RETURNING id`,
+      [applicationNo, user.rows[0]!.id],
+    );
+    const applicantToken = "service-case-applicant-token";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, $2, '444444444', now() + interval '15 minutes', now())`,
+      [createHash("sha256").update(applicantToken).digest("hex"), applicantRef],
+    );
+    const applicantCookie = `__Host-payease_applicant_session=${applicantToken}`;
+
+    const unauthenticatedCreate = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/service-cases`,
+      payload: {
+        caseType: "COMPLAINT",
+        message: "This should require Telegram authentication.",
+      },
+    });
+    expect(unauthenticatedCreate.statusCode).toBe(401);
+
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/service-cases`,
+      headers: { cookie: applicantCookie },
+      payload: {
+        caseType: "COMPLAINT",
+        message:
+          "Please review the payment information shown for my application.",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const caseNo = (created.json() as { caseNo: string }).caseNo;
+    expect(created.json()).toMatchObject({
+      caseNo,
+      caseType: "COMPLAINT",
+      status: "OPEN",
+    });
+
+    const stored = await database.query<{
+      message_encrypted: Buffer;
+      message_key_version: string;
+    }>(
+      "SELECT message_encrypted, message_key_version FROM applicant_service_cases WHERE case_no = $1",
+      [caseNo],
+    );
+    expect(stored.rows[0]?.message_encrypted.toString("utf8")).not.toContain(
+      "payment information",
+    );
+    expect(decryptPersonalValue(stored.rows[0]!.message_encrypted)).toBe(
+      "Please review the payment information shown for my application.",
+    );
+    expect(stored.rows[0]?.message_key_version).toBe("v1");
+
+    const applicantList = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/applications/${applicationNo}/service-cases`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(applicantList.statusCode).toBe(200);
+    expect(applicantList.json()).toMatchObject({
+      cases: [{ caseNo, caseType: "COMPLAINT", status: "OPEN" }],
+    });
+    expect(JSON.stringify(applicantList.json())).not.toContain(
+      "payment information",
+    );
+
+    const employerDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/service-cases/${caseNo}`,
+      headers: {
+        cookie: await adminCookieForRole(database, "EMPLOYER_HR", "EMPLOYER"),
+      },
+    });
+    expect(employerDetail.statusCode).toBe(403);
+
+    const brokerCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+    const queue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/service-cases/open",
+      headers: { cookie: brokerCookie },
+    });
+    expect(queue.statusCode).toBe(200);
+    expect(queue.json()).toMatchObject({
+      cases: [
+        { caseNo, applicationNo, applicantLanguage: "km", status: "OPEN" },
+      ],
+    });
+    const detail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/service-cases/${caseNo}`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      caseNo,
+      applicationNo,
+      message:
+        "Please review the payment information shown for my application.",
+    });
+    const referred = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/refer-to-lender`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(referred.statusCode).toBe(200);
+    expect(referred.json()).toEqual({ caseNo, status: "REFERRED_TO_LENDER" });
+
+    const lenderCookie = await lenderCreditOfficerCookie(database);
+    const lenderDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/service-cases/${caseNo}`,
+      headers: { cookie: lenderCookie },
+    });
+    expect(lenderDetail.statusCode).toBe(200);
+    expect(lenderDetail.json()).toMatchObject({
+      caseNo,
+      message:
+        "Please review the payment information shown for my application.",
+    });
+    const resolved = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/lender-resolution`,
+      headers: { cookie: lenderCookie },
+      payload: { reasonCode: "LENDER_RESPONSE_RECORDED" },
+    });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json()).toEqual({ caseNo, status: "RESOLVED" });
+    const repeatedResolution = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/lender-resolution`,
+      headers: { cookie: lenderCookie },
+      payload: { reasonCode: "LENDER_RESPONSE_RECORDED" },
+    });
+    expect(repeatedResolution.statusCode).toBe(200);
+    const customerCaseAudits = await database.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM audit_events
+        WHERE entity_type = 'SERVICE_CASE'
+          AND entity_id = (SELECT id FROM applicant_service_cases WHERE case_no = $1)`,
+      [caseNo],
+    );
+    expect(Number(customerCaseAudits.rows[0]?.count)).toBe(5);
+    const finalApplicantList = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/applications/${applicationNo}/service-cases`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(finalApplicantList.json()).toMatchObject({
+      cases: [{ caseNo, status: "RESOLVED" }],
+    });
+    expect(application.rows[0]?.id).toBeDefined();
   });
 });

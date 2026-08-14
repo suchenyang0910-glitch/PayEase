@@ -25,6 +25,48 @@ type PersonalProfileResponse = Readonly<{
     phoneConsentedAt: string | null;
   };
 }>;
+type ServiceCaseQueueEntry = Readonly<{
+  caseNo: string;
+  applicationNo: string;
+  caseType: "SERVICE_QUERY" | "COMPLAINT";
+  status: "OPEN" | "ACKNOWLEDGED" | "REFERRED_TO_LENDER";
+  applicantLanguage: Language;
+  createdAt: string;
+}>;
+type ServiceCaseDetail = Readonly<
+  ServiceCaseQueueEntry & {
+    message: string;
+  }
+>;
+
+function isServiceCaseQueueResponse(
+  payload: unknown,
+): payload is { cases: ServiceCaseQueueEntry[] } {
+  if (!payload || typeof payload !== "object") return false;
+  const cases = (payload as { cases?: unknown }).cases;
+  return (
+    Array.isArray(cases) &&
+    cases.every(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as { caseNo?: unknown }).caseNo === "string" &&
+        typeof (entry as { applicationNo?: unknown }).applicationNo ===
+          "string",
+    )
+  );
+}
+
+function isServiceCaseDetail(payload: unknown): payload is ServiceCaseDetail {
+  return (
+    Boolean(payload) &&
+    typeof payload === "object" &&
+    typeof (payload as { caseNo?: unknown }).caseNo === "string" &&
+    typeof (payload as { applicationNo?: unknown }).applicationNo ===
+      "string" &&
+    typeof (payload as { message?: unknown }).message === "string"
+  );
+}
 
 function isPersonalProfileResponse(
   payload: unknown,
@@ -170,6 +212,10 @@ export function App(): JSX.Element {
   const [personalProfile, setPersonalProfile] =
     useState<PersonalProfileResponse>();
   const [profileLoading, setProfileLoading] = useState(false);
+  const [serviceCases, setServiceCases] = useState<ServiceCaseQueueEntry[]>([]);
+  const [selectedServiceCase, setSelectedServiceCase] =
+    useState<ServiceCaseDetail>();
+  const [serviceCaseLoading, setServiceCaseLoading] = useState(false);
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
   const [accounts, setAccounts] = useState<DirectoryAccount[]>([]);
@@ -342,6 +388,90 @@ export function App(): JSX.Element {
       setProfileLoading(false);
     }
   };
+  const loadServiceCases = async () => {
+    setServiceCaseLoading(true);
+    setNotice("");
+    try {
+      const response = await request("/v1/local/service-cases/open");
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (!response.ok || !isServiceCaseQueueResponse(payload)) {
+        setNotice(
+          identity?.preferredLanguage === "zh-CN"
+            ? "暂时无法加载客服工单。"
+            : identity?.preferredLanguage === "km"
+              ? "មិនអាចផ្ទុកសំណើសេវាកម្មបានទេ។"
+              : "Support cases are currently unavailable.",
+        );
+        return;
+      }
+      setServiceCases(payload.cases);
+    } finally {
+      setServiceCaseLoading(false);
+    }
+  };
+  const viewServiceCase = async (caseNo: string) => {
+    setServiceCaseLoading(true);
+    setNotice("");
+    try {
+      const response = await request(
+        `/v1/local/service-cases/${encodeURIComponent(caseNo)}`,
+      );
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (!response.ok || !isServiceCaseDetail(payload)) {
+        setNotice(
+          identity?.preferredLanguage === "zh-CN"
+            ? "暂时无法读取工单详情。"
+            : identity?.preferredLanguage === "km"
+              ? "មិនអាចអានព័ត៌មានលម្អិតនៃសំណើបានទេ។"
+              : "Support case details are currently unavailable.",
+        );
+        return;
+      }
+      setSelectedServiceCase(payload);
+    } finally {
+      setServiceCaseLoading(false);
+    }
+  };
+  const referServiceCaseToLender = async (caseNo: string) => {
+    setServiceCaseLoading(true);
+    setNotice("");
+    try {
+      const response = await request(
+        `/v1/local/service-cases/${encodeURIComponent(caseNo)}/refer-to-lender`,
+        { method: "POST" },
+      );
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      if (!response.ok) {
+        setNotice(
+          identity?.preferredLanguage === "zh-CN"
+            ? "工单暂时无法转交持牌机构。"
+            : identity?.preferredLanguage === "km"
+              ? "មិនអាចបញ្ជូនសំណើទៅស្ថាប័នមានអាជ្ញាប័ណ្ណបានទេ។"
+              : "The case could not be referred to the licensed lender.",
+        );
+        return;
+      }
+      setSelectedServiceCase((current) =>
+        current?.caseNo === caseNo
+          ? { ...current, status: "REFERRED_TO_LENDER" }
+          : current,
+      );
+      await loadServiceCases();
+    } finally {
+      setServiceCaseLoading(false);
+    }
+  };
   if (checking) return <main style={shell}>{copy.checkingSession}</main>;
   if (!identity)
     return <Login onLogin={setIdentity} initialError={signInError} />;
@@ -448,6 +578,91 @@ export function App(): JSX.Element {
               </section>
             ) : null}
           </div>
+        </section>
+      ) : null}
+      {isBroker ? (
+        <section style={card} aria-label="Customer support case queue">
+          <h2>
+            {identity.preferredLanguage === "zh-CN"
+              ? "客服与投诉工单"
+              : identity.preferredLanguage === "km"
+                ? "សំណើសេវាអតិថិជន និងបណ្តឹង"
+                : "Customer support and complaints"}
+          </h2>
+          <p>
+            {identity.preferredLanguage === "zh-CN"
+              ? "仅可受理、说明状态并转交；投诉最终处理权属于持牌机构。"
+              : identity.preferredLanguage === "km"
+                ? "អាចទទួល សម្របសម្រួល និងបញ្ជូនប៉ុណ្ណោះ។ ស្ថាប័នមានអាជ្ញាប័ណ្ណទទួលខុសត្រូវលើលទ្ធផលចុងក្រោយ។"
+                : "Broker staff may receive and refer cases only. The licensed lender owns the final complaint outcome."}
+          </p>
+          <button
+            disabled={serviceCaseLoading}
+            onClick={() => void loadServiceCases()}
+          >
+            {serviceCaseLoading
+              ? "…"
+              : identity.preferredLanguage === "zh-CN"
+                ? "刷新待办"
+                : identity.preferredLanguage === "km"
+                  ? "ផ្ទុកឡើងវិញ"
+                  : "Refresh queue"}
+          </button>
+          {serviceCases.length > 0 ? (
+            <ul>
+              {serviceCases.map((serviceCase) => (
+                <li key={serviceCase.caseNo} style={{ marginTop: 10 }}>
+                  <button
+                    disabled={serviceCaseLoading}
+                    onClick={() => void viewServiceCase(serviceCase.caseNo)}
+                  >
+                    {serviceCase.caseNo} · {serviceCase.caseType} ·{" "}
+                    {serviceCase.status}
+                  </button>{" "}
+                  <small>{serviceCase.applicationNo}</small>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {selectedServiceCase ? (
+            <section style={{ ...card, marginTop: 16, background: "#f8fafc" }}>
+              <h3>{selectedServiceCase.caseNo}</h3>
+              <p>
+                <strong>
+                  {identity.preferredLanguage === "zh-CN"
+                    ? "受理内容（访问已留痕）"
+                    : identity.preferredLanguage === "km"
+                      ? "ខ្លឹមសារសំណើ (ការចូលប្រើត្រូវបានកត់ត្រា)"
+                      : "Case content (access is audited)"}
+                </strong>
+              </p>
+              <p style={{ whiteSpace: "pre-wrap" }}>
+                {selectedServiceCase.message}
+              </p>
+              {selectedServiceCase.status !== "REFERRED_TO_LENDER" ? (
+                <button
+                  disabled={serviceCaseLoading}
+                  onClick={() =>
+                    void referServiceCaseToLender(selectedServiceCase.caseNo)
+                  }
+                >
+                  {identity.preferredLanguage === "zh-CN"
+                    ? "转交持牌机构"
+                    : identity.preferredLanguage === "km"
+                      ? "បញ្ជូនទៅស្ថាប័នមានអាជ្ញាប័ណ្ណ"
+                      : "Refer to licensed lender"}
+                </button>
+              ) : (
+                <p>
+                  {identity.preferredLanguage === "zh-CN"
+                    ? "已转交持牌机构处理。"
+                    : identity.preferredLanguage === "km"
+                      ? "បានបញ្ជូនទៅស្ថាប័នមានអាជ្ញាប័ណ្ណរួចហើយ។"
+                      : "Referred to the licensed lender."}
+                </p>
+              )}
+            </section>
+          ) : null}
         </section>
       ) : null}
       {isAdmin ? (

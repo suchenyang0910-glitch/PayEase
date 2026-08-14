@@ -8,6 +8,8 @@ import {
   adminAccountCreateSchema,
   adminAccountActivitySchema,
   adminAccountRolesUpdateSchema,
+  applicantServiceCaseCreateSchema,
+  applicantServiceCaseLenderResolutionSchema,
   departmentCreateSchema,
   roleCreateSchema,
   contractConfirmationSchema,
@@ -49,7 +51,9 @@ import {
 } from "./applicant-origin.js";
 import {
   decryptPersonalProfile,
+  decryptPersonalValue,
   encryptPersonalProfile,
+  encryptPersonalValue,
   personalDataKeyVersion,
 } from "./personal-profile.js";
 import { runDatabaseMigrations } from "./database-migrations.js";
@@ -272,6 +276,21 @@ function requireLenderRole(
 ): boolean {
   if (
     !request.adminIdentity?.roles.some((role) => role.startsWith("LENDER_"))
+  ) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
+function requireServiceCaseReadRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  const roles = request.adminIdentity?.roles ?? [];
+  if (
+    !roles.includes("BROKER_OFFICER") &&
+    !roles.some((role) => role.startsWith("LENDER_"))
   ) {
     reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
     return false;
@@ -2100,6 +2119,324 @@ app.post(
         status: "CLOSED",
         withdrawn: true,
       };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/public/applications/:applicationNo/service-cases",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = applicantServiceCaseCreateSchema.parse(request.body);
+    let encryptedMessage: Buffer;
+    let keyVersion: string;
+    try {
+      encryptedMessage = encryptPersonalValue(input.message);
+      keyVersion = personalDataKeyVersion();
+    } catch (error) {
+      request.log.error({ err: error }, "service case encryption unavailable");
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const owned = await client.query<{
+        application_id: string;
+        user_id: string;
+        preferred_language: "km" | "en" | "zh-CN";
+      }>(
+        `SELECT applications.id AS application_id, users.id AS user_id, users.preferred_language
+           FROM applications JOIN users ON users.id = applications.user_id
+          WHERE applications.application_no = $1
+            AND users.telegram_user_ref = $2
+          FOR UPDATE`,
+        [params.applicationNo, applicant.telegramUserRef],
+      );
+      const application = owned.rows[0];
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const caseNo = `CASE-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const created = await client.query<{ id: string; case_no: string }>(
+        `INSERT INTO applicant_service_cases
+          (case_no, application_id, user_id, case_type, message_encrypted, message_key_version, applicant_language)
+         VALUES ($1, $2, $3, $4, $5::bytea, $6, $7)
+         RETURNING id, case_no`,
+        [
+          caseNo,
+          application.application_id,
+          application.user_id,
+          input.caseType,
+          encryptedMessage,
+          keyVersion,
+          application.preferred_language,
+        ],
+      );
+      const serviceCase = created.rows[0]!;
+      // The immutable ledger commits to the case number/type only.  The free
+      // text remains encrypted in the case table and is never copied to audit
+      // payloads, logs or customer-service notifications.
+      await addAuditEvent(
+        client,
+        serviceCase.id,
+        "APPLICANT_SERVICE_CASE_CREATED",
+        applicant.telegramUserRef,
+        { caseNo: serviceCase.case_no, caseType: input.caseType },
+        "SERVICE_CASE",
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send({
+        caseNo: serviceCase.case_no,
+        caseType: input.caseType,
+        status: "OPEN",
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get(
+  "/v1/local/public/applications/:applicationNo/service-cases",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const cases = await pool.query<{
+      case_no: string;
+      case_type: "SERVICE_QUERY" | "COMPLAINT";
+      status: string;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT c.case_no, c.case_type, c.status, c.created_at, c.updated_at
+         FROM applicant_service_cases c
+         JOIN applications a ON a.id = c.application_id
+         JOIN users u ON u.id = c.user_id
+        WHERE a.application_no = $1 AND u.telegram_user_ref = $2
+        ORDER BY c.created_at DESC`,
+      [params.applicationNo, applicant.telegramUserRef],
+    );
+    return {
+      cases: cases.rows.map((serviceCase) => ({
+        caseNo: serviceCase.case_no,
+        caseType: serviceCase.case_type,
+        status: serviceCase.status,
+        createdAt: serviceCase.created_at,
+        updatedAt: serviceCase.updated_at,
+      })),
+    };
+  },
+);
+
+app.get("/v1/local/service-cases/open", async (request, reply) => {
+  if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+  const cases = await pool.query<{
+    case_no: string;
+    application_no: string;
+    case_type: "SERVICE_QUERY" | "COMPLAINT";
+    status: string;
+    applicant_language: "km" | "en" | "zh-CN";
+    created_at: string;
+  }>(
+    `SELECT c.case_no, a.application_no, c.case_type, c.status, c.applicant_language, c.created_at
+       FROM applicant_service_cases c JOIN applications a ON a.id = c.application_id
+      WHERE c.status IN ('OPEN', 'ACKNOWLEDGED', 'REFERRED_TO_LENDER')
+      ORDER BY c.created_at ASC`,
+  );
+  return {
+    cases: cases.rows.map((serviceCase) => ({
+      caseNo: serviceCase.case_no,
+      applicationNo: serviceCase.application_no,
+      caseType: serviceCase.case_type,
+      status: serviceCase.status,
+      applicantLanguage: serviceCase.applicant_language,
+      createdAt: serviceCase.created_at,
+    })),
+  };
+});
+
+app.get("/v1/local/service-cases/:caseNo", async (request, reply) => {
+  if (!requireServiceCaseReadRole(request, reply)) return;
+  const params = z.object({ caseNo: z.string().min(1) }).parse(request.params);
+  const serviceCase = await pool.query<{
+    id: string;
+    case_no: string;
+    application_no: string;
+    case_type: "SERVICE_QUERY" | "COMPLAINT";
+    status: string;
+    message_encrypted: Buffer;
+    created_at: string;
+  }>(
+    `SELECT c.id, c.case_no, a.application_no, c.case_type, c.status, c.message_encrypted, c.created_at
+       FROM applicant_service_cases c JOIN applications a ON a.id = c.application_id
+      WHERE c.case_no = $1`,
+    [params.caseNo],
+  );
+  const record = serviceCase.rows[0];
+  if (!record) return reply.code(404).send({ code: "SERVICE_CASE_NOT_FOUND" });
+  let message: string;
+  try {
+    message = decryptPersonalValue(record.message_encrypted);
+  } catch (error) {
+    request.log.error({ err: error }, "service case decryption unavailable");
+    return reply.code(503).send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+  }
+  const auditClient = await pool.connect();
+  try {
+    await auditClient.query("BEGIN");
+    await addAuditEvent(
+      auditClient,
+      record.id,
+      "APPLICANT_SERVICE_CASE_VIEWED",
+      request.adminIdentity!.loginName,
+      { caseNo: record.case_no },
+      "SERVICE_CASE",
+    );
+    await auditClient.query("COMMIT");
+  } catch (error) {
+    await auditClient.query("ROLLBACK");
+    throw error;
+  } finally {
+    auditClient.release();
+  }
+  return {
+    caseNo: record.case_no,
+    applicationNo: record.application_no,
+    caseType: record.case_type,
+    status: record.status,
+    message,
+    createdAt: record.created_at,
+  };
+});
+
+app.post(
+  "/v1/local/service-cases/:caseNo/refer-to-lender",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const params = z
+      .object({ caseNo: z.string().min(1) })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const serviceCase = await client.query<{
+        id: string;
+        application_id: string;
+        status: string;
+      }>(
+        "SELECT id, application_id, status FROM applicant_service_cases WHERE case_no = $1 FOR UPDATE",
+        [params.caseNo],
+      );
+      const record = serviceCase.rows[0];
+      if (!record) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_CASE_NOT_FOUND" });
+      }
+      if (
+        !["OPEN", "ACKNOWLEDGED", "REFERRED_TO_LENDER"].includes(record.status)
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_SERVICE_CASE_STATE",
+          currentStatus: record.status,
+        });
+      }
+      if (record.status !== "REFERRED_TO_LENDER") {
+        await client.query(
+          "UPDATE applicant_service_cases SET status = 'REFERRED_TO_LENDER', referred_to_lender_at = now() WHERE id = $1",
+          [record.id],
+        );
+        await addAuditEvent(
+          client,
+          record.id,
+          "APPLICANT_SERVICE_CASE_REFERRED_TO_LENDER",
+          request.adminIdentity!.loginName,
+          { caseNo: params.caseNo },
+          "SERVICE_CASE",
+        );
+      }
+      await client.query("COMMIT");
+      return { caseNo: params.caseNo, status: "REFERRED_TO_LENDER" };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/service-cases/:caseNo/lender-resolution",
+  async (request, reply) => {
+    if (!requireLenderRole(request, reply)) return;
+    const params = z
+      .object({ caseNo: z.string().min(1) })
+      .parse(request.params);
+    const input = applicantServiceCaseLenderResolutionSchema.parse(
+      request.body,
+    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const serviceCase = await client.query<{ id: string; status: string }>(
+        "SELECT id, status FROM applicant_service_cases WHERE case_no = $1 FOR UPDATE",
+        [params.caseNo],
+      );
+      const record = serviceCase.rows[0];
+      if (!record) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_CASE_NOT_FOUND" });
+      }
+      if (record.status === "RESOLVED") {
+        await client.query("ROLLBACK");
+        return { caseNo: params.caseNo, status: "RESOLVED" };
+      }
+      if (record.status !== "REFERRED_TO_LENDER") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_SERVICE_CASE_STATE",
+          currentStatus: record.status,
+        });
+      }
+      await client.query(
+        `UPDATE applicant_service_cases
+          SET status = 'RESOLVED', lender_resolution_reason_code = $1, resolved_at = now()
+        WHERE id = $2`,
+        [input.reasonCode, record.id],
+      );
+      await addAuditEvent(
+        client,
+        record.id,
+        "APPLICANT_SERVICE_CASE_RESOLVED_BY_LENDER",
+        request.adminIdentity!.loginName,
+        { caseNo: params.caseNo, reasonCode: input.reasonCode },
+        "SERVICE_CASE",
+      );
+      await client.query("COMMIT");
+      return { caseNo: params.caseNo, status: "RESOLVED" };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

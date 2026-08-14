@@ -549,6 +549,114 @@ describe("applicant submission", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("submits a support case without exposing the response as an approval decision", async () => {
+    window.history.replaceState(null, "", "/?application=APP-SUPPORT-001");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-SUPPORT-001",
+              status: "REPAYMENT_ACTIVE",
+              requestedAmountMinor: "5000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: "5000",
+              rejectionConditionResolved: false,
+              supplementRequested: false,
+            },
+            terms: {
+              approvedAmountMinor: "5000",
+              serviceFeeMinor: "100",
+              totalRepayableMinor: "5100",
+              installmentCount: 1,
+              firstDueDate: "2026-09-15",
+            },
+            repayment: {
+              periodCount: 1,
+              paidPeriods: 0,
+              unpaidPeriods: 1,
+              overduePeriods: 0,
+              totalDueMinor: "5100",
+              totalPaidMinor: "0",
+              outstandingMinor: "5100",
+              overdueOutstandingMinor: "0",
+              nextInstallment: {
+                installmentNo: 1,
+                dueDate: "2026-09-15",
+                amountDueMinor: "5100",
+              },
+              installments: [
+                {
+                  installmentNo: 1,
+                  dueDate: "2026-09-15",
+                  amountDueMinor: "5100",
+                  amountPaidMinor: "0",
+                  status: "PENDING",
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            caseNo: "CASE-20260815-ABCDEFGH",
+            caseType: "COMPLAINT",
+            status: "OPEN",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+    await screen.findByRole("region", {
+      name: "Customer support and complaints",
+    });
+    fireEvent.change(screen.getByLabelText("Request type"), {
+      target: { value: "COMPLAINT" },
+    });
+    fireEvent.change(screen.getByLabelText("Tell us what happened"), {
+      target: {
+        value: "Please review the repayment information in my account.",
+      },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Submit support case" }),
+    );
+
+    expect(
+      await screen.findByText(
+        /Your case CASE-20260815-ABCDEFGH has been received/,
+      ),
+    ).toBeVisible();
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/v1/local/public/applications/APP-SUPPORT-001/service-cases",
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          caseType: "COMPLAINT",
+          message: "Please review the repayment information in my account.",
+        }),
+      },
+    ]);
+    expect(
+      screen.getByText(/licensed lender is responsible for the final outcome/i),
+    ).toBeVisible();
+  });
+
   it("records an applicant's explicit confirmation of approved terms", async () => {
     window.history.replaceState(null, "", "/?application=APP-CONTRACT-001");
     const fetchMock = vi

@@ -99,6 +99,20 @@ export const contractConfirmationSchema = z.object({
   evidenceReference: z.string().min(3).max(160),
 });
 
+export const applicantServiceCaseCreateSchema = z.object({
+  caseType: z.enum(["SERVICE_QUERY", "COMPLAINT"]),
+  // Free text may contain sensitive information, so the API encrypts it before
+  // persistence and never includes it in an audit event payload.
+  message: z.string().trim().min(10).max(2000),
+});
+
+export const applicantServiceCaseLenderResolutionSchema = z.object({
+  reasonCode: z
+    .string()
+    .trim()
+    .regex(/^[A-Z0-9_]{3,64}$/),
+});
+
 const dualControlActorSchema = z.object({
   actorUserRef: z.string().min(3).max(128),
   actorRole: z.string().min(3).max(64),

@@ -265,6 +265,11 @@ export function App(): JSX.Element {
   const [applicantSession, setApplicantSession] = useState(false);
   const [withdrawalConfirmationRequested, setWithdrawalConfirmationRequested] =
     useState(false);
+  const [serviceCaseType, setServiceCaseType] = useState<
+    "SERVICE_QUERY" | "COMPLAINT"
+  >("SERVICE_QUERY");
+  const [serviceCaseMessage, setServiceCaseMessage] = useState("");
+  const [serviceCaseNotice, setServiceCaseNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -597,6 +602,58 @@ export function App(): JSX.Element {
           : language === "km"
             ? "មិនអាចដកពាក្យសុំនេះបានទេ។ សូមទាក់ទងស្ថាប័នមានអាជ្ញាប័ណ្ណ ប្រសិនបើពាក្យសុំបានចូលដំណាក់កាលកិច្ចសន្យា។"
             : "暂时无法撤回该申请；如已进入合同处理，请联系持牌机构。",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitServiceCase() {
+    if (!applicationNo || !serviceCaseMessage.trim()) return;
+    setLoading(true);
+    setError("");
+    setServiceCaseNotice("");
+    try {
+      const response = await fetch(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/service-cases`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            caseType: serviceCaseType,
+            message: serviceCaseMessage.trim(),
+          }),
+        },
+      );
+      if (response.status === 401 || response.status === 403) {
+        setError(applicantSessionRecoveryMessage(language));
+        return;
+      }
+      const payload = (await response.json().catch(() => undefined)) as
+        { caseNo?: unknown; status?: unknown } | undefined;
+      if (
+        !response.ok ||
+        typeof payload?.caseNo !== "string" ||
+        payload.status !== "OPEN"
+      ) {
+        throw new Error("service case submission failed");
+      }
+      setServiceCaseMessage("");
+      setServiceCaseNotice(
+        language === "en"
+          ? `Your case ${payload.caseNo} has been received. The broker team will coordinate with the licensed lender where required.`
+          : language === "zh-CN"
+            ? `已收到你的工单 ${payload.caseNo}。如需最终处理，助贷团队将协调持牌机构。`
+            : `យើងបានទទួលសំណើ ${payload.caseNo} របស់អ្នក។ ក្រុមសេវាកម្មនឹងសម្របសម្រួលជាមួយស្ថាប័នមានអាជ្ញាប័ណ្ណនៅពេលចាំបាច់។`,
+      );
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not submit your support request. Please try again."
+          : language === "zh-CN"
+            ? "暂时无法提交客服工单，请稍后重试。"
+            : "មិនអាចដាក់សំណើសេវាកម្មបានទេ សូមព្យាយាមម្តងទៀត។",
       );
     } finally {
       setLoading(false);
@@ -1271,6 +1328,84 @@ export function App(): JSX.Element {
                       : "持牌机构确认放款后，系统将生成还款期次、费用及账单。"}
                 </p>
               )}
+              <section
+                className="next-payment"
+                aria-label="Customer support and complaints"
+              >
+                <strong>
+                  {language === "en"
+                    ? "Customer support and complaints"
+                    : language === "zh-CN"
+                      ? "客服与投诉"
+                      : "សេវាអតិថិជន និងបណ្តឹង"}
+                </strong>
+                <small>
+                  {language === "en"
+                    ? "For a complaint, the licensed lender is responsible for the final outcome. Do not include passwords, card numbers or one-time codes."
+                    : language === "zh-CN"
+                      ? "投诉的最终处理由持牌机构负责。请勿填写密码、银行卡完整号码或一次性验证码。"
+                      : "សម្រាប់បណ្តឹង ស្ថាប័នមានអាជ្ញាប័ណ្ណទទួលខុសត្រូវលើលទ្ធផលចុងក្រោយ។ សូមកុំបញ្ចូលពាក្យសម្ងាត់ លេខកាតពេញលេញ ឬលេខកូដម្តងទៀត។"}
+                </small>
+                <label className="field-label">
+                  {language === "en"
+                    ? "Request type"
+                    : language === "zh-CN"
+                      ? "问题类型"
+                      : "ប្រភេទសំណើ"}
+                  <select
+                    value={serviceCaseType}
+                    onChange={(event) =>
+                      setServiceCaseType(
+                        event.target.value as "SERVICE_QUERY" | "COMPLAINT",
+                      )
+                    }
+                  >
+                    <option value="SERVICE_QUERY">
+                      {language === "en"
+                        ? "Service question"
+                        : language === "zh-CN"
+                          ? "客服咨询"
+                          : "សំណួរសេវាកម្ម"}
+                    </option>
+                    <option value="COMPLAINT">
+                      {language === "en"
+                        ? "Complaint"
+                        : language === "zh-CN"
+                          ? "投诉"
+                          : "បណ្តឹង"}
+                    </option>
+                  </select>
+                </label>
+                <label className="field-label">
+                  {language === "en"
+                    ? "Tell us what happened"
+                    : language === "zh-CN"
+                      ? "请说明情况"
+                      : "សូមពិពណ៌នាអំពីបញ្ហា"}
+                  <textarea
+                    value={serviceCaseMessage}
+                    onChange={(event) =>
+                      setServiceCaseMessage(event.target.value)
+                    }
+                    maxLength={2000}
+                    rows={4}
+                  />
+                </label>
+                <button
+                  className="primary"
+                  disabled={loading || serviceCaseMessage.trim().length < 10}
+                  onClick={() => void submitServiceCase()}
+                >
+                  {language === "en"
+                    ? "Submit support case"
+                    : language === "zh-CN"
+                      ? "提交客服工单"
+                      : "ដាក់សំណើសេវាកម្ម"}
+                </button>
+                {serviceCaseNotice ? (
+                  <p className="response-note">{serviceCaseNotice}</p>
+                ) : null}
+              </section>
             </section>
           ) : null}
         </section>

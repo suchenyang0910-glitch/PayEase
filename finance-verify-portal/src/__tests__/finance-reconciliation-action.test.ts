@@ -9,7 +9,21 @@ describe("finance reconciliation result", () => {
       FINANCE_COPY.en,
     );
     expect(result.succeeded).toBe(false);
+    expect(result.sessionExpired).toBe(false);
     expect(result.notice).toContain(FINANCE_COPY.en.requestFailed);
     expect(result.notice).not.toContain(`${FINANCE_COPY.en.recorded}:`);
+  });
+
+  it("identifies an expired or revoked session", async () => {
+    await expect(
+      financeReconciliationNotice(
+        async () => new Response(null, { status: 401 }),
+        FINANCE_COPY.en,
+      ),
+    ).resolves.toEqual({
+      notice: "Action blocked (401): {}",
+      succeeded: false,
+      sessionExpired: true,
+    });
   });
 });

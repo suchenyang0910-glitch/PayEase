@@ -39,11 +39,17 @@ async function api(path: string, init?: RequestInit) {
   });
 }
 
-function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
+function Login({
+  done,
+  initialError = "",
+}: {
+  done: (identity: Identity) => void;
+  initialError?: string;
+}): JSX.Element {
   const [language, setLanguage] = useState<FinanceLanguage>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const copy = FINANCE_COPY[language];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -124,6 +130,7 @@ function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
 
 export function App(): JSX.Element {
   const [identity, setIdentity] = useState<Identity>();
+  const [signInError, setSignInError] = useState("");
   const [checking, setChecking] = useState(true);
   const [items, setItems] = useState<WorkItem[]>([]);
   const [assignee, setAssignee] = useState("");
@@ -143,11 +150,16 @@ export function App(): JSX.Element {
   const language = identity?.preferredLanguage ?? "en";
   const copy = FINANCE_COPY[language];
   const permitted = identity?.roles.includes("EMPLOYER_FINANCE") ?? false;
+  const expireSession = () => {
+    setSignInError(copy.sessionExpired);
+    setIdentity(undefined);
+  };
   const load = async () => {
     setRunningAction(true);
     setNotice("");
     try {
       const response = await api("/v1/local/reconciliation/open");
+      if (response.status === 401) return expireSession();
       if (!response.ok)
         return setNotice(
           `${copy.blocked} (${response.status}): ${copy.loadFailed}`,
@@ -178,6 +190,7 @@ export function App(): JSX.Element {
           }),
         copy,
       );
+      if (result.sessionExpired) return expireSession();
       setNotice(result.notice);
       if (result.succeeded) {
         const response = await api("/v1/local/reconciliation/open");
@@ -200,9 +213,10 @@ export function App(): JSX.Element {
       setIdentity((current) =>
         current ? { ...current, preferredLanguage } : current,
       );
+    else if (response.status === 401) expireSession();
   };
   if (checking) return <main style={layout}>{copy.checking}</main>;
-  if (!identity) return <Login done={setIdentity} />;
+  if (!identity) return <Login done={setIdentity} initialError={signInError} />;
   return (
     <main style={layout}>
       <header style={{ display: "flex", justifyContent: "space-between" }}>

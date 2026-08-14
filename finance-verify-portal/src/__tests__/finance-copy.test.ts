@@ -12,6 +12,7 @@ describe("finance portal copy", () => {
       expect(copy.title).toBeTruthy();
       expect(copy.queueTitle).toBeTruthy();
       expect(copy.requestFailed).toBeTruthy();
+      expect(copy.sessionExpired).toBeTruthy();
       expect(copy.unavailableDescription).toBeTruthy();
     }
   });

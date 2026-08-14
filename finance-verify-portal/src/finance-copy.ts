@@ -8,6 +8,7 @@ export type FinanceCopy = Readonly<{
   password: string;
   loginFailed: string;
   sessionFailed: string;
+  sessionExpired: string;
   signedInAs: string;
   language: string;
   signOut: string;
@@ -43,6 +44,7 @@ export const FINANCE_COPY: Readonly<Record<FinanceLanguage, FinanceCopy>> = {
     password: "Password",
     loginFailed: "Login failed. Check your account and password.",
     sessionFailed: "Unable to establish a secure session.",
+    sessionExpired: "Your secure session has expired. Please sign in again.",
     signedInAs: "Signed in as",
     language: "Language",
     signOut: "Sign out",
@@ -79,6 +81,7 @@ export const FINANCE_COPY: Readonly<Record<FinanceLanguage, FinanceCopy>> = {
     password: "密码",
     loginFailed: "登录失败，请检查账号和密码。",
     sessionFailed: "无法建立安全会话。",
+    sessionExpired: "安全会话已过期，请重新登录。",
     signedInAs: "当前登录账号",
     language: "语言",
     signOut: "退出登录",
@@ -112,6 +115,7 @@ export const FINANCE_COPY: Readonly<Record<FinanceLanguage, FinanceCopy>> = {
     password: "ពាក្យសម្ងាត់",
     loginFailed: "មិនអាចចូលប្រើបានទេ។ សូមពិនិត្យគណនី និងពាក្យសម្ងាត់។",
     sessionFailed: "មិនអាចបង្កើតសម័យសុវត្ថិភាពបានទេ។",
+    sessionExpired: "សម័យសុវត្ថិភាពរបស់អ្នកបានផុតកំណត់។ សូមចូលប្រើម្តងទៀត។",
     signedInAs: "បានចូលប្រើជា",
     language: "ភាសា",
     signOut: "ចាកចេញ",

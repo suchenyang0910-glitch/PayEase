@@ -695,6 +695,11 @@ export function App(): JSX.Element {
                       : "ត្រូវការព័ត៌មានបន្ថែម"
                   : t.reviewing}
           </h2>
+          {error ? (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          ) : null}
           <p>
             {result === "approved"
               ? language === "en"

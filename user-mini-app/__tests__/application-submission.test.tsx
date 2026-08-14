@@ -215,4 +215,76 @@ describe("applicant submission", () => {
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Confirm terms" })).toBeNull();
   });
+
+  it("does not report a contract confirmation when the server rejects it", async () => {
+    window.history.replaceState(null, "", "/?application=APP-CONTRACT-ERROR");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-CONTRACT-ERROR",
+              status: "CONTRACT_PENDING",
+              requestedAmountMinor: "25000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: "25000",
+              rejectionConditionResolved: false,
+              supplementRequested: false,
+            },
+            terms: {
+              approvedAmountMinor: "25000",
+              serviceFeeMinor: "500",
+              totalRepayableMinor: "25500",
+              installmentCount: 2,
+              firstDueDate: "2026-09-15",
+            },
+            repayment: {
+              periodCount: 0,
+              paidPeriods: 0,
+              unpaidPeriods: 0,
+              overduePeriods: 0,
+              totalDueMinor: "0",
+              totalPaidMinor: "0",
+              outstandingMinor: "0",
+              overdueOutstandingMinor: "0",
+              nextInstallment: null,
+              installments: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: "INVALID_APPLICATION_STATE" }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm terms" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "We could not record your confirmation. Please try again.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Confirm terms" })).toBeVisible();
+    expect(
+      screen.queryByText(
+        "Your confirmation is recorded. The lender is completing its contract record.",
+      ),
+    ).toBeNull();
+  });
 });

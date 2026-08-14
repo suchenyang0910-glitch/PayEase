@@ -54,8 +54,12 @@ export type BrokerCopy = Readonly<{
   accountStatus: string;
   accountActive: string;
   accountInactive: string;
+  enableAccount: string;
+  enableAccountConfirm: string;
   disableAccount: string;
   disableAccountConfirm: string;
+  updateRoles: string;
+  updateRolesConfirm: string;
   unavailableTitle: string;
   unavailableDescription: string;
 }>;
@@ -119,9 +123,15 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     accountStatus: "Status",
     accountActive: "Active",
     accountInactive: "Disabled",
+    enableAccount: "Enable account",
+    enableAccountConfirm:
+      "Enable this account? It will be able to sign in again.",
     disableAccount: "Disable account",
     disableAccountConfirm:
       "Disable this account and revoke all of its active sessions?",
+    updateRoles: "Update roles",
+    updateRolesConfirm:
+      "Update this account's roles and revoke all of its active sessions?",
     unavailableTitle: "Operations unavailable",
     unavailableDescription:
       "Your account has no broker or platform-administration role.",
@@ -181,8 +191,12 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     accountStatus: "状态",
     accountActive: "启用",
     accountInactive: "已禁用",
+    enableAccount: "启用账号",
+    enableAccountConfirm: "确认启用该账号吗？该账号将可以重新登录。",
     disableAccount: "禁用账号",
     disableAccountConfirm: "确认禁用该账号并撤销其所有有效会话吗？",
+    updateRoles: "更新角色",
+    updateRolesConfirm: "确认更新该账号的角色并撤销其所有有效会话吗？",
     unavailableTitle: "运营功能不可用",
     unavailableDescription: "当前账号没有助贷运营或平台目录管理权限。",
   },
@@ -245,8 +259,12 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     accountStatus: "ស្ថានភាព",
     accountActive: "កំពុងប្រើ",
     accountInactive: "បានបិទ",
+    enableAccount: "បើកគណនីឡើងវិញ",
+    enableAccountConfirm: "បើកគណនីនេះឬ? គណនីនេះអាចចូលប្រើឡើងវិញបាន។",
     disableAccount: "បិទគណនី",
     disableAccountConfirm: "បិទគណនីនេះ និងដកហូតសម័យដែលកំពុងប្រើទាំងអស់ឬ?",
+    updateRoles: "កែប្រែតួនាទី",
+    updateRolesConfirm: "កែប្រែតួនាទីគណនីនេះ និងដកហូតសម័យដែលកំពុងប្រើទាំងអស់ឬ?",
     unavailableTitle: "មុខងារប្រតិបត្តិការមិនអាចប្រើបាន",
     unavailableDescription:
       "គណនីរបស់អ្នកគ្មានតួនាទីប្រតិបត្តិការជំនួយឥណទាន ឬគ្រប់គ្រងបញ្ជីវេទិកា។",

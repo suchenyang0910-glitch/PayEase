@@ -19,6 +19,10 @@ describe("broker console language copy", () => {
       expect(copy.accountDirectory.trim()).not.toBe("");
       expect(copy.disableAccount.trim()).not.toBe("");
       expect(copy.disableAccountConfirm.trim()).not.toBe("");
+      expect(copy.enableAccount.trim()).not.toBe("");
+      expect(copy.enableAccountConfirm.trim()).not.toBe("");
+      expect(copy.updateRoles.trim()).not.toBe("");
+      expect(copy.updateRolesConfirm.trim()).not.toBe("");
       expect(copy.unavailableDescription.trim()).not.toBe("");
     }
   });

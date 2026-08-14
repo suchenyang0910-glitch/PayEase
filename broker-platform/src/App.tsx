@@ -170,6 +170,7 @@ export function App(): JSX.Element {
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
   const [accounts, setAccounts] = useState<DirectoryAccount[]>([]);
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, string>>({});
   const [department, setDepartment] = useState({
     domain: "BROKER" as Domain,
     code: "",
@@ -225,11 +226,14 @@ export function App(): JSX.Element {
     ]);
     if (d.ok) setDepartments((await d.json()) as unknown[]);
     if (r.ok) setRoles((await r.json()) as unknown[]);
-    if (a.ok) setAccounts(parseDirectoryAccounts(await a.json()));
+    if (a.ok) {
+      setAccounts(parseDirectoryAccounts(await a.json()));
+      setRoleDrafts({});
+    }
   };
   const adminRequest = async (
     path: string,
-    method: "POST" | "PATCH",
+    method: "POST" | "PATCH" | "PUT",
     body: object,
   ) => {
     setAdminInProgress(true);
@@ -252,12 +256,29 @@ export function App(): JSX.Element {
   const adminPost = async (path: string, body: object) => {
     await adminRequest(path, "POST", body);
   };
-  const disableAccount = async (loginName: string) => {
-    if (!window.confirm(copy.disableAccountConfirm)) return;
+  const setAccountActivity = async (loginName: string, isActive: boolean) => {
+    if (
+      !window.confirm(
+        isActive ? copy.enableAccountConfirm : copy.disableAccountConfirm,
+      )
+    )
+      return;
     await adminRequest(
       `/v1/local/admin/accounts/${encodeURIComponent(loginName)}/activity`,
       "PATCH",
-      { isActive: false },
+      { isActive },
+    );
+  };
+  const updateAccountRoles = async (entry: DirectoryAccount) => {
+    const roleCodes = (roleDrafts[entry.loginName] ?? entry.roles.join(","))
+      .split(",")
+      .map((code) => code.trim())
+      .filter(Boolean);
+    if (!window.confirm(copy.updateRolesConfirm)) return;
+    await adminRequest(
+      `/v1/local/admin/accounts/${encodeURIComponent(entry.loginName)}/roles`,
+      "PUT",
+      { roleCodes },
     );
   };
   const review = async (decision: "APPROVED" | "RETURNED") => {
@@ -666,7 +687,8 @@ export function App(): JSX.Element {
                 key={entry.loginName}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(160px, 1fr) auto auto",
+                  gridTemplateColumns:
+                    "minmax(160px, 1fr) minmax(180px, 1fr) auto",
                   gap: 12,
                   alignItems: "center",
                   borderTop: "1px solid #e2e8f0",
@@ -679,17 +701,50 @@ export function App(): JSX.Element {
                     {entry.departmentCode} · {entry.roles.join(", ")}
                   </div>
                 </div>
-                <span>
-                  {copy.accountStatus}:{" "}
-                  {entry.isActive ? copy.accountActive : copy.accountInactive}
-                </span>
-                {entry.isActive && entry.loginName !== identity.loginName ? (
-                  <button
-                    disabled={adminInProgress}
-                    onClick={() => void disableAccount(entry.loginName)}
-                  >
-                    {copy.disableAccount}
-                  </button>
+                <div>
+                  <span>
+                    {copy.accountStatus}:{" "}
+                    {entry.isActive ? copy.accountActive : copy.accountInactive}
+                  </span>
+                  {entry.loginName !== identity.loginName ? (
+                    <label style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                      {copy.roleCodes}
+                      <input
+                        value={
+                          roleDrafts[entry.loginName] ?? entry.roles.join(",")
+                        }
+                        onChange={(event) =>
+                          setRoleDrafts((current) => ({
+                            ...current,
+                            [entry.loginName]: event.target.value.toUpperCase(),
+                          }))
+                        }
+                      />
+                    </label>
+                  ) : null}
+                </div>
+                {entry.loginName !== identity.loginName ? (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <button
+                      disabled={adminInProgress}
+                      onClick={() =>
+                        void setAccountActivity(
+                          entry.loginName,
+                          !entry.isActive,
+                        )
+                      }
+                    >
+                      {entry.isActive
+                        ? copy.disableAccount
+                        : copy.enableAccount}
+                    </button>
+                    <button
+                      disabled={adminInProgress}
+                      onClick={() => void updateAccountRoles(entry)}
+                    >
+                      {copy.updateRoles}
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ))}

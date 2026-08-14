@@ -8,6 +8,10 @@ import {
 import { brokerProfileResult } from "./broker-profile-action";
 import { brokerReviewNotice } from "./broker-review-action";
 import {
+  brokerServiceCaseStatusLabel,
+  brokerServiceCaseTypeLabel,
+} from "./broker-service-case-label";
+import {
   parseBrokerSupplementResponseDetail,
   parseBrokerSupplementResponseList,
   type BrokerSupplementResponseDetail,
@@ -766,8 +770,16 @@ export function App(): JSX.Element {
                     disabled={serviceCaseLoading}
                     onClick={() => void viewServiceCase(serviceCase.caseNo)}
                   >
-                    {serviceCase.caseNo} · {serviceCase.caseType} ·{" "}
-                    {serviceCase.status}
+                    {serviceCase.caseNo} ·{" "}
+                    {brokerServiceCaseTypeLabel(
+                      serviceCase.caseType,
+                      identity.preferredLanguage,
+                    )}{" "}
+                    ·{" "}
+                    {brokerServiceCaseStatusLabel(
+                      serviceCase.status,
+                      identity.preferredLanguage,
+                    )}
                   </button>{" "}
                   <small>{serviceCase.applicationNo}</small>
                 </li>

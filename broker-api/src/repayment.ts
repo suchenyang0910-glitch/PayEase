@@ -28,6 +28,7 @@ export type ApplicantLoanSummary = Readonly<{
     currency: string;
     tenorDays: number;
     approvedAmountMinor: string | null;
+    rejectionConditionResolved: boolean;
   }>;
   terms: null | Readonly<{
     approvedAmountMinor: string;

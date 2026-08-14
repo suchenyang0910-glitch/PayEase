@@ -58,6 +58,7 @@ describe("repayment schedule", () => {
           currency: "USD",
           tenorDays: 30,
           approvedAmountMinor: "25000",
+          rejectionConditionResolved: false,
         },
         {
           approvedAmountMinor: "25000",
@@ -76,6 +77,7 @@ describe("repayment schedule", () => {
         currency: "USD",
         tenorDays: 30,
         approvedAmountMinor: "25000",
+        rejectionConditionResolved: false,
       },
       terms: {
         approvedAmountMinor: "25000",

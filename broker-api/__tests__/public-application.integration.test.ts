@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -31,6 +31,36 @@ function signedInitData(
     createHmac("sha256", secret).update(dataCheckString).digest("hex"),
   );
   return parameters.toString();
+}
+
+async function lenderCreditOfficerCookie(database: Pool): Promise<string> {
+  const department = await database.query<{ id: string }>(
+    `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
+     VALUES ('LENDER', 'TEST_LENDER', '测试机构', 'Test lender', 'Test lender')
+     RETURNING id`,
+  );
+  const role = await database.query<{ id: string }>(
+    `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
+     VALUES ('LENDER', 'LENDER_CREDIT_OFFICER', '信审专员', 'Credit officer', 'Credit officer')
+     RETURNING id`,
+  );
+  const account = await database.query<{ id: string }>(
+    `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)
+     VALUES ('integration-credit-officer', 'not-used-in-this-test', $1, 'en')
+     RETURNING id`,
+    [department.rows[0]!.id],
+  );
+  await database.query(
+    "INSERT INTO admin_account_roles (account_id, role_id) VALUES ($1, $2)",
+    [account.rows[0]!.id, role.rows[0]!.id],
+  );
+  const token = "integration-credit-officer-session-token";
+  await database.query(
+    `INSERT INTO admin_sessions (token_hash, account_id, expires_at)
+     VALUES ($1, $2, now() + interval '1 hour')`,
+    [createHash("sha256").update(token).digest("hex"), account.rows[0]!.id],
+  );
+  return `payease_session=${token}`;
 }
 
 integration("public applicant access", () => {
@@ -281,7 +311,11 @@ integration("public applicant access", () => {
       });
       expect(detail.statusCode).toBe(200);
       expect(detail.json()).toMatchObject({
-        application: { applicationNo, requestedAmountMinor: "10000" },
+        application: {
+          applicationNo,
+          requestedAmountMinor: "10000",
+          rejectionConditionResolved: false,
+        },
       });
 
       const activeApplicationRetry = await brokerApi.app.inject({
@@ -324,12 +358,27 @@ integration("public applicant access", () => {
         currentStatus: "REJECTED",
       });
 
-      await database.query(
-        `UPDATE applications
-            SET rejection_condition_resolved = true
-          WHERE application_no = $1`,
-        [applicationNo],
-      );
+      const lenderCookie = await lenderCreditOfficerCookie(database);
+      const resolveReapplication = await brokerApi.app.inject({
+        method: "POST",
+        url: `/v1/local/applications/${applicationNo}/reapplication-condition-resolved`,
+        headers: { cookie: lenderCookie },
+        payload: { reasonCode: "INTEGRATION_REJECTION_CONDITION_RESOLVED" },
+      });
+      expect(resolveReapplication.statusCode).toBe(200);
+      expect(resolveReapplication.json()).toMatchObject({
+        applicationNo,
+        status: "REJECTED",
+        rejectionConditionResolved: true,
+      });
+      const resolvedDetail = await brokerApi.app.inject({
+        method: "GET",
+        url: `/v1/local/public/applications/${applicationNo}`,
+        headers: { cookie: secondCookie },
+      });
+      expect(resolvedDetail.json()).toMatchObject({
+        application: { rejectionConditionResolved: true },
+      });
       const eligibleRetry = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",

@@ -995,9 +995,10 @@ app.get(
       tenor_days: number;
       status: string;
       approved_amount_minor: string | null;
+      rejection_condition_resolved: boolean;
     }>(
       `SELECT id, application_no, requested_amount_minor::text, currency, tenor_days, status,
-            approved_amount_minor::text
+            approved_amount_minor::text, rejection_condition_resolved
        FROM applications
        WHERE application_no = $1
          AND (
@@ -1027,6 +1028,7 @@ app.get(
         currency: application.currency,
         tenorDays: application.tenor_days,
         approvedAmountMinor: application.approved_amount_minor,
+        rejectionConditionResolved: application.rejection_condition_resolved,
       },
       loanDetails.terms,
       loanDetails.repayment,
@@ -1052,11 +1054,13 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     currency: string;
     tenor_days: number;
     approved_amount_minor: string | null;
+    rejection_condition_resolved: boolean;
     created_at: Date;
   }>(
     `SELECT applications.application_no, applications.status,
             applications.requested_amount_minor::text, applications.currency,
             applications.tenor_days, applications.approved_amount_minor::text,
+            applications.rejection_condition_resolved,
             applications.created_at
        FROM applications
        JOIN users ON users.id = applications.user_id
@@ -1074,6 +1078,7 @@ app.get("/v1/local/public/applications", async (request, reply) => {
       currency: application.currency,
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
+      rejectionConditionResolved: application.rejection_condition_resolved,
       createdAt: application.created_at.toISOString(),
     })),
   };
@@ -1104,12 +1109,64 @@ app.put(
   },
 );
 
+app.post(
+  "/v1/local/applications/:applicationNo/reapplication-condition-resolved",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_CREDIT_OFFICER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = lifecycleActorSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "REJECTED") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      await client.query(
+        `UPDATE applications
+            SET rejection_condition_resolved = true, updated_at = now()
+          WHERE id = $1`,
+        [application.id],
+      );
+      await addAuditEvent(
+        client,
+        application.id,
+        "REAPPLICATION_CONDITION_RESOLVED",
+        actorUserRef,
+        { ...input, actorUserRef, actorRole: "LENDER_CREDIT_OFFICER" },
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        status: "REJECTED",
+        rejectionConditionResolved: true,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
 app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
   const params = z
     .object({ applicationNo: z.string().min(1) })
     .parse(request.params);
   const result = await pool.query(
-    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, created_at
+    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, approved_amount_minor::text AS approved_amount_minor, rejection_condition_resolved, created_at
      FROM applications WHERE application_no = $1`,
     [params.applicationNo],
   );
@@ -1125,6 +1182,7 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
       currency: application.currency,
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
+      rejectionConditionResolved: application.rejection_condition_resolved,
     },
     loanDetails.terms,
     loanDetails.repayment,

@@ -12,6 +12,7 @@ type UserSummary = {
     currency: string;
     tenorDays: number;
     approvedAmountMinor: string | null;
+    rejectionConditionResolved: boolean;
   };
   terms: null | {
     approvedAmountMinor: string;
@@ -184,6 +185,18 @@ function telegramInitData(): string | undefined {
   return telegram?.WebApp?.initData || undefined;
 }
 
+function applicantResult(
+  application: UserSummary["application"] | undefined,
+): "approved" | "rejected-resolved" | "rejected-pending" | "reviewing" {
+  if (application?.approvedAmountMinor) return "approved";
+  if (application?.status === "REJECTED") {
+    return application.rejectionConditionResolved
+      ? "rejected-resolved"
+      : "rejected-pending";
+  }
+  return "reviewing";
+}
+
 export function App(): JSX.Element {
   const [language, setLanguage] = useState<LanguageCode>("km");
   const [stage, setStage] = useState<Stage>("welcome");
@@ -199,6 +212,7 @@ export function App(): JSX.Element {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
+  const result = applicantResult(summary?.application);
   const repaymentHint = useMemo(
     () => Math.ceil((amount * 1.03) / Math.max(1, term / 30)),
     [amount, term],
@@ -527,21 +541,43 @@ export function App(): JSX.Element {
       {stage === "offer" && (
         <section className="result-card">
           <div className="review-icon">⌛</div>
-          <h2>{approvedAmountMinor ? t.offer : t.reviewing}</h2>
+          <h2>
+            {result === "approved"
+              ? t.offer
+              : result.startsWith("rejected")
+                ? language === "en"
+                  ? "Application not approved"
+                  : language === "zh-CN"
+                    ? "申请未获批准"
+                    : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
+                : t.reviewing}
+          </h2>
           <p>
-            {approvedAmountMinor
+            {result === "approved"
               ? language === "en"
                 ? "The licensed lender has returned your approved limit."
                 : language === "km"
                   ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
                   : "持牌机构已返回你的审核额度。"
-              : t.noOffer}
+              : result === "rejected-resolved"
+                ? language === "en"
+                  ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
+                  : language === "zh-CN"
+                    ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
+                    : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
+                : result === "rejected-pending"
+                  ? language === "en"
+                    ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
+                    : language === "zh-CN"
+                      ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
+                      : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
+                  : t.noOffer}
           </p>
           <div className="application-number">
             <span>{t.status}</span>
             <strong>{applicationNo}</strong>
           </div>
-          {approvedAmountMinor ? (
+          {result === "approved" ? (
             <p className="response-note">
               {language === "en"
                 ? "Approved limit: "
@@ -552,6 +588,23 @@ export function App(): JSX.Element {
                 ${(Number(approvedAmountMinor) / 100).toLocaleString("en-US")}
               </strong>
             </p>
+          ) : result === "rejected-resolved" ? (
+            <button
+              className="primary"
+              onClick={() => {
+                setSummary(undefined);
+                setApprovedAmountMinor(undefined);
+                setApplicationNo("");
+                window.history.replaceState(null, "", window.location.pathname);
+                setStage("welcome");
+              }}
+            >
+              {language === "en"
+                ? "Start a new application"
+                : language === "zh-CN"
+                  ? "发起新的申请"
+                  : "ចាប់ផ្តើមពាក្យសុំថ្មី"}
+            </button>
           ) : (
             <p className="response-note">{t.expected}</p>
           )}

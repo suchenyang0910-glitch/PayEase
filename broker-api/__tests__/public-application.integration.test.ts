@@ -150,6 +150,35 @@ integration("public applicant access", () => {
     await database?.end();
   });
 
+  it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
+    process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
+    const bootstrap = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/bootstrap",
+      headers: { "x-bootstrap-password": "bootstrap-secret-not-real" },
+      payload: {
+        loginName: "initial-ops-admin",
+        password: "initial-ops-admin-password",
+        preferredLanguage: "en",
+      },
+    });
+
+    expect(bootstrap.statusCode).toBe(201);
+    expect(bootstrap.json()).toEqual({
+      loginName: "initial-ops-admin",
+      role: "OPS_ADMIN",
+    });
+    const complaintRole = await database.query<{
+      code: string;
+      domain: string;
+    }>(
+      "SELECT code, domain FROM roles WHERE code = 'LENDER_COMPLAINT_OFFICER'",
+    );
+    expect(complaintRole.rows).toEqual([
+      { code: "LENDER_COMPLAINT_OFFICER", domain: "LENDER" },
+    ]);
+  });
+
   it("returns the same generic response for unknown and incorrect admin credentials", async () => {
     const department = await database.query<{ id: string }>(
       `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)

@@ -786,7 +786,9 @@ app.post("/v1/local/auth/bootstrap", async (request, reply) => {
       ],
     ] as const) {
       await client.query(
-        "INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km) VALUES ($1, $2, $3, $4, $4)",
+        `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
+         VALUES ($1, $2, $3, $4, $4)
+         ON CONFLICT (code) DO NOTHING`,
         [domain, code, zh, en],
       );
     }

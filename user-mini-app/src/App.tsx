@@ -1082,6 +1082,25 @@ export function App(): JSX.Element {
                       </span>
                     </div>
                   )}
+                  <section
+                    className="next-payment"
+                    aria-label="Manual payment safety"
+                  >
+                    <strong>
+                      {language === "en"
+                        ? "Manual payment safety"
+                        : language === "km"
+                          ? "សុវត្ថិភាពការទូទាត់ដោយដៃ"
+                          : "人工还款安全提示"}
+                    </strong>
+                    <small>
+                      {language === "en"
+                        ? "Confirm payment instructions with the licensed lender's operations team before paying. Do not transfer funds to account details sent through unverified messages."
+                        : language === "km"
+                          ? "សូមបញ្ជាក់ការណែនាំទូទាត់ជាមួយក្រុមប្រតិបត្តិរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណមុនពេលបង់ប្រាក់។ កុំផ្ទេរប្រាក់ទៅគណនីដែលផ្ញើតាមសារមិនបានផ្ទៀងផ្ទាត់។"
+                          : "付款前请向持牌机构运营团队确认还款指引；请勿向未经核验的消息中提供的账户转账。"}
+                    </small>
+                  </section>
                   <div className="installments">
                     {summary.repayment.installments.map((item) => (
                       <div key={item.installmentNo}>

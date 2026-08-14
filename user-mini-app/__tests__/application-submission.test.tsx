@@ -456,6 +456,9 @@ describe("applicant submission", () => {
     );
     expect(screen.getByText("Next payment")).toBeVisible();
     expect(screen.getAllByText(/#2.*2026-10-15/)).toHaveLength(2);
+    expect(screen.getByLabelText("Manual payment safety")).toHaveTextContent(
+      "Confirm payment instructions with the licensed lender's operations team",
+    );
     expect(screen.getByText("Paid")).toBeVisible();
     expect(screen.getByText("Pending")).toBeVisible();
     expect(screen.queryByText("Estimated monthly payment")).toBeNull();

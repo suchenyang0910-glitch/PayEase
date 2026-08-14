@@ -2,10 +2,15 @@ export type ApplicantApplication = Readonly<{
   status: string;
   approvedAmountMinor: string | null;
   rejectionConditionResolved: boolean;
+  supplementRequested: boolean;
 }>;
 
 export type ApplicantResult =
-  "approved" | "rejected-resolved" | "rejected-pending" | "reviewing";
+  | "approved"
+  | "supplement-requested"
+  | "rejected-resolved"
+  | "rejected-pending"
+  | "reviewing";
 
 /**
  * Converts server-authoritative application state into the four states that
@@ -15,6 +20,7 @@ export type ApplicantResult =
 export function applicantResult(
   application: ApplicantApplication | undefined,
 ): ApplicantResult {
+  if (application?.supplementRequested) return "supplement-requested";
   if (application?.approvedAmountMinor) return "approved";
   if (application?.status === "REJECTED") {
     return application.rejectionConditionResolved

@@ -106,6 +106,7 @@ integration("public applicant access", () => {
       "V0009__protect_paid_repayment_installments.sql",
       "V0010__encrypted_personal_profiles.sql",
       "V0011__user_contract_confirmation.sql",
+      "V0012__supplement_review_rounds.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -312,6 +313,77 @@ integration("public applicant access", () => {
       [applicationNo],
     );
     expect(audit.rows[0]!.count).toBe("1");
+  });
+
+  it("allows the same broker account to decide again after a returned supplement request", async () => {
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "integration-user-supplement",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    const applicantCookie = String(created.headers["set-cookie"]).split(
+      ";",
+    )[0]!;
+    const brokerCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+    const returned = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: { cookie: brokerCookie },
+      payload: { decision: "RETURNED", reasonCode: "SUPPLEMENT_REQUIRED" },
+    });
+    expect(returned.statusCode).toBe(200);
+    expect(returned.json()).toMatchObject({
+      applicationNo,
+      status: "BROKER_REVIEW",
+      decision: "RETURNED",
+    });
+    const applicantView = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/applications/${applicationNo}`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(applicantView.statusCode).toBe(200);
+    expect(applicantView.json()).toMatchObject({
+      application: { supplementRequested: true },
+    });
+    const approved = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: { cookie: brokerCookie },
+      payload: { decision: "APPROVED", reasonCode: "SUPPLEMENT_RECEIVED" },
+    });
+    expect(approved.statusCode).toBe(200);
+    expect(approved.json()).toMatchObject({
+      applicationNo,
+      status: "EMPLOYER_VERIFICATION",
+      decision: "APPROVED",
+    });
+    const reviewRounds = await database.query<{
+      decision: string;
+      review_round: number;
+    }>(
+      `SELECT decision, review_round FROM approval_events
+        WHERE application_id = (SELECT id FROM applications WHERE application_no = $1)
+          AND stage = 'BROKER_REVIEW'
+        ORDER BY review_round`,
+      [applicationNo],
+    );
+    expect(reviewRounds.rows).toEqual([
+      { decision: "RETURNED", review_round: 1 },
+      { decision: "APPROVED", review_round: 2 },
+    ]);
   });
 
   it("restores the same user's applications after authenticating through a second trusted bot", async () => {

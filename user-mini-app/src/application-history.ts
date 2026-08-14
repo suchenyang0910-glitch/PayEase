@@ -6,6 +6,7 @@ export type ApplicationHistoryEntry = Readonly<{
   tenorDays: number;
   approvedAmountMinor: string | null;
   rejectionConditionResolved: boolean;
+  supplementRequested: boolean;
   createdAt: string;
 }>;
 

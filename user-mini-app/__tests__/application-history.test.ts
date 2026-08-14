@@ -13,6 +13,7 @@ function entry(applicationNo: string): ApplicationHistoryEntry {
     tenorDays: 30,
     approvedAmountMinor: null,
     rejectionConditionResolved: false,
+    supplementRequested: false,
     createdAt: "2026-08-14T00:00:00.000Z",
   };
 }

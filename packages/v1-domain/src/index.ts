@@ -46,6 +46,7 @@ export type ApprovalRecord = Readonly<{
   actorUserId: string;
   actorRole: string;
   reasonCode: string;
+  reviewRound?: number;
   internalNote?: string;
   occurredAt: string;
 }>;
@@ -72,6 +73,8 @@ export type LoanApplication = Readonly<{
   tenorDays: number;
   status: ApplicationStatus;
   rejectionConditionResolved: boolean;
+  reviewRound: number;
+  supplementRequested: boolean;
   approvals: readonly ApprovalRecord[];
   auditEvents: readonly AuditEvent[];
 }>;
@@ -142,6 +145,8 @@ export const createDraftApplication = (
     ...parsed,
     status: "DRAFT",
     rejectionConditionResolved: false,
+    reviewRound: 1,
+    supplementRequested: false,
     approvals: [],
     auditEvents: [],
   };
@@ -193,41 +198,54 @@ export const recordApproval = (
       `Approval stage ${approval.stage} is not available in ${application.status}`,
     );
   }
+  const reviewRound = approval.reviewRound ?? application.reviewRound;
+  if (reviewRound !== application.reviewRound) {
+    throw new Error("Approval review round does not match the application");
+  }
+  const normalizedApproval = { ...approval, reviewRound };
   const sameStage = application.approvals.filter(
-    (item) => item.stage === approval.stage,
+    (item) =>
+      item.stage === normalizedApproval.stage &&
+      (item.reviewRound ?? 1) === normalizedApproval.reviewRound,
   );
   if (sameStage.some((item) => item.actorUserId === approval.actorUserId)) {
     throw new Error("The same account cannot approve the same stage twice");
   }
-  if (approval.decision === "RETURNED") {
+  if (normalizedApproval.decision === "RETURNED") {
     return {
       ...application,
-      approvals: [...application.approvals, approval],
+      reviewRound: application.reviewRound + 1,
+      supplementRequested: true,
+      approvals: [...application.approvals, normalizedApproval],
       auditEvents: [
         ...application.auditEvents,
         {
           eventType: "APPROVAL_RECORDED",
-          actorUserId: approval.actorUserId,
-          occurredAt: approval.occurredAt,
-          reasonCode: approval.reasonCode,
+          actorUserId: normalizedApproval.actorUserId,
+          occurredAt: normalizedApproval.occurredAt,
+          reasonCode: normalizedApproval.reasonCode,
         },
       ],
     };
   }
-  const next = stageResult(approval.stage, approval.decision);
+  const next = stageResult(
+    normalizedApproval.stage,
+    normalizedApproval.decision,
+  );
   if (next === undefined)
     throw new Error("Approval did not produce a state transition");
   return {
     ...application,
     status: next,
-    approvals: [...application.approvals, approval],
+    supplementRequested: false,
+    approvals: [...application.approvals, normalizedApproval],
     auditEvents: [
       ...application.auditEvents,
       {
         eventType: "APPROVAL_RECORDED",
-        actorUserId: approval.actorUserId,
-        occurredAt: approval.occurredAt,
-        reasonCode: approval.reasonCode,
+        actorUserId: normalizedApproval.actorUserId,
+        occurredAt: normalizedApproval.occurredAt,
+        reasonCode: normalizedApproval.reasonCode,
       },
     ],
   };

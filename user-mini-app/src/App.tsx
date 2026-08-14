@@ -23,6 +23,7 @@ type UserSummary = {
     tenorDays: number;
     approvedAmountMinor: string | null;
     rejectionConditionResolved: boolean;
+    supplementRequested: boolean;
   };
   terms: null | {
     approvedAmountMinor: string;
@@ -361,6 +362,7 @@ export function App(): JSX.Element {
           tenorDays: term,
           approvedAmountMinor: null,
           rejectionConditionResolved: false,
+          supplementRequested: false,
           createdAt: new Date().toISOString(),
         }),
       );
@@ -698,7 +700,13 @@ export function App(): JSX.Element {
                   : language === "zh-CN"
                     ? "申请未获批准"
                     : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
-                : t.reviewing}
+                : result === "supplement-requested"
+                  ? language === "en"
+                    ? "Additional information needed"
+                    : language === "zh-CN"
+                      ? "需要补充资料"
+                      : "ត្រូវការព័ត៌មានបន្ថែម"
+                  : t.reviewing}
           </h2>
           <p>
             {result === "approved"
@@ -719,7 +727,13 @@ export function App(): JSX.Element {
                     : language === "zh-CN"
                       ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
                       : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
-                  : t.noOffer}
+                  : result === "supplement-requested"
+                    ? language === "en"
+                      ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
+                      : language === "zh-CN"
+                        ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
+                        : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
+                    : t.noOffer}
           </p>
           <div className="application-number">
             <span>{t.status}</span>

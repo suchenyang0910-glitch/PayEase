@@ -241,6 +241,43 @@ describe("V1 controlled-pilot workflow", () => {
     );
   });
 
+  it("opens a new review round after supplementary information is requested", () => {
+    let item = application();
+    item = transitionApplication(
+      item,
+      "SUBMITTED",
+      "tg-1001",
+      "2026-08-12T07:00:00.000Z",
+    );
+    item = transitionApplication(
+      item,
+      "BROKER_REVIEW",
+      "broker-1",
+      "2026-08-12T07:01:00.000Z",
+    );
+    item = recordApproval(item, {
+      ...approval("BROKER_REVIEW", "broker-1"),
+      decision: "RETURNED",
+      reasonCode: "SUPPLEMENT_REQUIRED",
+    });
+    expect(item).toMatchObject({
+      status: "BROKER_REVIEW",
+      reviewRound: 2,
+      supplementRequested: true,
+    });
+    item = recordApproval(item, {
+      ...approval("BROKER_REVIEW", "broker-1"),
+      decision: "APPROVED",
+      reasonCode: "SUPPLEMENT_RECEIVED",
+    });
+    expect(item).toMatchObject({
+      status: "EMPLOYER_VERIFICATION",
+      reviewRound: 2,
+      supplementRequested: false,
+    });
+    expect(item.approvals.map((entry) => entry.reviewRound)).toEqual([1, 2]);
+  });
+
   it("has controlled trilingual labels", () => {
     expect(translate("zh-CN", "submit")).toBe("提交申请");
     expect(translate("en", "approved")).toBe("Approved");

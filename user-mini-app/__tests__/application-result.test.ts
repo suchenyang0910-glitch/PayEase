@@ -8,6 +8,7 @@ describe("applicant result display state", () => {
         status: "CONTRACT_PENDING",
         approvedAmountMinor: "25000",
         rejectionConditionResolved: false,
+        supplementRequested: false,
       }),
     ).toBe("approved");
   });
@@ -18,6 +19,7 @@ describe("applicant result display state", () => {
         status: "REJECTED",
         approvedAmountMinor: null,
         rejectionConditionResolved: false,
+        supplementRequested: false,
       }),
     ).toBe("rejected-pending");
   });
@@ -28,6 +30,7 @@ describe("applicant result display state", () => {
         status: "REJECTED",
         approvedAmountMinor: null,
         rejectionConditionResolved: true,
+        supplementRequested: false,
       }),
     ).toBe("rejected-resolved");
   });
@@ -38,7 +41,19 @@ describe("applicant result display state", () => {
         status: "LENDER_FINAL_REVIEW",
         approvedAmountMinor: null,
         rejectionConditionResolved: false,
+        supplementRequested: false,
       }),
     ).toBe("reviewing");
+  });
+
+  it("explains a supplement request before considering an offer or rejection", () => {
+    expect(
+      applicantResult({
+        status: "BROKER_REVIEW",
+        approvedAmountMinor: null,
+        rejectionConditionResolved: false,
+        supplementRequested: true,
+      }),
+    ).toBe("supplement-requested");
   });
 });

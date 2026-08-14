@@ -217,7 +217,11 @@ function eventHash(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("|"), "utf8").digest("hex");
 }
 
-type ApplicationRow = Readonly<{ id: string; status: string }>;
+type ApplicationRow = Readonly<{
+  id: string;
+  status: string;
+  review_round: number;
+}>;
 
 type SingleApproval = Readonly<{
   actorUserRef: string;
@@ -246,7 +250,7 @@ async function lockApplication(
   applicationNo: string,
 ): Promise<ApplicationRow | undefined> {
   const result = await client.query<ApplicationRow>(
-    "SELECT id, status FROM applications WHERE application_no = $1 FOR UPDATE",
+    "SELECT id, status, review_round FROM applications WHERE application_no = $1 FOR UPDATE",
     [applicationNo],
   );
   return result.rows[0];
@@ -285,8 +289,8 @@ async function recordSingleApproval(
         ? "REJECTED"
         : application.status;
   await client.query(
-    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6, now())`,
+    `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, review_round, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
     [
       application.id,
       stage,
@@ -294,8 +298,26 @@ async function recordSingleApproval(
       input.actorUserRef,
       input.actorRole,
       input.reasonCode,
+      application.review_round,
     ],
   );
+  if (input.decision === "RETURNED") {
+    await client.query(
+      `UPDATE applications
+          SET review_round = review_round + 1,
+              supplement_requested = true,
+              updated_at = now()
+        WHERE id = $1`,
+      [application.id],
+    );
+  } else {
+    await client.query(
+      `UPDATE applications
+          SET supplement_requested = false, updated_at = now()
+        WHERE id = $1`,
+      [application.id],
+    );
+  }
   await updateStatus(
     client,
     application,
@@ -308,7 +330,7 @@ async function recordSingleApproval(
     application.id,
     `${stage}_RECORDED`,
     input.actorUserRef,
-    input,
+    { ...input, reviewRound: application.review_round },
   );
   return toStatus;
 }
@@ -1098,9 +1120,10 @@ app.get(
       status: string;
       approved_amount_minor: string | null;
       rejection_condition_resolved: boolean;
+      supplement_requested: boolean;
     }>(
       `SELECT id, application_no, requested_amount_minor::text, currency, tenor_days, status,
-            approved_amount_minor::text, rejection_condition_resolved
+            approved_amount_minor::text, rejection_condition_resolved, supplement_requested
        FROM applications
        WHERE application_no = $1
          AND (
@@ -1131,6 +1154,7 @@ app.get(
         tenorDays: application.tenor_days,
         approvedAmountMinor: application.approved_amount_minor,
         rejectionConditionResolved: application.rejection_condition_resolved,
+        supplementRequested: application.supplement_requested,
       },
       loanDetails.terms,
       loanDetails.repayment,
@@ -1157,12 +1181,13 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     tenor_days: number;
     approved_amount_minor: string | null;
     rejection_condition_resolved: boolean;
+    supplement_requested: boolean;
     created_at: Date;
   }>(
     `SELECT applications.application_no, applications.status,
             applications.requested_amount_minor::text, applications.currency,
             applications.tenor_days, applications.approved_amount_minor::text,
-            applications.rejection_condition_resolved,
+            applications.rejection_condition_resolved, applications.supplement_requested,
             applications.created_at
        FROM applications
        JOIN users ON users.id = applications.user_id
@@ -1181,6 +1206,7 @@ app.get("/v1/local/public/applications", async (request, reply) => {
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
       rejectionConditionResolved: application.rejection_condition_resolved,
+      supplementRequested: application.supplement_requested,
       createdAt: application.created_at.toISOString(),
     })),
   };
@@ -1364,7 +1390,7 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
     .object({ applicationNo: z.string().min(1) })
     .parse(request.params);
   const result = await pool.query(
-    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, approved_amount_minor::text AS approved_amount_minor, rejection_condition_resolved, created_at
+    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, approved_amount_minor::text AS approved_amount_minor, rejection_condition_resolved, supplement_requested, created_at
      FROM applications WHERE application_no = $1`,
     [params.applicationNo],
   );
@@ -1381,6 +1407,7 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
       rejectionConditionResolved: application.rejection_condition_resolved,
+      supplementRequested: application.supplement_requested,
     },
     loanDetails.terms,
     loanDetails.repayment,
@@ -1568,7 +1595,7 @@ app.post(
     try {
       await client.query("BEGIN");
       const owned = await client.query<ApplicationRow>(
-        `SELECT applications.id, applications.status
+        `SELECT applications.id, applications.status, applications.review_round
            FROM applications
            JOIN users ON users.id = applications.user_id
           WHERE applications.application_no = $1

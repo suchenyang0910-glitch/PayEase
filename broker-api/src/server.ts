@@ -127,7 +127,8 @@ async function authenticatedApplicant(
     authenticated_bot_id: string;
   }>(
     `SELECT telegram_user_ref, authenticated_bot_id FROM telegram_auth_sessions
-     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+       AND last_seen_at > now() - interval '5 minutes'`,
     [eventHash([token])],
   );
   const identity = result.rows[0];
@@ -143,6 +144,13 @@ async function authenticatedApplicant(
     )
   )
     return undefined;
+  const touched = await pool.query(
+    `UPDATE telegram_auth_sessions SET last_seen_at = now()
+      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
+        AND last_seen_at > now() - interval '5 minutes'`,
+    [eventHash([token])],
+  );
+  if (!touched.rowCount) return undefined;
   return { telegramUserRef: identity.telegram_user_ref };
 }
 

@@ -111,6 +111,7 @@ integration("public applicant access", () => {
       "V0013__repayment_amount_integrity.sql",
       "V0014__application_status_transition_integrity.sql",
       "V0015__manual_action_idempotency.sql",
+      "V0016__telegram_session_idle_timeout.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -876,6 +877,18 @@ integration("public applicant access", () => {
         [applicationNo],
       );
       expect(createdUser.rows[0]?.telegram_user_ref).toBe("telegram-42424242");
+      await database.query(
+        `UPDATE telegram_auth_sessions
+            SET last_seen_at = now() - interval '5 minutes 1 second'
+          WHERE token_hash = $1`,
+        [createHash("sha256").update(firstCookie.split("=")[1]!).digest("hex")],
+      );
+      const idleSession = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+        headers: { cookie: firstCookie },
+      });
+      expect(idleSession.statusCode).toBe(401);
 
       const secondInitData = signedInitData(
         botB.botToken,

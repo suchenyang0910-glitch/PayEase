@@ -1,8 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
+import {
+  FINANCE_COPY,
+  FINANCE_LANGUAGE_LABELS,
+  type FinanceLanguage,
+} from "./finance-copy";
+import { financeReconciliationNotice } from "./finance-reconciliation-action";
 
 type Identity = {
   loginName: string;
-  preferredLanguage: "zh-CN" | "en" | "km";
+  preferredLanguage: FinanceLanguage;
   roles: string[];
 };
 type WorkItem = {
@@ -12,7 +18,6 @@ type WorkItem = {
   evidence_reference: string;
   status: string;
   assigned_to_user_ref: string | null;
-  resolution_reason: string | null;
 };
 const layout = {
   maxWidth: 1000,
@@ -35,30 +40,50 @@ async function api(path: string, init?: RequestInit) {
 }
 
 function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
+  const [language, setLanguage] = useState<FinanceLanguage>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const copy = FINANCE_COPY[language];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const response = await api("/v1/local/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ loginName, password }),
-    });
-    if (!response.ok) return setError("Login failed.");
-    const me = await api("/v1/local/auth/me");
-    if (!me.ok) return setError("Unable to establish session.");
-    done((await me.json()) as Identity);
+    setError("");
+    try {
+      const response = await api("/v1/local/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ loginName, password }),
+      });
+      if (!response.ok) return setError(copy.loginFailed);
+      const me = await api("/v1/local/auth/me");
+      if (!me.ok) return setError(copy.sessionFailed);
+      let identity = (await me.json()) as Identity;
+      if (identity.preferredLanguage !== language) {
+        try {
+          const persisted = await api("/v1/local/auth/me/preferred-language", {
+            method: "PATCH",
+            body: JSON.stringify({ preferredLanguage: language }),
+          });
+          if (persisted.ok)
+            identity = { ...identity, preferredLanguage: language };
+        } catch {
+          // A preference failure must not discard an authenticated session.
+        }
+      }
+      done(identity);
+    } catch {
+      setError(copy.sessionFailed);
+    }
   };
   return (
     <main style={layout}>
       <section style={panel}>
-        <h1>Employer finance reconciliation</h1>
+        <h1>{copy.title}</h1>
         <form
           onSubmit={submit}
           style={{ display: "grid", gap: 10, maxWidth: 400 }}
         >
           <label>
-            Account
+            {copy.account}
             <input
               autoComplete="username"
               value={loginName}
@@ -67,7 +92,7 @@ function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
             />
           </label>
           <label>
-            Password
+            {copy.password}
             <input
               type="password"
               autoComplete="current-password"
@@ -76,7 +101,20 @@ function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
               required
             />
           </label>
-          <button>Sign in</button>
+          <label>
+            {copy.language}
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as FinanceLanguage)}
+            >
+              {Object.entries(FINANCE_LANGUAGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button>{copy.signIn}</button>
           {error ? <p role="alert">{error}</p> : null}
         </form>
       </section>
@@ -91,6 +129,7 @@ export function App(): JSX.Element {
   const [assignee, setAssignee] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_EVIDENCE_MATCHED");
   const [notice, setNotice] = useState("");
+  const [runningAction, setRunningAction] = useState(false);
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (response) => {
@@ -101,39 +140,58 @@ export function App(): JSX.Element {
       })
       .finally(() => setChecking(false));
   }, []);
+  const language = identity?.preferredLanguage ?? "en";
+  const copy = FINANCE_COPY[language];
+  const permitted = identity?.roles.includes("EMPLOYER_FINANCE") ?? false;
   const load = async () => {
-    const response = await api("/v1/local/reconciliation/open");
-    if (!response.ok) return setNotice(`Load blocked: ${response.status}`);
-    setItems((await response.json()) as WorkItem[]);
+    setRunningAction(true);
+    setNotice("");
+    try {
+      const response = await api("/v1/local/reconciliation/open");
+      if (!response.ok)
+        return setNotice(
+          `${copy.blocked} (${response.status}): ${copy.loadFailed}`,
+        );
+      setItems((await response.json()) as WorkItem[]);
+    } catch {
+      setNotice(`${copy.blocked}: ${copy.loadFailed}`);
+    } finally {
+      setRunningAction(false);
+    }
   };
   const action = async (
     id: string,
     operation: "assign" | "match" | "difference" | "close",
   ) => {
-    const body =
-      operation === "assign" ? { assigneeLoginName: assignee } : { reasonCode };
-    const response = await api(`/v1/local/reconciliation/${id}/${operation}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({}));
-    setNotice(
-      response.ok
-        ? `Recorded: ${JSON.stringify(payload)}`
-        : `Blocked (${response.status}): ${JSON.stringify(payload)}`,
-    );
-    if (response.ok) await load();
+    setRunningAction(true);
+    setNotice("");
+    try {
+      const body =
+        operation === "assign"
+          ? { assigneeLoginName: assignee }
+          : { reasonCode };
+      const result = await financeReconciliationNotice(
+        () =>
+          api(`/v1/local/reconciliation/${id}/${operation}`, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        copy,
+      );
+      setNotice(result.notice);
+      if (result.succeeded) {
+        const response = await api("/v1/local/reconciliation/open");
+        if (response.ok) setItems((await response.json()) as WorkItem[]);
+      }
+    } finally {
+      setRunningAction(false);
+    }
   };
-  if (checking) return <main style={layout}>Checking secure session…</main>;
-  if (!identity) return <Login done={setIdentity} />;
-  const permitted = identity.roles.includes("EMPLOYER_FINANCE");
   const logout = async () => {
     await api("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
   };
-  const updateLanguage = async (
-    preferredLanguage: Identity["preferredLanguage"],
-  ) => {
+  const updateLanguage = async (preferredLanguage: FinanceLanguage) => {
     const response = await api("/v1/local/auth/me/preferred-language", {
       method: "PATCH",
       body: JSON.stringify({ preferredLanguage }),
@@ -143,64 +201,65 @@ export function App(): JSX.Element {
         current ? { ...current, preferredLanguage } : current,
       );
   };
+  if (checking) return <main style={layout}>{copy.checking}</main>;
+  if (!identity) return <Login done={setIdentity} />;
   return (
     <main style={layout}>
       <header style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
-          <h1>Employer finance reconciliation</h1>
+          <h1>{copy.title}</h1>
           <p>
-            {identity.loginName} ·{" "}
+            {copy.signedInAs}: {identity.loginName} ·{" "}
             <select
               value={identity.preferredLanguage}
               onChange={(e) =>
-                void updateLanguage(
-                  e.target.value as Identity["preferredLanguage"],
-                )
+                void updateLanguage(e.target.value as FinanceLanguage)
               }
             >
-              <option value="zh-CN">中文</option>
-              <option value="en">English</option>
-              <option value="km">ខ្មែរ</option>
+              {Object.entries(FINANCE_LANGUAGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </p>
         </div>
-        <button onClick={logout}>Sign out</button>
+        <button onClick={logout}>{copy.signOut}</button>
       </header>
       <section style={panel}>
         {permitted ? (
           <>
-            <h2>Manual reconciliation work queue</h2>
-            <p>
-              Only assigned finance accounts can match, flag a difference, or
-              close a work item.
-            </p>
+            <h2>{copy.queueTitle}</h2>
+            <p>{copy.queueDescription}</p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <label>
-                Assign to account
+                {copy.assignee}
                 <input
                   value={assignee}
                   onChange={(e) => setAssignee(e.target.value)}
-                  placeholder="finance.account"
+                  placeholder={copy.assigneePlaceholder}
                 />
               </label>
               <label>
-                Resolution reason
+                {copy.reasonCode}
                 <input
                   value={reasonCode}
                   onChange={(e) => setReasonCode(e.target.value)}
                 />
               </label>
-              <button onClick={load}>Load open queue</button>
+              <button disabled={runningAction} onClick={() => void load()}>
+                {copy.loadQueue}
+              </button>
             </div>
             <div style={{ overflowX: "auto", marginTop: 18 }}>
               <table>
                 <thead>
                   <tr>
-                    <th>Application</th>
-                    <th>Evidence</th>
-                    <th>Status</th>
-                    <th>Assigned</th>
-                    <th>Actions</th>
+                    <th>{copy.application}</th>
+                    <th>{copy.evidence}</th>
+                    <th>{copy.status}</th>
+                    <th>{copy.assigned}</th>
+                    <th>{copy.actions}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -214,19 +273,28 @@ export function App(): JSX.Element {
                       <td>{item.assigned_to_user_ref ?? "—"}</td>
                       <td style={{ display: "flex", gap: 6 }}>
                         <button
-                          disabled={!assignee}
-                          onClick={() => action(item.id, "assign")}
+                          disabled={!assignee || runningAction}
+                          onClick={() => void action(item.id, "assign")}
                         >
-                          Assign
+                          {copy.assign}
                         </button>
-                        <button onClick={() => action(item.id, "match")}>
-                          Match
+                        <button
+                          disabled={runningAction}
+                          onClick={() => void action(item.id, "match")}
+                        >
+                          {copy.match}
                         </button>
-                        <button onClick={() => action(item.id, "difference")}>
-                          Difference
+                        <button
+                          disabled={runningAction}
+                          onClick={() => void action(item.id, "difference")}
+                        >
+                          {copy.difference}
                         </button>
-                        <button onClick={() => action(item.id, "close")}>
-                          Close
+                        <button
+                          disabled={runningAction}
+                          onClick={() => void action(item.id, "close")}
+                        >
+                          {copy.close}
                         </button>
                       </td>
                     </tr>
@@ -242,8 +310,8 @@ export function App(): JSX.Element {
           </>
         ) : (
           <>
-            <h2>Reconciliation unavailable</h2>
-            <p>Your account does not hold the EMPLOYER_FINANCE role.</p>
+            <h2>{copy.unavailable}</h2>
+            <p>{copy.unavailableDescription}</p>
           </>
         )}
       </section>

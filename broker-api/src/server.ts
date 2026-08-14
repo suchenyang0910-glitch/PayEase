@@ -85,6 +85,11 @@ const app = Fastify({ logger: true });
 const requestTraceContext = new AsyncLocalStorage<{ traceId: string }>();
 const acceptedTraceId =
   /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i;
+const apiSecurityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+} as const;
 
 function traceIdForRequest(header: string | string[] | undefined): string {
   const candidate = typeof header === "string" ? header.trim() : "";
@@ -376,6 +381,12 @@ app.addHook("onSend", async (_request, reply) => {
   // review environments.
   if (isControlledPreview())
     reply.header("X-PayEase-Environment", "controlled-preview");
+  // These are safe for JSON responses regardless of the calling browser.
+  // Document-level CSP, framing and HSTS remain the responsibility of the
+  // TLS reverse proxy because the Telegram Mini App and back-office portals
+  // deliberately require different document policies.
+  for (const [name, value] of Object.entries(apiSecurityHeaders))
+    reply.header(name, value);
   reply.header("Cache-Control", "no-store");
 });
 

@@ -135,6 +135,14 @@ integration("public applicant access", () => {
     });
     expect(live.statusCode).toBe(200);
     expect(live.headers["x-trace-id"]).toBe(traceId);
+    expect(live.headers["x-content-type-options"]).toBe("nosniff");
+    expect(live.headers["referrer-policy"]).toBe(
+      "strict-origin-when-cross-origin",
+    );
+    expect(live.headers["permissions-policy"]).toBe(
+      "camera=(), microphone=(), geolocation=(), payment=()",
+    );
+    expect(live.headers["cache-control"]).toBe("no-store");
     expect(live.json()).toEqual({ status: "live", service: "broker-api" });
 
     const ready = await brokerApi.app.inject({

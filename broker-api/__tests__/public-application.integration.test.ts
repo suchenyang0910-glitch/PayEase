@@ -190,6 +190,18 @@ integration("public applicant access", () => {
     process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
     process.env.REQUIRE_TELEGRAM_AUTH = "true";
     try {
+      const unauthenticatedList = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+      });
+      expect(unauthenticatedList.statusCode).toBe(401);
+      const unauthenticatedLanguageUpdate = await brokerApi.app.inject({
+        method: "PUT",
+        url: "/v1/local/public/profile/preferred-language",
+        payload: { preferredLanguage: "en" },
+      });
+      expect(unauthenticatedLanguageUpdate.statusCode).toBe(401);
+
       const firstLogin = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/public/telegram-sessions",
@@ -216,6 +228,13 @@ integration("public applicant access", () => {
       expect(created.statusCode).toBe(201);
       const applicationNo = (created.json() as { applicationNo: string })
         .applicationNo;
+      const createdUser = await database.query<{ telegram_user_ref: string }>(
+        `SELECT users.telegram_user_ref
+           FROM applications JOIN users ON users.id = applications.user_id
+          WHERE applications.application_no = $1`,
+        [applicationNo],
+      );
+      expect(createdUser.rows[0]?.telegram_user_ref).toBe("telegram-42424242");
 
       const secondLogin = await brokerApi.app.inject({
         method: "POST",

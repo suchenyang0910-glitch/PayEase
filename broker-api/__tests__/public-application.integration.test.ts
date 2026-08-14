@@ -40,7 +40,7 @@ let adminFixtureSequence = 0;
 async function adminCookieForRole(
   database: Pool,
   roleCode: string,
-  domain: "BROKER" | "LENDER" | "EMPLOYER",
+  domain: "OPS" | "BROKER" | "LENDER" | "EMPLOYER",
 ): Promise<string> {
   const department = await database.query<{ id: string }>(
     `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
@@ -253,6 +253,71 @@ integration("public applicant access", () => {
           .digest("hex"),
       },
     ]);
+  });
+
+  it("lets a different platform administrator disable an account and revoke its sessions", async () => {
+    const opsCookie = await adminCookieForRole(database, "OPS_ADMIN", "OPS");
+    const opsMe = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: opsCookie },
+    });
+    expect(opsMe.statusCode).toBe(200);
+    const opsLoginName = (opsMe.json() as { loginName: string }).loginName;
+    const targetCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+    const targetMe = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: targetCookie },
+    });
+    expect(targetMe.statusCode).toBe(200);
+    const targetLoginName = (targetMe.json() as { loginName: string })
+      .loginName;
+
+    const disabled = await brokerApi.app.inject({
+      method: "PATCH",
+      url: `/v1/local/admin/accounts/${targetLoginName}/activity`,
+      headers: { cookie: opsCookie },
+      payload: { isActive: false },
+    });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json()).toMatchObject({
+      loginName: targetLoginName,
+      isActive: false,
+      revokedSessions: 1,
+    });
+    const disabledSession = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: targetCookie },
+    });
+    expect(disabledSession.statusCode).toBe(401);
+
+    const selfDisable = await brokerApi.app.inject({
+      method: "PATCH",
+      url: `/v1/local/admin/accounts/${opsLoginName}/activity`,
+      headers: { cookie: opsCookie },
+      payload: { isActive: false },
+    });
+    expect(selfDisable.statusCode).toBe(409);
+    expect(selfDisable.json()).toEqual({
+      code: "ADMIN_SELF_DEACTIVATION_BLOCKED",
+    });
+    const audit = await database.query<{
+      event_type: string;
+      entity_type: string;
+    }>(
+      `SELECT event_type, entity_type FROM audit_events
+        WHERE entity_type = 'ADMIN_ACCOUNT' ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+    );
+    expect(audit.rows[0]).toEqual({
+      event_type: "ADMIN_ACCOUNT_DEACTIVATED",
+      entity_type: "ADMIN_ACCOUNT",
+    });
   });
 
   it("returns full loan and repayment details only to the application's opaque cookie", async () => {

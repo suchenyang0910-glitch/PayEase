@@ -188,3 +188,7 @@ export const adminAccountCreateSchema = z.object({
     .max(4),
   preferredLanguage: languageSchema,
 });
+
+export const adminAccountActivitySchema = z.object({
+  isActive: z.boolean(),
+});

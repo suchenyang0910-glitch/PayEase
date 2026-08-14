@@ -6,6 +6,7 @@ import {
   brokerReviewSchema,
   bootstrapAdminSchema,
   adminAccountCreateSchema,
+  adminAccountActivitySchema,
   departmentCreateSchema,
   roleCreateSchema,
   contractConfirmationSchema,
@@ -368,14 +369,19 @@ async function addAuditEvent(
   eventType: string,
   actorUserRef: string,
   payload: Record<string, unknown>,
+  entityType = "APPLICATION",
 ): Promise<void> {
   const payloadHash = eventHash([JSON.stringify(payload)]);
   const previous = await client.query<{ event_hash: string }>(
-    "SELECT event_hash FROM audit_events WHERE entity_type = 'APPLICATION' AND entity_id = $1 ORDER BY occurred_at DESC LIMIT 1",
-    [entityId],
+    "SELECT event_hash FROM audit_events WHERE entity_type = $1 AND entity_id = $2 ORDER BY occurred_at DESC, id DESC LIMIT 1",
+    [entityType, entityId],
   );
   const previousHash = previous.rows[0]?.event_hash ?? null;
+  // Preserve the existing application-ledger hash formula. Other entity types
+  // include their type in the commitment so identical UUIDs cannot be chained
+  // across unrelated audit domains.
   const auditHash = eventHash([
+    ...(entityType === "APPLICATION" ? [] : [entityType]),
     entityId,
     eventType,
     actorUserRef,
@@ -385,8 +391,16 @@ async function addAuditEvent(
   await client.query(
     `INSERT INTO audit_events
       (entity_type, entity_id, event_type, actor_user_ref, payload_hash, previous_event_hash, event_hash, occurred_at)
-     VALUES ('APPLICATION', $1, $2, $3, $4, $5, $6, now())`,
-    [entityId, eventType, actorUserRef, payloadHash, previousHash, auditHash],
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+    [
+      entityType,
+      entityId,
+      eventType,
+      actorUserRef,
+      payloadHash,
+      previousHash,
+      auditHash,
+    ],
   );
 }
 
@@ -908,6 +922,76 @@ app.post("/v1/local/admin/accounts", async (request, reply) => {
     client.release();
   }
 });
+
+// Disabling an internal account is an incident/offboarding control, not a
+// cosmetic directory edit. Revoke every outstanding session in the same
+// transaction so the account loses access immediately.
+app.patch(
+  "/v1/local/admin/accounts/:loginName/activity",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const params = z
+      .object({ loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/) })
+      .parse(request.params);
+    const input = adminAccountActivitySchema.parse(request.body);
+    const actorLoginName = request.adminIdentity!.loginName;
+    if (!input.isActive && params.loginName === actorLoginName) {
+      return reply.code(409).send({ code: "ADMIN_SELF_DEACTIVATION_BLOCKED" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const account = await client.query<{
+        id: string;
+        login_name: string;
+        is_active: boolean;
+      }>(
+        `UPDATE admin_accounts SET is_active = $1, updated_at = now()
+          WHERE login_name = $2
+          RETURNING id, login_name, is_active`,
+        [input.isActive, params.loginName],
+      );
+      const row = account.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "ADMIN_ACCOUNT_NOT_FOUND" });
+      }
+      const revoked = input.isActive
+        ? 0
+        : ((
+            await client.query(
+              `UPDATE admin_sessions SET revoked_at = now()
+                WHERE account_id = $1 AND revoked_at IS NULL`,
+              [row.id],
+            )
+          ).rowCount ?? 0);
+      await addAuditEvent(
+        client,
+        row.id,
+        input.isActive
+          ? "ADMIN_ACCOUNT_REACTIVATED"
+          : "ADMIN_ACCOUNT_DEACTIVATED",
+        actorLoginName,
+        {
+          targetLoginNameHash: eventHash([row.login_name]),
+          revokedSessions: revoked,
+        },
+        "ADMIN_ACCOUNT",
+      );
+      await client.query("COMMIT");
+      return {
+        loginName: row.login_name,
+        isActive: row.is_active,
+        revokedSessions: revoked,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
 
 const createStageHandler = (
   expectedStatus: string,

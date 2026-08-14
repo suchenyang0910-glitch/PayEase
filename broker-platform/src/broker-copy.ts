@@ -19,6 +19,15 @@ export type BrokerCopy = Readonly<{
   viewProfile: string;
   documentsComplete: string;
   requestSupplement: string;
+  loadSupplementResponses: string;
+  supplementResponses: string;
+  noSupplementResponses: string;
+  applicantLanguage: string;
+  submittedAt: string;
+  viewSupplementResponse: string;
+  supplementResponseContent: string;
+  supplementResponseUnavailable: string;
+  supplementResponseDetailUnavailable: string;
   applicantProfile: string;
   accessLogged: string;
   fullName: string;
@@ -85,6 +94,17 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     viewProfile: "View authorised profile",
     documentsComplete: "Documents complete",
     requestSupplement: "Request supplement",
+    loadSupplementResponses: "Load supplement responses",
+    supplementResponses: "Applicant supplement responses",
+    noSupplementResponses: "No supplement responses have been submitted.",
+    applicantLanguage: "Applicant language",
+    submittedAt: "Submitted at",
+    viewSupplementResponse: "View response",
+    supplementResponseContent: "Supplement response (access is audited)",
+    supplementResponseUnavailable:
+      "Supplement responses are currently unavailable.",
+    supplementResponseDetailUnavailable:
+      "The supplement response could not be read.",
     applicantProfile: "Applicant profile",
     accessLogged: "access logged",
     fullName: "Full name",
@@ -157,6 +177,15 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     viewProfile: "查看已授权资料",
     documentsComplete: "资料齐全",
     requestSupplement: "请求补件",
+    loadSupplementResponses: "加载补件回应",
+    supplementResponses: "申请人补件回应",
+    noSupplementResponses: "申请人尚未提交补件回应。",
+    applicantLanguage: "申请人语言",
+    submittedAt: "提交时间",
+    viewSupplementResponse: "查看回应",
+    supplementResponseContent: "补件回应内容（访问已审计）",
+    supplementResponseUnavailable: "暂时无法加载补件回应。",
+    supplementResponseDetailUnavailable: "暂时无法读取补件回应内容。",
     applicantProfile: "申请人资料",
     accessLogged: "访问已记录",
     fullName: "姓名",
@@ -222,6 +251,15 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     viewProfile: "មើលព័ត៌មានដែលបានអនុញ្ញាត",
     documentsComplete: "ឯកសារគ្រប់គ្រាន់",
     requestSupplement: "ស្នើឯកសារបន្ថែម",
+    loadSupplementResponses: "ផ្ទុកការឆ្លើយតបបន្ថែម",
+    supplementResponses: "ការឆ្លើយតបបន្ថែមរបស់អ្នកដាក់ពាក្យ",
+    noSupplementResponses: "មិនទាន់មានការឆ្លើយតបបន្ថែមត្រូវបានដាក់ស្នើទេ។",
+    applicantLanguage: "ភាសារបស់អ្នកដាក់ពាក្យ",
+    submittedAt: "ពេលវេលាដាក់ស្នើ",
+    viewSupplementResponse: "មើលការឆ្លើយតប",
+    supplementResponseContent: "ការឆ្លើយតបបន្ថែម (ការចូលមើលត្រូវបានកត់ត្រា)",
+    supplementResponseUnavailable: "មិនអាចផ្ទុកការឆ្លើយតបបន្ថែមបានទេ។",
+    supplementResponseDetailUnavailable: "មិនអាចអានការឆ្លើយតបបន្ថែមបានទេ។",
     applicantProfile: "ព័ត៌មានអ្នកដាក់ពាក្យ",
     accessLogged: "ការចូលមើលត្រូវបានកត់ត្រា",
     fullName: "ឈ្មោះពេញ",

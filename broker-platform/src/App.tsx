@@ -7,6 +7,12 @@ import {
 } from "./broker-directory";
 import { brokerProfileResult } from "./broker-profile-action";
 import { brokerReviewNotice } from "./broker-review-action";
+import {
+  parseBrokerSupplementResponseDetail,
+  parseBrokerSupplementResponseList,
+  type BrokerSupplementResponseDetail,
+  type BrokerSupplementResponseEntry,
+} from "./broker-supplement-response";
 
 type Language = "zh-CN" | "en" | "km";
 type Domain = "OPS" | "BROKER" | "LENDER" | "EMPLOYER";
@@ -217,6 +223,15 @@ export function App(): JSX.Element {
   const [selectedServiceCase, setSelectedServiceCase] =
     useState<ServiceCaseDetail>();
   const [serviceCaseLoading, setServiceCaseLoading] = useState(false);
+  const [supplementResponses, setSupplementResponses] = useState<
+    BrokerSupplementResponseEntry[]
+  >([]);
+  const [supplementResponsesLoaded, setSupplementResponsesLoaded] =
+    useState(false);
+  const [selectedSupplementResponse, setSelectedSupplementResponse] =
+    useState<BrokerSupplementResponseDetail>();
+  const [supplementResponseLoading, setSupplementResponseLoading] =
+    useState(false);
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
   const [accounts, setAccounts] = useState<DirectoryAccount[]>([]);
@@ -389,6 +404,55 @@ export function App(): JSX.Element {
       setProfileLoading(false);
     }
   };
+  const loadSupplementResponses = async () => {
+    if (!applicationNo) return;
+    setSupplementResponseLoading(true);
+    setSelectedSupplementResponse(undefined);
+    setNotice("");
+    try {
+      const response = await request(
+        `/v1/local/applications/${encodeURIComponent(applicationNo)}/supplement-responses`,
+      );
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const entries = parseBrokerSupplementResponseList(
+        await response.json().catch(() => undefined),
+      );
+      if (!response.ok || !entries) {
+        setNotice(copy.supplementResponseUnavailable);
+        return;
+      }
+      setSupplementResponses(entries);
+      setSupplementResponsesLoaded(true);
+    } finally {
+      setSupplementResponseLoading(false);
+    }
+  };
+  const viewSupplementResponse = async (responseNo: string) => {
+    setSupplementResponseLoading(true);
+    setNotice("");
+    try {
+      const response = await request(
+        `/v1/local/supplement-responses/${encodeURIComponent(responseNo)}`,
+      );
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const detail = parseBrokerSupplementResponseDetail(
+        await response.json().catch(() => undefined),
+      );
+      if (!response.ok || !detail) {
+        setNotice(copy.supplementResponseDetailUnavailable);
+        return;
+      }
+      setSelectedSupplementResponse(detail);
+    } finally {
+      setSupplementResponseLoading(false);
+    }
+  };
   const loadServiceCases = async () => {
     setServiceCaseLoading(true);
     setNotice("");
@@ -512,6 +576,9 @@ export function App(): JSX.Element {
                 onChange={(e) => {
                   setApplicationNo(e.target.value);
                   setPersonalProfile(undefined);
+                  setSupplementResponses([]);
+                  setSupplementResponsesLoaded(false);
+                  setSelectedSupplementResponse(undefined);
                 }}
                 placeholder="APP-…"
                 required
@@ -531,6 +598,12 @@ export function App(): JSX.Element {
                 onClick={() => void loadPersonalProfile()}
               >
                 {profileLoading ? "…" : copy.viewProfile}
+              </button>
+              <button
+                disabled={!applicationNo || supplementResponseLoading}
+                onClick={() => void loadSupplementResponses()}
+              >
+                {supplementResponseLoading ? "…" : copy.loadSupplementResponses}
               </button>
               <button
                 disabled={!applicationNo || reviewInProgress}
@@ -576,6 +649,50 @@ export function App(): JSX.Element {
                     {personalProfile.consent.phoneVersion ?? copy.notRecorded}
                   </dd>
                 </dl>
+              </section>
+            ) : null}
+            {supplementResponses.length > 0 ? (
+              <section
+                aria-live="polite"
+                style={{ ...card, marginTop: 0, background: "#f8fafc" }}
+              >
+                <h3>{copy.supplementResponses}</h3>
+                <ul>
+                  {supplementResponses.map((response) => (
+                    <li key={response.responseNo}>
+                      <strong>{response.responseNo}</strong> ·{" "}
+                      {copy.applicantLanguage}: {response.applicantLanguage} ·{" "}
+                      {copy.submittedAt}: {response.submittedAt}{" "}
+                      <button
+                        disabled={supplementResponseLoading}
+                        onClick={() =>
+                          void viewSupplementResponse(response.responseNo)
+                        }
+                      >
+                        {copy.viewSupplementResponse}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : applicationNo &&
+              supplementResponsesLoaded &&
+              !supplementResponseLoading ? (
+              <p>{copy.noSupplementResponses}</p>
+            ) : null}
+            {selectedSupplementResponse ? (
+              <section
+                aria-live="polite"
+                style={{ ...card, marginTop: 0, background: "#f8fafc" }}
+              >
+                <h3>{copy.supplementResponseContent}</h3>
+                <p>
+                  <strong>{selectedSupplementResponse.responseNo}</strong> ·{" "}
+                  {selectedSupplementResponse.submittedAt}
+                </p>
+                <p style={{ whiteSpace: "pre-wrap" }}>
+                  {selectedSupplementResponse.message}
+                </p>
               </section>
             ) : null}
           </div>

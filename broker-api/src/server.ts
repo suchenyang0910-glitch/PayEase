@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { Pool, type PoolClient } from "pg";
@@ -68,6 +69,7 @@ import {
 declare module "fastify" {
   interface FastifyRequest {
     adminIdentity?: { loginName: string; roles: string[] };
+    traceId?: string;
   }
 }
 
@@ -80,6 +82,20 @@ if (!databaseUrl) {
 
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
 const app = Fastify({ logger: true });
+const requestTraceContext = new AsyncLocalStorage<{ traceId: string }>();
+const acceptedTraceId =
+  /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i;
+
+function traceIdForRequest(header: string | string[] | undefined): string {
+  const candidate = typeof header === "string" ? header.trim() : "";
+  return acceptedTraceId.test(candidate)
+    ? candidate.toLowerCase()
+    : randomUUID();
+}
+
+function currentTraceId(): string {
+  return requestTraceContext.getStore()?.traceId ?? randomUUID();
+}
 
 // Schema failures are client input errors.  Never surface them as a 500, which
 // would make malformed public submissions look like a service outage.
@@ -88,13 +104,17 @@ app.setErrorHandler((error, request, reply) => {
     return reply.code(400).send({
       code: "VALIDATION_ERROR",
       fields: error.issues.map((issue) => issue.path.join(".")),
+      request_id: request.traceId ?? currentTraceId(),
     });
   }
   // Internal errors can contain database constraint names, ciphertext parsing
   // details, or other operational context. Log them for operators, but do not
   // expose that detail to an applicant or back-office browser.
   request.log.error({ err: error }, "Unhandled PayEase API error");
-  return reply.code(500).send({ code: "INTERNAL_ERROR" });
+  return reply.code(500).send({
+    code: "INTERNAL_ERROR",
+    request_id: request.traceId ?? currentTraceId(),
+  });
 });
 
 function sessionToken(cookieHeader: string | undefined): string | undefined {
@@ -189,6 +209,10 @@ async function requireOpsAdmin(
 }
 
 app.addHook("onRequest", async (request, reply) => {
+  const traceId = traceIdForRequest(request.headers["x-trace-id"]);
+  request.traceId = traceId;
+  requestTraceContext.enterWith({ traceId });
+  reply.header("X-Trace-Id", traceId);
   const requestPath = request.url.split("?", 1)[0]!;
   const isPublicUserApplicationSubmission =
     request.method === "POST" && requestPath === "/v1/local/applications";
@@ -584,18 +608,20 @@ async function addAuditEvent(
     entityId,
     eventType,
     actorUserRef,
+    currentTraceId(),
     payloadHash,
     previousHash ?? "",
   ]);
   await client.query(
     `INSERT INTO audit_events
-      (entity_type, entity_id, event_type, actor_user_ref, payload_hash, previous_event_hash, event_hash, occurred_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+      (entity_type, entity_id, event_type, actor_user_ref, trace_id, payload_hash, previous_event_hash, event_hash, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`,
     [
       entityType,
       entityId,
       eventType,
       actorUserRef,
+      currentTraceId(),
       payloadHash,
       previousHash,
       auditHash,
@@ -626,14 +652,23 @@ async function addAuthenticationAuditEvent(
     entityId,
     eventType,
     actorUserRef,
+    currentTraceId(),
     payloadHash,
     previousHash ?? "",
   ]);
   await client.query(
     `INSERT INTO audit_events
-      (entity_type, entity_id, event_type, actor_user_ref, payload_hash, previous_event_hash, event_hash, occurred_at)
-     VALUES ('ADMIN_AUTH', $1, $2, $3, $4, $5, $6, now())`,
-    [entityId, eventType, actorUserRef, payloadHash, previousHash, auditHash],
+      (entity_type, entity_id, event_type, actor_user_ref, trace_id, payload_hash, previous_event_hash, event_hash, occurred_at)
+     VALUES ('ADMIN_AUTH', $1, $2, $3, $4, $5, $6, $7, now())`,
+    [
+      entityId,
+      eventType,
+      actorUserRef,
+      currentTraceId(),
+      payloadHash,
+      previousHash,
+      auditHash,
+    ],
   );
 }
 

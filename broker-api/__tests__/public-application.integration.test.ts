@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0020__default_rbac_khmer_display_names.sql",
+      filename: "V0021__audit_trace_id.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -211,15 +211,18 @@ integration("public applicant access", () => {
     expect(unknown.headers["set-cookie"]).toBeUndefined();
     expect(wrongPassword.headers["set-cookie"]).toBeUndefined();
 
+    const loginTraceId = "9a19c1ef-5479-4a7d-9289-e73256624129";
     const valid = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/auth/login",
+      headers: { "x-trace-id": loginTraceId },
       payload: {
         loginName: "login-boundary-test",
         password: "correct-login-password",
       },
     });
     expect(valid.statusCode).toBe(200);
+    expect(valid.headers["x-trace-id"]).toBe(loginTraceId);
     expect(String(valid.headers["set-cookie"])).toContain("HttpOnly");
     expect(String(valid.headers["set-cookie"])).toContain("Max-Age=1800");
     expect(String(valid.headers["set-cookie"])).toContain(
@@ -301,6 +304,12 @@ integration("public applicant access", () => {
           .digest("hex"),
       },
     ]);
+    const persistedTrace = await database.query<{ trace_id: string }>(
+      `SELECT trace_id FROM audit_events
+        WHERE entity_type = 'ADMIN_AUTH' AND event_type = 'AUTH_LOGIN_SUCCESS'
+        ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+    );
+    expect(persistedTrace.rows).toEqual([{ trace_id: loginTraceId }]);
   });
 
   it("rejects a protected back-office mutation without the double-submit CSRF token", async () => {

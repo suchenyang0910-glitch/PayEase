@@ -19,6 +19,7 @@ import { shouldKeepApplicantSessionAlive } from "./applicant-session-keepalive.t
 import { isControlledPreviewBuild } from "./deployment-mode.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
 import { usdInputToMinor } from "./usd-amount.ts";
+import { applicantProfileValidationError } from "./applicant-profile.ts";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -295,6 +296,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     details: "填写个人资料",
     name: "姓名",
     phone: "手机号码",
+    phoneInvalid: "请输入有效的手机号码。",
     employer: "所在企业",
     consent: "我已阅读并同意个人信息授权与隐私说明",
     send: "提交至助贷审核",
@@ -336,6 +338,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     details: "Your details",
     name: "Full name",
     phone: "Mobile number",
+    phoneInvalid: "Enter a valid mobile number.",
     employer: "Employer",
     consent: "I agree to the personal-data authorization and privacy notice",
     send: "Submit for broker review",
@@ -378,6 +381,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     details: "ព័ត៌មានរបស់អ្នក",
     name: "ឈ្មោះពេញ",
     phone: "លេខទូរស័ព្ទ",
+    phoneInvalid: "សូមបញ្ចូលលេខទូរស័ព្ទត្រឹមត្រូវ។",
     employer: "ក្រុមហ៊ុន",
     consent: "ខ្ញុំយល់ព្រមលើការអនុញ្ញាតប្រើព័ត៌មានផ្ទាល់ខ្លួន",
     send: "ដាក់ស្នើសម្រាប់ការពិនិត្យ",
@@ -460,6 +464,7 @@ export function App(): JSX.Element {
   const t = labels[language];
   const amountInputError =
     t.amountInvalid ?? "Enter an amount from USD 10.00 to 500.00.";
+  const phoneInputError = t.phoneInvalid ?? "Enter a valid mobile number.";
   const requestedAmountMinor = usdInputToMinor(amountInput);
   const showPreviewBadge = isControlledPreviewBuild(
     import.meta.env.VITE_PAYEASE_DEPLOYMENT_MODE,
@@ -652,7 +657,16 @@ export function App(): JSX.Element {
       setError(amountInputError);
       return;
     }
-    if (!name.trim() || !phone.trim() || !employer.trim() || !consent) {
+    const profileError = applicantProfileValidationError({
+      fullName: name,
+      phone,
+      employerName: employer,
+    });
+    if (profileError === "PHONE_INVALID") {
+      setError(phoneInputError);
+      return;
+    }
+    if (profileError === "REQUIRED" || !consent) {
       setError(
         language === "en"
           ? "Complete your details and consent first."
@@ -1140,6 +1154,7 @@ export function App(): JSX.Element {
                   placeholder="+855 …"
                   inputMode="tel"
                   autoComplete="tel"
+                  maxLength={32}
                 />
               </label>
               <label>

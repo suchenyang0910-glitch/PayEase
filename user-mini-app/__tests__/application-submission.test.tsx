@@ -81,6 +81,39 @@ describe("applicant submission", () => {
     });
   });
 
+  it("does not send malformed phone data to the application API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Test Applicant" },
+    });
+    fireEvent.change(screen.getByLabelText("Mobile number"), {
+      target: { value: "invalid" },
+    });
+    fireEvent.change(screen.getByLabelText("Employer"), {
+      target: { value: "Pilot Factory" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /personal-data authorization and privacy notice/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /submit for broker review/i }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter a valid mobile number.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("persists an applicant language selected before the Telegram session finishes", async () => {
     vi.stubGlobal("Telegram", { WebApp: { initData: "signed-init-data" } });
     const fetchMock = vi

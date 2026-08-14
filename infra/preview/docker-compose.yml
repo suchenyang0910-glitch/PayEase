@@ -56,6 +56,21 @@ services:
       PAYEASE_PII_ENCRYPTION_KEY_VERSION: ${PAYEASE_PII_ENCRYPTION_KEY_VERSION:-v1}
     ports:
       - "127.0.0.1:3100:3100"
+    # Node 22 provides fetch natively, so the runtime image needs neither curl
+    # nor wget just to establish readiness.  Use readiness rather than
+    # liveness: the service is not healthy until PostgreSQL is reachable.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3100/health/ready').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
 
 volumes:
   payease-preview-postgres:

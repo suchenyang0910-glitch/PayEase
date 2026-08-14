@@ -4,14 +4,14 @@ import {
   applicantPhase,
   progressStepForPhase,
   type ApplicantPhase,
-} from "./application-progress";
+} from "./application-progress.ts";
 import {
   prependApplicationHistory,
   type ApplicationHistoryEntry,
-} from "./application-history";
-import { applicantResult } from "./application-result";
-import { applicantSessionRecoveryMessage } from "./applicant-session-message";
-import { formatUsdMinor } from "./format-usd-minor";
+} from "./application-history.ts";
+import { applicantResult } from "./application-result.ts";
+import { applicantSessionRecoveryMessage } from "./applicant-session-message.ts";
+import { formatUsdMinor } from "./format-usd-minor.ts";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";

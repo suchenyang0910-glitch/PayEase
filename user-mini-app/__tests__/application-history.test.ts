@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   prependApplicationHistory,
   type ApplicationHistoryEntry,
-} from "../src/application-history.js";
+} from "../src/application-history.ts";
 
 function entry(applicationNo: string): ApplicationHistoryEntry {
   return {

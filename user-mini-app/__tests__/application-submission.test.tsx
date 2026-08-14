@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { App } from "../src/App";
+import { App } from "../src/App.tsx";
 
 describe("applicant submission", () => {
   afterEach(() => {

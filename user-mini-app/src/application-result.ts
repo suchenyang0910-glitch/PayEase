@@ -20,12 +20,12 @@ export type ApplicantResult =
 export function applicantResult(
   application: ApplicantApplication | undefined,
 ): ApplicantResult {
-  if (application?.supplementRequested) return "supplement-requested";
-  if (application?.approvedAmountMinor) return "approved";
   if (application?.status === "REJECTED") {
     return application.rejectionConditionResolved
       ? "rejected-resolved"
       : "rejected-pending";
   }
+  if (application?.supplementRequested) return "supplement-requested";
+  if (application?.approvedAmountMinor) return "approved";
   return "reviewing";
 }

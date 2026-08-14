@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatUsdMinor } from "../src/format-usd-minor.js";
+import { formatUsdMinor } from "../src/format-usd-minor.ts";
 
 describe("USD minor-unit formatting", () => {
   it("renders normal, negative and missing monetary values", () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applicantPhase,
   progressStepForPhase,
-} from "../src/application-progress.js";
+} from "../src/application-progress.ts";
 
 describe("applicant application progress", () => {
   it.each([

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicantResult } from "../src/application-result.js";
+import { applicantResult } from "../src/application-result.ts";
 
 describe("applicant result display state", () => {
   it("shows a lender offer only when an approved amount exists", () => {
@@ -55,5 +55,16 @@ describe("applicant result display state", () => {
         supplementRequested: true,
       }),
     ).toBe("supplement-requested");
+  });
+
+  it("never masks a final rejection with a stale supplement flag", () => {
+    expect(
+      applicantResult({
+        status: "REJECTED",
+        approvedAmountMinor: null,
+        rejectionConditionResolved: false,
+        supplementRequested: true,
+      }),
+    ).toBe("rejected-pending");
   });
 });

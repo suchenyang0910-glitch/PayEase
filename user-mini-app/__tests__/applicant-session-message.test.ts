@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicantSessionRecoveryMessage } from "../src/applicant-session-message.js";
+import { applicantSessionRecoveryMessage } from "../src/applicant-session-message.ts";
 
 describe("applicant session recovery message", () => {
   it("explains how to recover from a disabled or expired Telegram Bot session", () => {

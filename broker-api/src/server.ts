@@ -35,6 +35,7 @@ import {
   configuredTelegramBots,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
+import { requiresTelegramAuthentication } from "./telegram-auth-policy.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -104,10 +105,6 @@ async function authenticatedApplicant(
   );
   const identity = result.rows[0];
   return identity ? { telegramUserRef: identity.telegram_user_ref } : undefined;
-}
-
-function requiresTelegramAuthentication(): boolean {
-  return process.env.REQUIRE_TELEGRAM_AUTH === "true";
 }
 
 async function hasRole(

@@ -35,6 +35,7 @@ services:
       # Production must set both values in the VPS-local environment file. The
       # JSON contains one or more enabled Bot ID/token pairs and is never
       # committed; controlled preview stays explicitly disabled by default.
+      PAYEASE_DEPLOYMENT_MODE: "controlled-preview"
       REQUIRE_TELEGRAM_AUTH: ${REQUIRE_TELEGRAM_AUTH:-false}
       TELEGRAM_BOTS_JSON: ${TELEGRAM_BOTS_JSON:-}
     ports:

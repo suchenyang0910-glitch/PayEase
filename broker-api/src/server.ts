@@ -1581,6 +1581,16 @@ app.post(
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
       }
+      // A Telegram Mini App can retry after a response is lost.  Treat the
+      // already-recorded confirmation as a successful no-op so one user
+      // action never produces duplicate status/audit events.
+      if (application.status === "USER_CONTRACT_CONFIRMED") {
+        await client.query("ROLLBACK");
+        return {
+          applicationNo: params.applicationNo,
+          status: "USER_CONTRACT_CONFIRMED",
+        };
+      }
       if (application.status !== "CONTRACT_PENDING") {
         await client.query("ROLLBACK");
         return reply.code(409).send({

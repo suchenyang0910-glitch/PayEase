@@ -657,6 +657,24 @@ integration("public applicant access", () => {
       applicationNo,
       status: "USER_CONTRACT_CONFIRMED",
     });
+    const repeatedUserContractConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/contract-confirmation`,
+      headers: { cookie: telegramApplicantCookie },
+    });
+    expect(repeatedUserContractConfirmation.statusCode).toBe(200);
+    expect(repeatedUserContractConfirmation.json()).toEqual({
+      applicationNo,
+      status: "USER_CONTRACT_CONFIRMED",
+    });
+    const userConfirmationAuditCount = await database.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM audit_events
+        WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)
+          AND event_type = 'USER_CONTRACT_CONFIRMED'`,
+      [applicationNo],
+    );
+    expect(Number(userConfirmationAuditCount.rows[0]?.count)).toBe(1);
     await call(
       "contract-confirmation",
       await adminCookieForRole(database, "LENDER_CONTRACT_OFFICER", "LENDER"),

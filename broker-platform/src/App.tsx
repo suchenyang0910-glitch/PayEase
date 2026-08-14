@@ -537,6 +537,38 @@ export function App(): JSX.Element {
       setServiceCaseLoading(false);
     }
   };
+  const acknowledgeServiceCase = async (caseNo: string) => {
+    setServiceCaseLoading(true);
+    setNotice("");
+    try {
+      const response = await request(
+        `/v1/local/service-cases/${encodeURIComponent(caseNo)}/acknowledge`,
+        { method: "POST" },
+      );
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      if (!response.ok) {
+        setNotice(
+          identity?.preferredLanguage === "zh-CN"
+            ? "工单暂时无法受理。"
+            : identity?.preferredLanguage === "km"
+              ? "មិនអាចទទួលយកករណីនេះបានទេ។"
+              : "The case could not be acknowledged.",
+        );
+        return;
+      }
+      setSelectedServiceCase((current) =>
+        current?.caseNo === caseNo
+          ? { ...current, status: "ACKNOWLEDGED" }
+          : current,
+      );
+      await loadServiceCases();
+    } finally {
+      setServiceCaseLoading(false);
+    }
+  };
   if (checking) return <main style={shell}>{copy.checkingSession}</main>;
   if (!identity)
     return <Login onLogin={setIdentity} initialError={signInError} />;
@@ -757,7 +789,22 @@ export function App(): JSX.Element {
               <p style={{ whiteSpace: "pre-wrap" }}>
                 {selectedServiceCase.message}
               </p>
-              {selectedServiceCase.status !== "REFERRED_TO_LENDER" ? (
+              {selectedServiceCase.status === "OPEN" ? (
+                <button
+                  disabled={serviceCaseLoading}
+                  onClick={() =>
+                    void acknowledgeServiceCase(selectedServiceCase.caseNo)
+                  }
+                >
+                  {identity.preferredLanguage === "zh-CN"
+                    ? "受理工单"
+                    : identity.preferredLanguage === "km"
+                      ? "ទទួលយកករណី"
+                      : "Acknowledge case"}
+                </button>
+              ) : null}
+              {selectedServiceCase.status === "OPEN" ||
+              selectedServiceCase.status === "ACKNOWLEDGED" ? (
                 <button
                   disabled={serviceCaseLoading}
                   onClick={() =>
@@ -770,7 +817,7 @@ export function App(): JSX.Element {
                       ? "បញ្ជូនទៅស្ថាប័នមានអាជ្ញាប័ណ្ណ"
                       : "Refer to licensed lender"}
                 </button>
-              ) : (
+              ) : selectedServiceCase.status === "REFERRED_TO_LENDER" ? (
                 <p>
                   {identity.preferredLanguage === "zh-CN"
                     ? "已转交持牌机构处理。"
@@ -778,7 +825,7 @@ export function App(): JSX.Element {
                       ? "បានបញ្ជូនទៅស្ថាប័នមានអាជ្ញាប័ណ្ណរួចហើយ។"
                       : "Referred to the licensed lender."}
                 </p>
-              )}
+              ) : null}
             </section>
           ) : null}
         </section>

@@ -2806,6 +2806,57 @@ app.get("/v1/local/service-cases/:caseNo", async (request, reply) => {
 });
 
 app.post(
+  "/v1/local/service-cases/:caseNo/acknowledge",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const params = z
+      .object({ caseNo: z.string().min(1) })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const serviceCase = await client.query<{ id: string; status: string }>(
+        "SELECT id, status FROM applicant_service_cases WHERE case_no = $1 FOR UPDATE",
+        [params.caseNo],
+      );
+      const record = serviceCase.rows[0];
+      if (!record) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_CASE_NOT_FOUND" });
+      }
+      if (record.status !== "OPEN" && record.status !== "ACKNOWLEDGED") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_SERVICE_CASE_STATE",
+          currentStatus: record.status,
+        });
+      }
+      if (record.status === "OPEN") {
+        await client.query(
+          "UPDATE applicant_service_cases SET status = 'ACKNOWLEDGED' WHERE id = $1",
+          [record.id],
+        );
+        await addAuditEvent(
+          client,
+          record.id,
+          "APPLICANT_SERVICE_CASE_ACKNOWLEDGED",
+          request.adminIdentity!.loginName,
+          { caseNo: params.caseNo },
+          "SERVICE_CASE",
+        );
+      }
+      await client.query("COMMIT");
+      return { caseNo: params.caseNo, status: "ACKNOWLEDGED" };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
   "/v1/local/service-cases/:caseNo/refer-to-lender",
   async (request, reply) => {
     if (!requireRole(request, reply, "BROKER_OFFICER")) return;

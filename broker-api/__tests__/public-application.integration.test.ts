@@ -2066,6 +2066,34 @@ integration("public applicant access", () => {
       message:
         "Please review the payment information shown for my application.",
     });
+    const creditOfficerCookie = await lenderCreditOfficerCookie(database);
+    const unauthorizedAcknowledgement = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/acknowledge`,
+      headers: { cookie: creditOfficerCookie },
+    });
+    expect(unauthorizedAcknowledgement.statusCode).toBe(403);
+    const acknowledged = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/acknowledge`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(acknowledged.statusCode).toBe(200);
+    expect(acknowledged.json()).toEqual({ caseNo, status: "ACKNOWLEDGED" });
+    const repeatedAcknowledgement = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/acknowledge`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(repeatedAcknowledgement.statusCode).toBe(200);
+    const acknowledgedApplicantList = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/applications/${applicationNo}/service-cases`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(acknowledgedApplicantList.json()).toMatchObject({
+      cases: [{ caseNo, status: "ACKNOWLEDGED" }],
+    });
     const referred = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/service-cases/${caseNo}/refer-to-lender`,
@@ -2073,8 +2101,16 @@ integration("public applicant access", () => {
     });
     expect(referred.statusCode).toBe(200);
     expect(referred.json()).toEqual({ caseNo, status: "REFERRED_TO_LENDER" });
-
-    const creditOfficerCookie = await lenderCreditOfficerCookie(database);
+    const acknowledgementAfterReferral = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/acknowledge`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(acknowledgementAfterReferral.statusCode).toBe(409);
+    expect(acknowledgementAfterReferral.json()).toMatchObject({
+      code: "INVALID_SERVICE_CASE_STATE",
+      currentStatus: "REFERRED_TO_LENDER",
+    });
     const unauthorizedLenderQueue = await brokerApi.app.inject({
       method: "GET",
       url: "/v1/local/service-cases/referred-to-lender",
@@ -2136,7 +2172,7 @@ integration("public applicant access", () => {
           AND entity_id = (SELECT id FROM applicant_service_cases WHERE case_no = $1)`,
       [caseNo],
     );
-    expect(Number(customerCaseAudits.rows[0]?.count)).toBe(5);
+    expect(Number(customerCaseAudits.rows[0]?.count)).toBe(6);
     const finalApplicantList = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/public/applications/${applicationNo}/service-cases`,

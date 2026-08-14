@@ -142,15 +142,15 @@ describe("Telegram multi-bot Mini App verification", () => {
     ).toHaveLength(1);
   });
 
-  it("requires two configured Bots and public recovery links for enabled Bots", () => {
+  it("requires two enabled Bots and public recovery links for each", () => {
     expect(() =>
       requireTelegramRecoveryTopology(
         JSON.stringify([
           { botId: "100000001", botToken: "j".repeat(24), enabled: true },
         ]),
       ),
-    ).toThrow("at least two distinct");
-    expect(
+    ).toThrow("at least two enabled distinct");
+    expect(() =>
       requireTelegramRecoveryTopology(
         JSON.stringify([
           {
@@ -162,7 +162,7 @@ describe("Telegram multi-bot Mini App verification", () => {
           { botId: "100000003", botToken: "l".repeat(24), enabled: false },
         ]),
       ),
-    ).toHaveLength(2);
+    ).toThrow("at least two enabled distinct");
     expect(() =>
       requireTelegramRecoveryTopology(
         JSON.stringify([

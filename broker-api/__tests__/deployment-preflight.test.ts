@@ -54,9 +54,37 @@ describe("Telegram deployment preflight", () => {
       PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
     });
     expect(result.ready).toBe(false);
-    expect(result.error).toContain("at least two distinct Telegram bots");
+    expect(result.error).toContain(
+      "at least two enabled distinct Telegram bots",
+    );
     expect(result.configuredBotIds).toEqual(["123456789"]);
     expect(result.enabledBotCount).toBe(1);
+  });
+
+  it("fails when a configured recovery Bot is disabled", () => {
+    const result = telegramAuthenticationPreflight({
+      PAYEASE_DEPLOYMENT_MODE: "production",
+      TELEGRAM_BOTS_JSON: JSON.stringify([
+        {
+          botId: "123456789",
+          botToken: "preflight-token-one-not-real-00001",
+          enabled: true,
+          entryUrl: "https://t.me/payease_primary?startapp=apply",
+        },
+        {
+          botId: "987654321",
+          botToken: "preflight-token-two-not-real-00002",
+          enabled: false,
+          entryUrl: "https://t.me/payease_recovery?startapp=apply",
+        },
+      ]),
+      PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+    });
+    expect(result.ready).toBe(false);
+    expect(result.enabledBotCount).toBe(1);
+    expect(result.error).toContain(
+      "at least two enabled distinct Telegram bots",
+    );
   });
 
   it("allows only an explicit unauthenticated controlled preview without Bots", () => {

@@ -116,26 +116,25 @@ export function requireEnabledTelegramBot(
 }
 
 /**
- * Production availability requires an independently configured recovery Bot.
- * At least one Bot must be enabled to accept a new login, while a second
- * configured Bot may be disabled during an incident and later rotated or
- * restored without rebuilding the applicant identity store.
+ * Production availability requires independently usable recovery Bots.
+ * At least two Bots must be enabled concurrently so that users can open a
+ * healthy entry point immediately if one Bot is disabled during an incident.
+ * A disabled Bot may remain in configuration for audit and token rotation,
+ * but it cannot count as the recovery path.
  */
 export function requireTelegramRecoveryTopology(
   source = process.env.TELEGRAM_BOTS_JSON,
 ): TelegramBotConfig[] {
   const bots = requireEnabledTelegramBot(source);
-  if (bots.length < 2) {
+  const enabledBots = bots.filter((bot) => bot.enabled);
+  if (enabledBots.length < 2) {
     throw new Error(
-      "TELEGRAM_BOTS_JSON must contain at least two distinct Telegram bots for recovery",
+      "TELEGRAM_BOTS_JSON must contain at least two enabled distinct Telegram bots for recovery",
     );
   }
-  // A second configured Bot is not a usable recovery path unless the Mini App
-  // can safely show a public deep link to it after a session is invalidated.
-  // Require this only for enabled Bots: during an incident an operator may
-  // deliberately disable the affected Bot while retaining its configuration
-  // for audit and rotation.
-  if (bots.some((bot) => bot.enabled && !bot.entryUrl)) {
+  // An enabled Bot is not a usable recovery path unless the Mini App can
+  // safely show a public deep link to it after a session is invalidated.
+  if (enabledBots.some((bot) => !bot.entryUrl)) {
     throw new Error(
       "Every enabled Telegram bot must configure a public recovery entry URL",
     );

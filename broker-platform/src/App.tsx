@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BROKER_COPY, LANGUAGE_LABELS } from "./broker-copy";
 import { brokerAdminActionResult } from "./broker-admin-action";
 import {
@@ -220,6 +220,7 @@ export function App(): JSX.Element {
   const [signInError, setSignInError] = useState("");
   const [adminInProgress, setAdminInProgress] = useState(false);
   const [reviewInProgress, setReviewInProgress] = useState(false);
+  const reviewIdempotencyKey = useRef<string>();
   const [personalProfile, setPersonalProfile] =
     useState<PersonalProfileResponse>();
   const [profileLoading, setProfileLoading] = useState(false);
@@ -363,12 +364,18 @@ export function App(): JSX.Element {
   const review = async (decision: "APPROVED" | "RETURNED") => {
     setReviewInProgress(true);
     setNotice("");
+    const idempotencyKey = reviewIdempotencyKey.current ?? crypto.randomUUID();
+    reviewIdempotencyKey.current = idempotencyKey;
     try {
       const result = await brokerReviewNotice(
         () =>
           request(
             `/v1/local/applications/${encodeURIComponent(applicationNo)}/broker-review`,
-            { method: "POST", body: JSON.stringify({ decision, reasonCode }) },
+            {
+              method: "POST",
+              body: JSON.stringify({ decision, reasonCode }),
+              headers: { "Idempotency-Key": idempotencyKey },
+            },
           ),
         copy,
       );
@@ -376,6 +383,7 @@ export function App(): JSX.Element {
         expireSession();
         return;
       }
+      if (!result.deliveryUncertain) reviewIdempotencyKey.current = undefined;
       setNotice(result.notice);
     } finally {
       setReviewInProgress(false);

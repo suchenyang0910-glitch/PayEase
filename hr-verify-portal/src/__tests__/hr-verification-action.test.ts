@@ -17,6 +17,7 @@ describe("HR verification action", () => {
     ).resolves.toEqual({
       notice: "Blocked: The verification request could not be sent.",
       sessionExpired: false,
+      deliveryUncertain: true,
     });
   });
 
@@ -26,6 +27,10 @@ describe("HR verification action", () => {
         async () => new Response(null, { status: 401 }),
         copy,
       ),
-    ).resolves.toEqual({ notice: "Blocked (401): {}", sessionExpired: true });
+    ).resolves.toEqual({
+      notice: "Blocked (401): {}",
+      sessionExpired: true,
+      deliveryUncertain: false,
+    });
   });
 });

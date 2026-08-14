@@ -19,6 +19,7 @@ describe("broker review action", () => {
       notice:
         "Action blocked: The review request could not be sent. No review decision was recorded.",
       sessionExpired: false,
+      deliveryUncertain: true,
     });
   });
 
@@ -34,6 +35,7 @@ describe("broker review action", () => {
     ).resolves.toEqual({
       notice: 'Action blocked (409): {"code":"INVALID_APPLICATION_STATE"}',
       sessionExpired: false,
+      deliveryUncertain: false,
     });
   });
 
@@ -43,6 +45,7 @@ describe("broker review action", () => {
     ).resolves.toEqual({
       notice: "Action blocked (401): {}",
       sessionExpired: true,
+      deliveryUncertain: false,
     });
   });
 });

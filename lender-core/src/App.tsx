@@ -195,6 +195,8 @@ type Action = {
 };
 
 const actionsRequiringIdempotency = new Set([
+  "lender-initial-review",
+  "lender-final-review",
   "disbursement-release",
   "disbursement-confirmation",
   "repayment-write-off",

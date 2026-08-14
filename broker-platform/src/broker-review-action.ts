@@ -3,6 +3,7 @@ import type { BrokerCopy } from "./broker-copy";
 export type BrokerReviewResult = Readonly<{
   notice: string;
   sessionExpired: boolean;
+  deliveryUncertain: boolean;
 }>;
 
 /**
@@ -20,15 +21,18 @@ export async function brokerReviewNotice(
       ? {
           notice: `${copy.recorded}: ${JSON.stringify(payload)}`,
           sessionExpired: false,
+          deliveryUncertain: false,
         }
       : {
           notice: `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
           sessionExpired: response.status === 401,
+          deliveryUncertain: false,
         };
   } catch {
     return {
       notice: `${copy.blocked}: ${copy.reviewRequestFailed}`,
       sessionExpired: false,
+      deliveryUncertain: true,
     };
   }
 }

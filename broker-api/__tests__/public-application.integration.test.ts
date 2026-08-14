@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0024__telegram_session_user_agent_binding.sql",
+      filename: "V0025__approval_action_idempotency.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -849,10 +849,23 @@ integration("public applicant access", () => {
       "BROKER_OFFICER",
       "BROKER",
     );
-    const returned = await brokerApi.app.inject({
+    const missingApprovalIdempotencyKey = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/applications/${applicationNo}/broker-review`,
       headers: { cookie: brokerCookie },
+      payload: { decision: "RETURNED", reasonCode: "SUPPLEMENT_REQUIRED" },
+    });
+    expect(missingApprovalIdempotencyKey.statusCode).toBe(400);
+    expect(missingApprovalIdempotencyKey.json()).toEqual({
+      code: "IDEMPOTENCY_KEY_REQUIRED",
+    });
+    const returned = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "broker-return-supplement-001",
+      },
       payload: { decision: "RETURNED", reasonCode: "SUPPLEMENT_REQUIRED" },
     });
     expect(returned.statusCode).toBe(200);
@@ -861,6 +874,28 @@ integration("public applicant access", () => {
       status: "BROKER_REVIEW",
       decision: "RETURNED",
     });
+    const repeatedReturn = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "broker-return-supplement-001",
+      },
+      payload: { decision: "RETURNED", reasonCode: "SUPPLEMENT_REQUIRED" },
+    });
+    expect(repeatedReturn.statusCode).toBe(200);
+    expect(repeatedReturn.json()).toEqual(returned.json());
+    const reusedReturnKey = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "broker-return-supplement-001",
+      },
+      payload: { decision: "APPROVED", reasonCode: "SUPPLEMENT_REQUIRED" },
+    });
+    expect(reusedReturnKey.statusCode).toBe(409);
+    expect(reusedReturnKey.json()).toEqual({ code: "IDEMPOTENCY_KEY_REUSED" });
     const applicantView = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/public/applications/${applicationNo}`,
@@ -913,7 +948,10 @@ integration("public applicant access", () => {
     const brokerSupplements = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/applications/${applicationNo}/supplement-responses`,
-      headers: { cookie: brokerCookie },
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "broker-approve-supplement-001",
+      },
     });
     expect(brokerSupplements.statusCode).toBe(200);
     expect(brokerSupplements.json()).toMatchObject({
@@ -1550,7 +1588,8 @@ integration("public applicant access", () => {
         url: `/v1/local/applications/${applicationNo}/${route}`,
         headers: {
           cookie,
-          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+          "idempotency-key":
+            idempotencyKey ?? `approval-${route}-integration-001`,
         },
         payload,
       });

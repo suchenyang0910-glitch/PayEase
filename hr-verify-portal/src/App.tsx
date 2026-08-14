@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { HR_COPY, HR_LANGUAGE_LABELS, type HrLanguage } from "./hr-copy";
 import { hrVerificationNotice } from "./hr-verification-action";
 
@@ -143,6 +143,7 @@ export function App(): JSX.Element {
   const [notice, setNotice] = useState("");
   const [signInError, setSignInError] = useState("");
   const [running, setRunning] = useState(false);
+  const verificationIdempotencyKey = useRef<string>();
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (response) => {
@@ -164,6 +165,9 @@ export function App(): JSX.Element {
     if (!route) return;
     setRunning(true);
     setNotice("");
+    const idempotencyKey =
+      verificationIdempotencyKey.current ?? crypto.randomUUID();
+    verificationIdempotencyKey.current = idempotencyKey;
     try {
       const result = await hrVerificationNotice(
         () =>
@@ -172,6 +176,7 @@ export function App(): JSX.Element {
             {
               method: "POST",
               body: JSON.stringify({ decision, reasonCode }),
+              headers: { "Idempotency-Key": idempotencyKey },
             },
           ),
         copy,
@@ -181,6 +186,8 @@ export function App(): JSX.Element {
         setIdentity(undefined);
         return;
       }
+      if (!result.deliveryUncertain)
+        verificationIdempotencyKey.current = undefined;
       setNotice(result.notice);
     } finally {
       setRunning(false);

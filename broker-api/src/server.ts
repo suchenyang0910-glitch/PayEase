@@ -444,6 +444,11 @@ type FinalReviewTerms = Readonly<{
 class DualControlConflictError extends Error {}
 
 type ManualActionName =
+  | "BROKER_REVIEW"
+  | "EMPLOYER_VERIFICATION"
+  | "EMPLOYER_FINANCE_VERIFICATION"
+  | "LENDER_INITIAL_REVIEW"
+  | "LENDER_FINAL_REVIEW"
   | "DISBURSEMENT_RELEASE"
   | "DISBURSEMENT_CONFIRMATION"
   | "REPAYMENT_WRITE_OFF"
@@ -1444,6 +1449,7 @@ const createStageHandler = (
   approvedStatus: string,
   requiredRole: string,
   schema: z.ZodType<ApprovalCommand & FinalReviewTerms>,
+  actionName: ManualActionName,
   afterRecord?: (
     client: PoolClient,
     application: ApplicationRow,
@@ -1451,8 +1457,13 @@ const createStageHandler = (
     actorUserRef: string,
   ) => Promise<void>,
 ) => {
-  return async (request: { params: unknown; body: unknown }, reply: any) => {
+  return async (request: any, reply: any) => {
     if (!requireRole(request as any, reply, requiredRole)) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
@@ -1469,6 +1480,22 @@ const createStageHandler = (
       if (!application) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        actionName,
+        securedInput.actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
       }
       if (application.status !== expectedStatus) {
         await client.query("ROLLBACK");
@@ -1491,12 +1518,21 @@ const createStageHandler = (
           input,
           securedInput.actorUserRef,
         );
-      await client.query("COMMIT");
-      return {
+      const response = {
         applicationNo: params.applicationNo,
         status,
         decision: securedInput.decision,
       };
+      await recordManualActionResult(
+        client,
+        application,
+        actionName,
+        securedInput.actorUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return response;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -2158,52 +2194,14 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
 
 app.post(
   "/v1/local/applications/:applicationNo/broker-review",
-  async (request, reply) => {
-    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
-    const params = z
-      .object({ applicationNo: z.string().min(1) })
-      .parse(request.params);
-    const input = brokerReviewSchema.parse(request.body);
-    const actorUserRef = request.adminIdentity!.loginName;
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const application = await lockApplication(client, params.applicationNo);
-      if (!application) {
-        await client.query("ROLLBACK");
-        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
-      }
-      if (application.status !== "BROKER_REVIEW") {
-        await client.query("ROLLBACK");
-        return reply.code(409).send({
-          code: "INVALID_APPLICATION_STATE",
-          currentStatus: application.status,
-        });
-      }
-      const toStatus = await recordSingleApproval(
-        client,
-        application,
-        "BROKER_REVIEW",
-        {
-          ...input,
-          actorUserRef,
-          actorRole: "BROKER_OFFICER",
-        },
-        "EMPLOYER_VERIFICATION",
-      );
-      await client.query("COMMIT");
-      return {
-        applicationNo: params.applicationNo,
-        status: toStatus,
-        decision: input.decision,
-      };
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
+  createStageHandler(
+    "BROKER_REVIEW",
+    "BROKER_REVIEW",
+    "EMPLOYER_VERIFICATION",
+    "BROKER_OFFICER",
+    brokerReviewSchema,
+    "BROKER_REVIEW",
+  ),
 );
 
 app.post(
@@ -2214,6 +2212,7 @@ app.post(
     "EMPLOYER_FINANCE_VERIFICATION",
     "EMPLOYER_HR",
     employerVerificationSchema,
+    "EMPLOYER_VERIFICATION",
   ),
 );
 
@@ -2225,6 +2224,7 @@ app.post(
     "LENDER_INITIAL_REVIEW",
     "EMPLOYER_FINANCE",
     employerVerificationSchema,
+    "EMPLOYER_FINANCE_VERIFICATION",
   ),
 );
 
@@ -2236,6 +2236,7 @@ app.post(
     "LENDER_FINAL_REVIEW",
     "LENDER_CREDIT_OFFICER",
     lenderInitialReviewSchema,
+    "LENDER_INITIAL_REVIEW",
   ),
 );
 
@@ -2247,6 +2248,7 @@ app.post(
     "CONTRACT_PENDING",
     "LENDER_CREDIT_REVIEWER",
     lenderFinalReviewSchema,
+    "LENDER_FINAL_REVIEW",
     async (client, application, input, actorUserRef) => {
       if (input.decision !== "APPROVED") return;
       if (

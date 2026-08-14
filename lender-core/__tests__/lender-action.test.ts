@@ -18,6 +18,7 @@ describe("lender action notice", () => {
       notice:
         "Blocked: The request could not be sent. No operation was recorded.",
       sessionExpired: false,
+      deliveryUncertain: true,
     });
   });
 
@@ -33,12 +34,17 @@ describe("lender action notice", () => {
     ).resolves.toEqual({
       notice: 'Blocked (409): {"code":"DUAL_CONTROL_CONFLICT"}',
       sessionExpired: false,
+      deliveryUncertain: false,
     });
   });
 
   it("identifies an expired server-side session without treating it as a business rejection", async () => {
     await expect(
       lenderActionNotice(async () => new Response(null, { status: 401 }), copy),
-    ).resolves.toEqual({ notice: "Blocked (401): {}", sessionExpired: true });
+    ).resolves.toEqual({
+      notice: "Blocked (401): {}",
+      sessionExpired: true,
+      deliveryUncertain: false,
+    });
   });
 });

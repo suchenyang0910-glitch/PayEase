@@ -3,6 +3,7 @@ import type { LenderCopy } from "./lender-copy";
 export type LenderActionResult = Readonly<{
   notice: string;
   sessionExpired: boolean;
+  deliveryUncertain: boolean;
 }>;
 
 /**
@@ -21,15 +22,18 @@ export async function lenderActionNotice(
       ? {
           notice: `${copy.recorded}: ${JSON.stringify(payload)}`,
           sessionExpired: false,
+          deliveryUncertain: false,
         }
       : {
           notice: `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
           sessionExpired: response.status === 401,
+          deliveryUncertain: false,
         };
   } catch {
     return {
       notice: `${copy.blocked}: ${copy.actionFailed}`,
       sessionExpired: false,
+      deliveryUncertain: true,
     };
   }
 }

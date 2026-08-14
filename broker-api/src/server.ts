@@ -275,6 +275,87 @@ type FinalReviewTerms = Readonly<{
 
 class DualControlConflictError extends Error {}
 
+type ManualActionName = "DISBURSEMENT_CONFIRMATION" | "REPAYMENT_CONFIRMATION";
+
+type ManualActionReplay =
+  | Readonly<{
+      kind: "new";
+      idempotencyKey: string;
+      requestFingerprint: string;
+    }>
+  | Readonly<{
+      kind: "replay";
+      responseStatus: number;
+      responseBody: Record<string, unknown>;
+    }>
+  | Readonly<{ kind: "key-reused" }>;
+
+function manualActionIdempotencyKey(
+  header: string | string[] | undefined,
+): string | undefined {
+  const value = Array.isArray(header) ? undefined : header;
+  return z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]{16,128}$/)
+    .safeParse(value).data;
+}
+
+async function manualActionReplay(
+  client: PoolClient,
+  application: ApplicationRow,
+  actionName: ManualActionName,
+  actorUserRef: string,
+  idempotencyKey: string,
+  requestBody: object,
+): Promise<ManualActionReplay> {
+  const requestFingerprint = eventHash([JSON.stringify(requestBody)]);
+  const existing = await client.query<{
+    request_fingerprint: string;
+    response_status: number;
+    response_body: Record<string, unknown>;
+  }>(
+    `SELECT request_fingerprint, response_status, response_body
+       FROM manual_action_idempotency
+      WHERE application_id = $1 AND action_name = $2
+        AND actor_user_ref = $3 AND idempotency_key = $4
+      FOR UPDATE`,
+    [application.id, actionName, actorUserRef, idempotencyKey],
+  );
+  const recorded = existing.rows[0];
+  if (!recorded) return { kind: "new", idempotencyKey, requestFingerprint };
+  if (recorded.request_fingerprint !== requestFingerprint)
+    return { kind: "key-reused" };
+  return {
+    kind: "replay",
+    responseStatus: recorded.response_status,
+    responseBody: recorded.response_body,
+  };
+}
+
+async function recordManualActionResult(
+  client: PoolClient,
+  application: ApplicationRow,
+  actionName: ManualActionName,
+  actorUserRef: string,
+  replay: Extract<ManualActionReplay, { kind: "new" }>,
+  responseBody: Record<string, unknown>,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO manual_action_idempotency
+      (application_id, action_name, actor_user_ref, idempotency_key,
+       request_fingerprint, response_status, response_body)
+     VALUES ($1, $2, $3, $4, $5, 200, $6::jsonb)`,
+    [
+      application.id,
+      actionName,
+      actorUserRef,
+      replay.idempotencyKey,
+      replay.requestFingerprint,
+      JSON.stringify(responseBody),
+    ],
+  );
+}
+
 async function lockApplication(
   client: PoolClient,
   applicationNo: string,
@@ -2302,10 +2383,16 @@ app.post(
   "/v1/local/applications/:applicationNo/disbursement-confirmation",
   async (request, reply) => {
     if (!requireRole(request, reply, "LENDER_DISBURSEMENT_CHECKER")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = checkerApprovalSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -2313,6 +2400,22 @@ app.post(
       if (!application) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "DISBURSEMENT_CONFIRMATION",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
       }
       if (application.status !== "DISBURSEMENT_PENDING") {
         await client.query("ROLLBACK");
@@ -2326,7 +2429,7 @@ app.post(
         application,
         "DISBURSEMENT_RELEASE",
         "DISBURSEMENT_CONFIRMATION",
-        request.adminIdentity!.loginName,
+        actorUserRef,
         "LENDER_DISBURSEMENT_CHECKER",
         input.reasonCode,
         input.evidenceReference,
@@ -2334,8 +2437,20 @@ app.post(
         "DISBURSEMENT_RECEIPT",
       );
       await createRepaymentSchedule(client, application.id);
+      const result = {
+        applicationNo: params.applicationNo,
+        status: "DISBURSED",
+      };
+      await recordManualActionResult(
+        client,
+        application,
+        "DISBURSEMENT_CONFIRMATION",
+        actorUserRef,
+        replay,
+        result,
+      );
       await client.query("COMMIT");
-      return { applicationNo: params.applicationNo, status: "DISBURSED" };
+      return result;
     } catch (error) {
       await client.query("ROLLBACK");
       if (error instanceof DualControlConflictError) {
@@ -2514,10 +2629,16 @@ app.post(
   "/v1/local/applications/:applicationNo/repayment-confirmation",
   async (request, reply) => {
     if (!requireRole(request, reply, "LENDER_REPAYMENT_CHECKER")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = checkerApprovalSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -2525,6 +2646,22 @@ app.post(
       if (!application) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "REPAYMENT_CONFIRMATION",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
       }
       if (application.status !== "REPAYMENT_ACTIVE") {
         await client.query("ROLLBACK");
@@ -2559,7 +2696,7 @@ app.post(
         application,
         "REPAYMENT_WRITE_OFF",
         "REPAYMENT_CONFIRMATION",
-        request.adminIdentity!.loginName,
+        actorUserRef,
         "LENDER_REPAYMENT_CHECKER",
         input.reasonCode,
         input.evidenceReference,
@@ -2573,8 +2710,20 @@ app.post(
          WHERE id = $1`,
         [nextInstallment.id],
       );
+      const result = {
+        applicationNo: params.applicationNo,
+        status: nextStatus,
+      };
+      await recordManualActionResult(
+        client,
+        application,
+        "REPAYMENT_CONFIRMATION",
+        actorUserRef,
+        replay,
+        result,
+      );
       await client.query("COMMIT");
-      return { applicationNo: params.applicationNo, status: nextStatus };
+      return result;
     } catch (error) {
       await client.query("ROLLBACK");
       if (error instanceof DualControlConflictError) {

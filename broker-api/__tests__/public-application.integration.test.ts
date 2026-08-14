@@ -110,6 +110,7 @@ integration("public applicant access", () => {
       "V0012__supplement_review_rounds.sql",
       "V0013__repayment_amount_integrity.sql",
       "V0014__application_status_transition_integrity.sql",
+      "V0015__manual_action_idempotency.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -1079,11 +1080,15 @@ integration("public applicant access", () => {
       cookie: string,
       payload: Record<string, unknown>,
       expectedStatus: string,
+      idempotencyKey?: string,
     ) => {
       const response = await brokerApi.app.inject({
         method: "POST",
         url: `/v1/local/applications/${applicationNo}/${route}`,
-        headers: { cookie },
+        headers: {
+          cookie,
+          ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+        },
         payload,
       });
       expect(response.statusCode).toBe(200);
@@ -1126,7 +1131,7 @@ integration("public applicant access", () => {
         approvedAmountMinor: "25000",
         serviceFeeMinor: "500",
         totalRepayableMinor: "25500",
-        installmentCount: 1,
+        installmentCount: 2,
         firstDueDate: "2026-09-15",
       },
       "CONTRACT_PENDING",
@@ -1211,19 +1216,68 @@ integration("public applicant access", () => {
       { reasonCode: "MANUAL_DISBURSEMENT_RECORDED" },
       "DISBURSEMENT_PENDING",
     );
+    const disbursementChecker = await adminCookieForRole(
+      database,
+      "LENDER_DISBURSEMENT_CHECKER",
+      "LENDER",
+    );
+    const confirmationWithoutKey = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/disbursement-confirmation`,
+      headers: { cookie: disbursementChecker },
+      payload: {
+        reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
+        evidenceReference: "DISBURSEMENT-INTEGRATION-001",
+      },
+    });
+    expect(confirmationWithoutKey.statusCode).toBe(400);
+    expect(confirmationWithoutKey.json()).toEqual({
+      code: "IDEMPOTENCY_KEY_REQUIRED",
+    });
+    const disbursementConfirmationKey = "disbursement-confirmation-0001";
     await call(
       "disbursement-confirmation",
-      await adminCookieForRole(
-        database,
-        "LENDER_DISBURSEMENT_CHECKER",
-        "LENDER",
-      ),
+      disbursementChecker,
       {
         reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
         evidenceReference: "DISBURSEMENT-INTEGRATION-001",
       },
       "DISBURSED",
+      disbursementConfirmationKey,
     );
+    const repeatedDisbursementConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/disbursement-confirmation`,
+      headers: {
+        cookie: disbursementChecker,
+        "idempotency-key": disbursementConfirmationKey,
+      },
+      payload: {
+        reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
+        evidenceReference: "DISBURSEMENT-INTEGRATION-001",
+      },
+    });
+    expect(repeatedDisbursementConfirmation.statusCode).toBe(200);
+    expect(repeatedDisbursementConfirmation.json()).toEqual({
+      applicationNo,
+      status: "DISBURSED",
+    });
+    const changedDisbursementRetry = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/disbursement-confirmation`,
+      headers: {
+        cookie: disbursementChecker,
+        "idempotency-key": disbursementConfirmationKey,
+      },
+      payload: {
+        reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
+        evidenceReference: "DISBURSEMENT-INTEGRATION-CHANGED",
+      },
+    });
+    expect(changedDisbursementRetry.statusCode).toBe(409);
+    expect(changedDisbursementRetry.json()).toEqual({
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
     const repaymentMaker = await adminCookieForRole(
       database,
       "LENDER_REPAYMENT_MAKER",
@@ -1241,14 +1295,61 @@ integration("public applicant access", () => {
       { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
       "REPAYMENT_ACTIVE",
     );
+    const repaymentChecker = await adminCookieForRole(
+      database,
+      "LENDER_REPAYMENT_CHECKER",
+      "LENDER",
+    );
+    const firstRepaymentConfirmationKey = "repayment-confirmation-period-0001";
     await call(
       "repayment-confirmation",
-      await adminCookieForRole(database, "LENDER_REPAYMENT_CHECKER", "LENDER"),
+      repaymentChecker,
       {
         reasonCode: "MANUAL_PAYMENT_CONFIRMED",
         evidenceReference: "REPAYMENT-INTEGRATION-001",
       },
+      "REPAYMENT_ACTIVE",
+      firstRepaymentConfirmationKey,
+    );
+    const repeatedFirstRepaymentConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/repayment-confirmation`,
+      headers: {
+        cookie: repaymentChecker,
+        "idempotency-key": firstRepaymentConfirmationKey,
+      },
+      payload: {
+        reasonCode: "MANUAL_PAYMENT_CONFIRMED",
+        evidenceReference: "REPAYMENT-INTEGRATION-001",
+      },
+    });
+    expect(repeatedFirstRepaymentConfirmation.statusCode).toBe(200);
+    expect(repeatedFirstRepaymentConfirmation.json()).toEqual({
+      applicationNo,
+      status: "REPAYMENT_ACTIVE",
+    });
+    const paidAfterRetry = await database.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM repayment_installments
+        WHERE application_id = (SELECT id FROM applications WHERE application_no = $1)
+          AND status = 'PAID'`,
+      [applicationNo],
+    );
+    expect(paidAfterRetry.rows[0]?.count).toBe("1");
+    await call(
+      "repayment-write-off",
+      repaymentMaker,
+      { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
+      "REPAYMENT_ACTIVE",
+    );
+    await call(
+      "repayment-confirmation",
+      repaymentChecker,
+      {
+        reasonCode: "MANUAL_PAYMENT_CONFIRMED",
+        evidenceReference: "REPAYMENT-INTEGRATION-0002",
+      },
       "SETTLED",
+      "repayment-confirmation-period-0002",
     );
 
     const applicantView = await brokerApi.app.inject({
@@ -1260,8 +1361,8 @@ integration("public applicant access", () => {
     expect(applicantView.json()).toMatchObject({
       application: { status: "SETTLED", approvedAmountMinor: "25000" },
       repayment: {
-        periodCount: 1,
-        paidPeriods: 1,
+        periodCount: 2,
+        paidPeriods: 2,
         unpaidPeriods: 0,
         outstandingMinor: "0",
       },

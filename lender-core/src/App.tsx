@@ -138,6 +138,11 @@ type Action = {
   roles: string[];
 };
 
+const actionsRequiringIdempotency = new Set([
+  "disbursement-confirmation",
+  "repayment-confirmation",
+]);
+
 export function App(): JSX.Element {
   const [identity, setIdentity] = useState<Identity>();
   const [checking, setChecking] = useState(true);
@@ -154,6 +159,9 @@ export function App(): JSX.Element {
   const [notice, setNotice] = useState("");
   const [signInError, setSignInError] = useState("");
   const [runningAction, setRunningAction] = useState<string>();
+  const [pendingIdempotencyKeys, setPendingIdempotencyKeys] = useState<
+    Record<string, string>
+  >({});
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (r) => {
@@ -248,14 +256,36 @@ export function App(): JSX.Element {
     setRunningAction(action.route);
     setNotice("");
     try {
+      const idempotencyKey = actionsRequiringIdempotency.has(action.route)
+        ? (pendingIdempotencyKeys[action.route] ?? crypto.randomUUID())
+        : undefined;
+      if (idempotencyKey && !pendingIdempotencyKeys[action.route]) {
+        setPendingIdempotencyKeys((current) => ({
+          ...current,
+          [action.route]: idempotencyKey,
+        }));
+      }
+      const idempotencyHeaders: HeadersInit | undefined = idempotencyKey
+        ? { "Idempotency-Key": idempotencyKey }
+        : undefined;
       const result = await lenderActionNotice(
         () =>
           api(
             `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
-            { method: "POST", body: JSON.stringify(action.body()) },
+            {
+              method: "POST",
+              body: JSON.stringify(action.body()),
+              headers: idempotencyHeaders,
+            },
           ),
         copy,
       );
+      if (idempotencyKey && !result.deliveryUncertain) {
+        setPendingIdempotencyKeys((current) => {
+          const { [action.route]: _completedKey, ...remaining } = current;
+          return remaining;
+        });
+      }
       if (result.sessionExpired) {
         setSignInError(copy.sessionExpired);
         setIdentity(undefined);

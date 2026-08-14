@@ -1110,6 +1110,13 @@ app.post("/v1/local/applications", async (request, reply) => {
         amountMinor: input.requestedAmount.amountMinor,
         currency: "USD",
         tenorDays: input.tenorDays,
+        // This is deliberately recorded separately from profile encryption:
+        // reviewers can prove that the applicant affirmatively authorized the
+        // two data categories without decrypting the applicant's values.
+        personalDataAndPhoneConsent: input.personalDataAndPhoneConsent === true,
+        personalDataConsentVersion: input.personalProfile
+          ? "PAYEASE-PERSONAL-DATA-v1"
+          : undefined,
       },
     );
     await client.query("COMMIT");

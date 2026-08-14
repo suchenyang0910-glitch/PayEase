@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, createHmac } from "node:crypto";
 import { Pool } from "pg";
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decryptPersonalProfile } from "../src/personal-profile.js";
 
@@ -264,6 +265,23 @@ integration("public applicant access", () => {
       phone: "+85512345678",
       employerName: "Pilot Factory",
     };
+    const missingConsent = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "integration-user-missing-consent",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+        personalProfile: profile,
+      },
+    });
+    expect(missingConsent.statusCode).toBe(400);
+    expect(missingConsent.json()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      fields: ["personalDataAndPhoneConsent"],
+    });
+
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
@@ -273,6 +291,7 @@ integration("public applicant access", () => {
         requestedAmount: { amountMinor: "10000", currency: "USD" },
         tenorDays: 30,
         personalProfile: profile,
+        personalDataAndPhoneConsent: true,
       },
     });
     expect(created.statusCode).toBe(201);
@@ -314,6 +333,26 @@ integration("public applicant access", () => {
     expect(row.personal_data_key_version).toBe("v1");
     expect(row.phone_consent_version).toBe("PAYEASE-PERSONAL-DATA-v1");
     expect(row.phone_consented_at).toBeInstanceOf(Date);
+
+    const submittedAudit = await database.query<{ payload_hash: string }>(
+      `SELECT payload_hash FROM audit_events
+        WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)
+          AND event_type = 'APPLICATION_SUBMITTED'`,
+      [applicationNo],
+    );
+    const expectedAuditPayload = {
+      applicationNo,
+      amountMinor: "10000",
+      currency: "USD",
+      tenorDays: 30,
+      personalDataAndPhoneConsent: true,
+      personalDataConsentVersion: "PAYEASE-PERSONAL-DATA-v1",
+    };
+    expect(submittedAudit.rows[0]!.payload_hash).toBe(
+      createHash("sha256")
+        .update(JSON.stringify(expectedAuditPayload), "utf8")
+        .digest("hex"),
+    );
 
     const brokerProfile = await brokerApi.app.inject({
       method: "GET",

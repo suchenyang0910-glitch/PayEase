@@ -338,6 +338,7 @@ export function App(): JSX.Element {
             phone: phone.trim(),
             employerName: employer.trim(),
           },
+          personalDataAndPhoneConsent: true,
         }),
       });
       const payload = (await response.json()) as {

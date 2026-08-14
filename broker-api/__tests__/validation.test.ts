@@ -38,12 +38,19 @@ describe("controlled-pilot application validation", () => {
         phone: "+85512345678",
         employerName: "Pilot Factory",
       },
+      personalDataAndPhoneConsent: true,
     };
     expect(createApplicationSchema.safeParse(valid).success).toBe(true);
     expect(
       createApplicationSchema.safeParse({
         ...valid,
         personalProfile: { ...valid.personalProfile, phone: "not-a-phone" },
+      }).success,
+    ).toBe(false);
+    expect(
+      createApplicationSchema.safeParse({
+        ...valid,
+        personalDataAndPhoneConsent: undefined,
       }).success,
     ).toBe(false);
   });

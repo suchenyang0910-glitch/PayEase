@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { BROKER_COPY, LANGUAGE_LABELS } from "./broker-copy";
 
 type Language = "zh-CN" | "en" | "km";
 type Domain = "OPS" | "BROKER" | "LENDER" | "EMPLOYER";
@@ -46,6 +47,7 @@ function Login({
 }: {
   onLogin: (identity: Identity) => void;
 }): JSX.Element {
+  const [language, setLanguage] = useState<Language>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -55,20 +57,19 @@ function Login({
       method: "POST",
       body: JSON.stringify({ loginName, password }),
     });
-    if (!response.ok)
-      return setError("Login failed. Check your account and password.");
+    if (!response.ok) return setError(BROKER_COPY[language].loginFailed);
     const me = await request("/v1/local/auth/me");
-    if (!me.ok) return setError("Session could not be established.");
+    if (!me.ok) return setError(BROKER_COPY[language].sessionFailed);
     onLogin((await me.json()) as Identity);
   };
   return (
     <main style={shell}>
       <section style={card}>
-        <h1>PayEase broker console</h1>
-        <p>Sign in to access controlled operations.</p>
+        <h1>{BROKER_COPY[language].title}</h1>
+        <p>{BROKER_COPY[language].signInDescription}</p>
         <form onSubmit={submit} style={form}>
           <label>
-            Account
+            {BROKER_COPY[language].account}
             <input
               value={loginName}
               onChange={(e) => setLoginName(e.target.value)}
@@ -77,7 +78,7 @@ function Login({
             />
           </label>
           <label>
-            Password
+            {BROKER_COPY[language].password}
             <input
               type="password"
               value={password}
@@ -86,7 +87,20 @@ function Login({
               required
             />
           </label>
-          <button>Sign in</button>
+          <label>
+            {BROKER_COPY[language].language}
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value as Language)}
+            >
+              {Object.entries(LANGUAGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button>{BROKER_COPY[language].signIn}</button>
           {error ? <p role="alert">{error}</p> : null}
         </form>
       </section>
@@ -135,6 +149,7 @@ export function App(): JSX.Element {
       })
       .finally(() => setChecking(false));
   }, []);
+  const copy = BROKER_COPY[identity?.preferredLanguage ?? "en"];
   const logout = async () => {
     await request("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
@@ -166,8 +181,8 @@ export function App(): JSX.Element {
     const payload = await response.json().catch(() => ({}));
     setNotice(
       response.ok
-        ? `Saved: ${JSON.stringify(payload)}`
-        : `Blocked (${response.status}): ${JSON.stringify(payload)}`,
+        ? `${copy.recorded}: ${JSON.stringify(payload)}`
+        : `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
     );
     if (response.ok) await refreshDirectory();
   };
@@ -179,8 +194,8 @@ export function App(): JSX.Element {
     const payload = await response.json().catch(() => ({}));
     setNotice(
       response.ok
-        ? `Recorded: ${JSON.stringify(payload)}`
-        : `Action blocked (${response.status}): ${JSON.stringify(payload)}`,
+        ? `${copy.recorded}: ${JSON.stringify(payload)}`
+        : `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
     );
   };
   const loadPersonalProfile = async () => {
@@ -191,14 +206,14 @@ export function App(): JSX.Element {
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       setNotice(
-        `Profile unavailable (${response.status}): ${JSON.stringify(payload)}`,
+        `${copy.profileUnavailable} (${response.status}): ${JSON.stringify(payload)}`,
       );
       return;
     }
     setPersonalProfile((await response.json()) as PersonalProfileResponse);
-    setNotice("Profile access recorded in the audit log.");
+    setNotice(copy.profileAccessRecorded);
   };
-  if (checking) return <main style={shell}>Checking secure session…</main>;
+  if (checking) return <main style={shell}>{copy.checkingSession}</main>;
   if (!identity) return <Login onLogin={setIdentity} />;
   const isBroker = identity.roles.includes("BROKER_OFFICER");
   const isAdmin = identity.roles.includes("OPS_ADMIN");
@@ -208,27 +223,29 @@ export function App(): JSX.Element {
         style={{ display: "flex", justifyContent: "space-between", gap: 16 }}
       >
         <div>
-          <h1>PayEase broker console</h1>
+          <h1>{copy.title}</h1>
           <p>
-            Signed in as {identity.loginName} · language:{" "}
+            {copy.signedInAs} {identity.loginName} · {copy.language}:{" "}
             <select
               value={identity.preferredLanguage}
               onChange={(e) => void updateLanguage(e.target.value as Language)}
             >
-              <option value="zh-CN">中文</option>
-              <option value="en">English</option>
-              <option value="km">ខ្មែរ</option>
+              {Object.entries(LANGUAGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </p>
         </div>
-        <button onClick={logout}>Sign out</button>
+        <button onClick={logout}>{copy.signOut}</button>
       </header>
       {isBroker ? (
         <section style={card}>
-          <h2>Document review and employer-verification handoff</h2>
+          <h2>{copy.reviewTitle}</h2>
           <div style={form}>
             <label>
-              Application number
+              {copy.applicationNumber}
               <input
                 value={applicationNo}
                 onChange={(e) => {
@@ -240,7 +257,7 @@ export function App(): JSX.Element {
               />
             </label>
             <label>
-              Reason code
+              {copy.reasonCode}
               <input
                 value={reasonCode}
                 onChange={(e) => setReasonCode(e.target.value)}
@@ -252,19 +269,19 @@ export function App(): JSX.Element {
                 disabled={!applicationNo}
                 onClick={() => void loadPersonalProfile()}
               >
-                View authorised profile
+                {copy.viewProfile}
               </button>
               <button
                 disabled={!applicationNo}
                 onClick={() => review("APPROVED")}
               >
-                Documents complete
+                {copy.documentsComplete}
               </button>
               <button
                 disabled={!applicationNo}
                 onClick={() => review("RETURNED")}
               >
-                Request supplement
+                {copy.requestSupplement}
               </button>
             </div>
             {personalProfile ? (
@@ -272,7 +289,9 @@ export function App(): JSX.Element {
                 aria-live="polite"
                 style={{ ...card, marginTop: 0, background: "#f8fafc" }}
               >
-                <h3>Applicant profile — access logged</h3>
+                <h3>
+                  {copy.applicantProfile} — {copy.accessLogged}
+                </h3>
                 <dl
                   style={{
                     display: "grid",
@@ -280,20 +299,20 @@ export function App(): JSX.Element {
                     gap: 8,
                   }}
                 >
-                  <dt>Full name</dt>
+                  <dt>{copy.fullName}</dt>
                   <dd>{personalProfile.profile.fullName}</dd>
-                  <dt>Phone</dt>
+                  <dt>{copy.phone}</dt>
                   <dd>{personalProfile.profile.phone}</dd>
-                  <dt>Employer</dt>
+                  <dt>{copy.employer}</dt>
                   <dd>{personalProfile.profile.employerName}</dd>
-                  <dt>Personal-data consent</dt>
+                  <dt>{copy.personalConsent}</dt>
                   <dd>
                     {personalProfile.consent.personalDataVersion ??
-                      "Not recorded"}
+                      copy.notRecorded}
                   </dd>
-                  <dt>Phone consent</dt>
+                  <dt>{copy.phoneConsent}</dt>
                   <dd>
-                    {personalProfile.consent.phoneVersion ?? "Not recorded"}
+                    {personalProfile.consent.phoneVersion ?? copy.notRecorded}
                   </dd>
                 </dl>
               </section>
@@ -303,12 +322,9 @@ export function App(): JSX.Element {
       ) : null}
       {isAdmin ? (
         <section style={card}>
-          <h2>Platform directory administration</h2>
-          <p>
-            Create departments, roles and accounts. New accounts carry their own
-            default language preference and role set.
-          </p>
-          <button onClick={refreshDirectory}>Refresh directory</button>
+          <h2>{copy.directoryTitle}</h2>
+          <p>{copy.directoryDescription}</p>
+          <button onClick={refreshDirectory}>{copy.refreshDirectory}</button>
           <div
             style={{
               display: "grid",
@@ -330,9 +346,9 @@ export function App(): JSX.Element {
                 });
               }}
             >
-              <h3>Create department</h3>
+              <h3>{copy.createDepartment}</h3>
               <label>
-                Domain
+                {copy.domain}
                 <select
                   value={department.domain}
                   onChange={(e) =>
@@ -348,7 +364,7 @@ export function App(): JSX.Element {
                 </select>
               </label>
               <label>
-                Code
+                {copy.code}
                 <input
                   value={department.code}
                   onChange={(e) =>
@@ -361,7 +377,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Chinese name
+                {copy.chineseName}
                 <input
                   value={department.zh}
                   onChange={(e) =>
@@ -371,7 +387,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                English name
+                {copy.englishName}
                 <input
                   value={department.en}
                   onChange={(e) =>
@@ -381,7 +397,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Khmer name
+                {copy.khmerName}
                 <input
                   value={department.km}
                   onChange={(e) =>
@@ -390,7 +406,7 @@ export function App(): JSX.Element {
                   required
                 />
               </label>
-              <button>Create department</button>
+              <button>{copy.createDepartment}</button>
             </form>
             <form
               style={form}
@@ -405,9 +421,9 @@ export function App(): JSX.Element {
                 });
               }}
             >
-              <h3>Create role</h3>
+              <h3>{copy.createRole}</h3>
               <label>
-                Domain
+                {copy.domain}
                 <select
                   value={role.domain}
                   onChange={(e) =>
@@ -420,7 +436,7 @@ export function App(): JSX.Element {
                 </select>
               </label>
               <label>
-                Code
+                {copy.code}
                 <input
                   value={role.code}
                   onChange={(e) =>
@@ -430,7 +446,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Chinese name
+                {copy.chineseName}
                 <input
                   value={role.zh}
                   onChange={(e) => setRole({ ...role, zh: e.target.value })}
@@ -438,7 +454,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                English name
+                {copy.englishName}
                 <input
                   value={role.en}
                   onChange={(e) => setRole({ ...role, en: e.target.value })}
@@ -446,14 +462,14 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Khmer name
+                {copy.khmerName}
                 <input
                   value={role.km}
                   onChange={(e) => setRole({ ...role, km: e.target.value })}
                   required
                 />
               </label>
-              <button>Create role</button>
+              <button>{copy.createRole}</button>
             </form>
             <form
               style={form}
@@ -471,9 +487,9 @@ export function App(): JSX.Element {
                 });
               }}
             >
-              <h3>Create account</h3>
+              <h3>{copy.createAccount}</h3>
               <label>
-                Login name
+                {copy.loginName}
                 <input
                   value={account.loginName}
                   onChange={(e) =>
@@ -484,7 +500,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Temporary password
+                {copy.temporaryPassword}
                 <input
                   type="password"
                   value={account.password}
@@ -497,7 +513,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Department code
+                {copy.departmentCode}
                 <input
                   value={account.departmentCode}
                   onChange={(e) =>
@@ -510,7 +526,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Role codes (comma separated)
+                {copy.roleCodes}
                 <input
                   value={account.roleCodes}
                   onChange={(e) =>
@@ -523,7 +539,7 @@ export function App(): JSX.Element {
                 />
               </label>
               <label>
-                Default language
+                {copy.defaultLanguage}
                 <select
                   value={account.preferredLanguage}
                   onChange={(e) =>
@@ -533,16 +549,18 @@ export function App(): JSX.Element {
                     })
                   }
                 >
-                  <option value="zh-CN">中文</option>
-                  <option value="en">English</option>
-                  <option value="km">ខ្មែរ</option>
+                  {Object.entries(LANGUAGE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </label>
-              <button>Create account</button>
+              <button>{copy.createAccount}</button>
             </form>
           </div>
           <details style={{ marginTop: 18 }}>
-            <summary>Directory data</summary>
+            <summary>{copy.directoryData}</summary>
             <pre style={{ whiteSpace: "pre-wrap" }}>
               {JSON.stringify({ departments, roles }, null, 2)}
             </pre>
@@ -551,8 +569,8 @@ export function App(): JSX.Element {
       ) : null}
       {!isBroker && !isAdmin ? (
         <section style={card}>
-          <h2>Operations unavailable</h2>
-          <p>Your account has no broker or platform-administration role.</p>
+          <h2>{copy.unavailableTitle}</h2>
+          <p>{copy.unavailableDescription}</p>
         </section>
       ) : null}
       {notice ? <p role="status">{notice}</p> : null}

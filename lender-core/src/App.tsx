@@ -219,7 +219,7 @@ export function App(): JSX.Element {
         <div>
           <h1>{copy.title}</h1>
           <p>
-            {identity.loginName} ·{" "}
+            {copy.signedInAs}: {identity.loginName} ·{" "}
             <select
               value={identity.preferredLanguage}
               onChange={(e) =>

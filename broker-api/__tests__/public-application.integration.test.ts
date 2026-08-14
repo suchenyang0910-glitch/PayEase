@@ -1734,6 +1734,39 @@ integration("public applicant access", () => {
       status: "REPAYMENT_ACTIVE",
       approval: "MAKER_RECORDED",
     });
+    // Payment write-off and payment confirmation have the same separation
+    // requirement as disbursement. An accidental second role assignment must
+    // not let the maker settle their own recorded payment.
+    await database.query(
+      `INSERT INTO admin_account_roles (account_id, role_id)
+       SELECT session.account_id, role.id
+         FROM admin_sessions AS session
+         CROSS JOIN roles AS role
+        WHERE session.token_hash = $1
+          AND role.code = 'LENDER_REPAYMENT_CHECKER'
+       ON CONFLICT DO NOTHING`,
+      [
+        createHash("sha256")
+          .update(repaymentMaker.split("=")[1]!)
+          .digest("hex"),
+      ],
+    );
+    const sameAccountRepaymentConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/repayment-confirmation`,
+      headers: {
+        cookie: repaymentMaker,
+        "idempotency-key": "repayment-confirmation-same-account",
+      },
+      payload: {
+        reasonCode: "MANUAL_PAYMENT_CONFIRMED",
+        evidenceReference: "REPAYMENT-SAME-ACCOUNT-REJECTED",
+      },
+    });
+    expect(sameAccountRepaymentConfirmation.statusCode).toBe(409);
+    expect(sameAccountRepaymentConfirmation.json()).toEqual({
+      code: "DUAL_CONTROL_CONFLICT",
+    });
     const repaymentChecker = await adminCookieForRole(
       database,
       "LENDER_REPAYMENT_CHECKER",

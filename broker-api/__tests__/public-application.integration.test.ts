@@ -108,6 +108,7 @@ integration("public applicant access", () => {
       "V0011__user_contract_confirmation.sql",
       "V0012__supplement_review_rounds.sql",
       "V0013__repayment_amount_integrity.sql",
+      "V0014__application_status_transition_integrity.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -156,6 +157,12 @@ integration("public applicant access", () => {
       [applicationNo],
     );
     const applicationId = application.rows[0]!.id;
+    await expect(
+      database.query(
+        "UPDATE applications SET status = 'SETTLED' WHERE id = $1",
+        [applicationId],
+      ),
+    ).rejects.toThrow("invalid application status transition");
     await database.query(
       `INSERT INTO loan_terms
         (application_id, approved_amount_minor, service_fee_minor, total_repayable_minor, installment_count, first_due_date, created_by_user_ref)

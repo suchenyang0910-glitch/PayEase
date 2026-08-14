@@ -33,34 +33,50 @@ function signedInitData(
   return parameters.toString();
 }
 
-async function lenderCreditOfficerCookie(database: Pool): Promise<string> {
+let adminFixtureSequence = 0;
+
+async function adminCookieForRole(
+  database: Pool,
+  roleCode: string,
+  domain: "BROKER" | "LENDER" | "EMPLOYER",
+): Promise<string> {
   const department = await database.query<{ id: string }>(
     `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
-     VALUES ('LENDER', 'TEST_LENDER', '测试机构', 'Test lender', 'Test lender')
+     VALUES ($1, $2, '测试机构', 'Test lender', 'Test lender')
+     ON CONFLICT (code) DO UPDATE SET display_name_en = EXCLUDED.display_name_en
      RETURNING id`,
+    [domain, `TEST_${domain}`],
   );
   const role = await database.query<{ id: string }>(
     `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
-     VALUES ('LENDER', 'LENDER_CREDIT_OFFICER', '信审专员', 'Credit officer', 'Credit officer')
+     VALUES ($1, $2, '测试角色', $2, $2)
+     ON CONFLICT (code) DO UPDATE SET display_name_en = EXCLUDED.display_name_en
      RETURNING id`,
+    [domain, roleCode],
   );
+  const fixtureId = ++adminFixtureSequence;
+  const loginName = `integration-${roleCode.toLowerCase()}-${fixtureId}`;
   const account = await database.query<{ id: string }>(
     `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)
-     VALUES ('integration-credit-officer', 'not-used-in-this-test', $1, 'en')
+     VALUES ($1, 'not-used-in-this-test', $2, 'en')
      RETURNING id`,
-    [department.rows[0]!.id],
+    [loginName, department.rows[0]!.id],
   );
   await database.query(
     "INSERT INTO admin_account_roles (account_id, role_id) VALUES ($1, $2)",
     [account.rows[0]!.id, role.rows[0]!.id],
   );
-  const token = "integration-credit-officer-session-token";
+  const token = `integration-session-${roleCode}-${fixtureId}`;
   await database.query(
     `INSERT INTO admin_sessions (token_hash, account_id, expires_at)
      VALUES ($1, $2, now() + interval '1 hour')`,
     [createHash("sha256").update(token).digest("hex"), account.rows[0]!.id],
   );
   return `payease_session=${token}`;
+}
+
+async function lenderCreditOfficerCookie(database: Pool): Promise<string> {
+  return adminCookieForRole(database, "LENDER_CREDIT_OFFICER", "LENDER");
 }
 
 integration("public applicant access", () => {
@@ -398,5 +414,164 @@ integration("public applicant access", () => {
         delete process.env.REQUIRE_TELEGRAM_AUTH;
       else process.env.REQUIRE_TELEGRAM_AUTH = originalRequireTelegramAuth;
     }
+  });
+
+  it("records the full manual pilot lifecycle with distinct approval accounts", async () => {
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "integration-lifecycle-user",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "25000", currency: "USD" },
+        tenorDays: 30,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    const applicantCookie = String(created.headers["set-cookie"]).split(
+      ";",
+    )[0]!;
+    const call = async (
+      route: string,
+      cookie: string,
+      payload: Record<string, unknown>,
+      expectedStatus: string,
+    ) => {
+      const response = await brokerApi.app.inject({
+        method: "POST",
+        url: `/v1/local/applications/${applicationNo}/${route}`,
+        headers: { cookie },
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        applicationNo,
+        status: expectedStatus,
+      });
+    };
+
+    await call(
+      "broker-review",
+      await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      { decision: "APPROVED", reasonCode: "DOCUMENTS_COMPLETE" },
+      "EMPLOYER_VERIFICATION",
+    );
+    await call(
+      "employer-verification",
+      await adminCookieForRole(database, "EMPLOYER_HR", "EMPLOYER"),
+      { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
+      "EMPLOYER_FINANCE_VERIFICATION",
+    );
+    await call(
+      "employer-finance-verification",
+      await adminCookieForRole(database, "EMPLOYER_FINANCE", "EMPLOYER"),
+      { decision: "APPROVED", reasonCode: "SALARY_RANGE_CONFIRMED" },
+      "LENDER_INITIAL_REVIEW",
+    );
+    await call(
+      "lender-initial-review",
+      await adminCookieForRole(database, "LENDER_CREDIT_OFFICER", "LENDER"),
+      { decision: "APPROVED", reasonCode: "INITIAL_CREDIT_APPROVED" },
+      "LENDER_FINAL_REVIEW",
+    );
+    await call(
+      "lender-final-review",
+      await adminCookieForRole(database, "LENDER_CREDIT_REVIEWER", "LENDER"),
+      {
+        decision: "APPROVED",
+        reasonCode: "FINAL_CREDIT_APPROVED",
+        approvedAmountMinor: "25000",
+        serviceFeeMinor: "500",
+        totalRepayableMinor: "25500",
+        installmentCount: 1,
+        firstDueDate: "2026-09-15",
+      },
+      "CONTRACT_PENDING",
+    );
+    await call(
+      "contract-confirmation",
+      await adminCookieForRole(database, "LENDER_CONTRACT_OFFICER", "LENDER"),
+      { evidenceReference: "CONTRACT-INTEGRATION-001" },
+      "CONTRACT_CONFIRMED",
+    );
+    const disbursementMaker = await adminCookieForRole(
+      database,
+      "LENDER_DISBURSEMENT_MAKER",
+      "LENDER",
+    );
+    await call(
+      "open-disbursement",
+      disbursementMaker,
+      { reasonCode: "MANUAL_DISBURSEMENT_OPENED" },
+      "DISBURSEMENT_PENDING",
+    );
+    await call(
+      "disbursement-release",
+      disbursementMaker,
+      { reasonCode: "MANUAL_DISBURSEMENT_RECORDED" },
+      "DISBURSEMENT_PENDING",
+    );
+    await call(
+      "disbursement-confirmation",
+      await adminCookieForRole(
+        database,
+        "LENDER_DISBURSEMENT_CHECKER",
+        "LENDER",
+      ),
+      {
+        reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
+        evidenceReference: "DISBURSEMENT-INTEGRATION-001",
+      },
+      "DISBURSED",
+    );
+    const repaymentMaker = await adminCookieForRole(
+      database,
+      "LENDER_REPAYMENT_MAKER",
+      "LENDER",
+    );
+    await call(
+      "activate-repayment",
+      repaymentMaker,
+      { reasonCode: "REPAYMENT_OPENED" },
+      "REPAYMENT_ACTIVE",
+    );
+    await call(
+      "repayment-write-off",
+      repaymentMaker,
+      { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
+      "REPAYMENT_ACTIVE",
+    );
+    await call(
+      "repayment-confirmation",
+      await adminCookieForRole(database, "LENDER_REPAYMENT_CHECKER", "LENDER"),
+      {
+        reasonCode: "MANUAL_PAYMENT_CONFIRMED",
+        evidenceReference: "REPAYMENT-INTEGRATION-001",
+      },
+      "SETTLED",
+    );
+
+    const applicantView = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/applications/${applicationNo}`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(applicantView.statusCode).toBe(200);
+    expect(applicantView.json()).toMatchObject({
+      application: { status: "SETTLED", approvedAmountMinor: "25000" },
+      repayment: {
+        periodCount: 1,
+        paidPeriods: 1,
+        unpaidPeriods: 0,
+        outstandingMinor: "0",
+      },
+    });
+    const auditEvents = await database.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM audit_events WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)",
+      [applicationNo],
+    );
+    expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(10);
   });
 });

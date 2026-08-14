@@ -63,6 +63,45 @@ describe("applicant submission", () => {
     });
   });
 
+  it("persists an applicant language selected before the Telegram session finishes", async () => {
+    vi.stubGlobal("Telegram", { WebApp: { initData: "signed-init-data" } });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ preferredLanguage: "km", applications: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ preferredLanguage: "en" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("combobox", { name: "Language" })).toHaveValue(
+      "en",
+    );
+    expect(fetchMock.mock.calls[2]).toEqual([
+      "/api/v1/local/public/profile/preferred-language",
+      {
+        method: "PUT",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ preferredLanguage: "en" }),
+      },
+    ]);
+  });
+
   it("shows a retryable status error after an application was submitted", async () => {
     const fetchMock = vi
       .fn()

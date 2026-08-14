@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
 import {
   applicantPhase,
@@ -237,6 +237,7 @@ function telegramInitData(): string | undefined {
 
 export function App(): JSX.Element {
   const [language, setLanguage] = useState<LanguageCode>("km");
+  const languageChangedByApplicant = useRef(false);
   const [stage, setStage] = useState<Stage>("welcome");
   const [amount, setAmount] = useState(50);
   const [term, setTerm] = useState(30);
@@ -292,7 +293,9 @@ export function App(): JSX.Element {
       if (!applications.ok) return;
       const payload = (await applications.json()) as ApplicationList;
       setApplicantSession(true);
-      if (payload.preferredLanguage) setLanguage(payload.preferredLanguage);
+      if (payload.preferredLanguage && !languageChangedByApplicant.current) {
+        setLanguage(payload.preferredLanguage);
+      }
       setApplicationHistory(payload.applications);
       const latest = payload.applications[0];
       if (!latest) return;
@@ -304,6 +307,19 @@ export function App(): JSX.Element {
       // client-side identity fallback.
     });
   }, []);
+
+  useEffect(() => {
+    if (!applicantSession || !languageChangedByApplicant.current) return;
+    void fetch("/api/v1/local/public/profile/preferred-language", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ preferredLanguage: language }),
+    }).catch(() => {
+      // Keep the selected language for this view. A later authenticated session
+      // will retry the preference update without storing a credential client-side.
+    });
+  }, [applicantSession, language]);
 
   async function submit() {
     if (!name.trim() || !phone.trim() || !employer.trim() || !consent) {
@@ -454,17 +470,8 @@ export function App(): JSX.Element {
   }
 
   function changeLanguage(nextLanguage: LanguageCode) {
+    languageChangedByApplicant.current = true;
     setLanguage(nextLanguage);
-    if (!telegramInitData()) return;
-    void fetch("/api/v1/local/public/profile/preferred-language", {
-      method: "PUT",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ preferredLanguage: nextLanguage }),
-    }).catch(() => {
-      // The selected language stays active for this view. The server will only
-      // persist it after a verified Telegram session is available.
-    });
   }
 
   async function logoutApplicant() {

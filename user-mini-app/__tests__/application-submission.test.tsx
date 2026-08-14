@@ -143,4 +143,76 @@ describe("applicant submission", () => {
     expect(screen.getByText("Pending")).toBeVisible();
     expect(screen.queryByText("Estimated monthly payment")).toBeNull();
   });
+
+  it("records an applicant's explicit confirmation of approved terms", async () => {
+    window.history.replaceState(null, "", "/?application=APP-CONTRACT-001");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-CONTRACT-001",
+              status: "CONTRACT_PENDING",
+              requestedAmountMinor: "25000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: "25000",
+              rejectionConditionResolved: false,
+              supplementRequested: false,
+            },
+            terms: {
+              approvedAmountMinor: "25000",
+              serviceFeeMinor: "500",
+              totalRepayableMinor: "25500",
+              installmentCount: 2,
+              firstDueDate: "2026-09-15",
+            },
+            repayment: {
+              periodCount: 0,
+              paidPeriods: 0,
+              unpaidPeriods: 0,
+              overduePeriods: 0,
+              totalDueMinor: "0",
+              totalPaidMinor: "0",
+              outstandingMinor: "0",
+              overdueOutstandingMinor: "0",
+              nextInstallment: null,
+              installments: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: "USER_CONTRACT_CONFIRMED" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Confirm terms" }),
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/v1/local/public/applications/APP-CONTRACT-001/contract-confirmation",
+      { method: "POST", credentials: "include" },
+    ]);
+    expect(
+      await screen.findByText(
+        "Your confirmation is recorded. The lender is completing its contract record.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Confirm terms" })).toBeNull();
+  });
 });

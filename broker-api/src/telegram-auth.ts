@@ -22,6 +22,7 @@ export function configuredTelegramBots(
   if (!Array.isArray(parsed))
     throw new Error("TELEGRAM_BOTS_JSON must be an array");
   const botIds = new Set<string>();
+  const botTokens = new Set<string>();
   return parsed.map((entry) => {
     if (!entry || typeof entry !== "object") {
       throw new Error("Telegram bot configuration must be an object");
@@ -38,7 +39,12 @@ export function configuredTelegramBots(
       throw new Error("Telegram bot configuration is invalid");
     }
     if (botIds.has(botId)) throw new Error("Telegram bot IDs must be unique");
+    // One token belongs to exactly one Telegram Bot. Duplicating it under
+    // separate IDs would make incident attribution and disablement ambiguous.
+    if (botTokens.has(botToken))
+      throw new Error("Telegram bot tokens must be unique");
     botIds.add(botId);
+    botTokens.add(botToken);
     return {
       botId,
       botToken,

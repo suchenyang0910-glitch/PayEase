@@ -111,6 +111,14 @@ describe("Telegram multi-bot Mini App verification", () => {
         ]),
       ),
     ).toThrow("unique");
+    expect(() =>
+      configuredTelegramBots(
+        JSON.stringify([
+          { botId: "555555556", botToken: "f".repeat(24) },
+          { botId: "555555557", botToken: "f".repeat(24) },
+        ]),
+      ),
+    ).toThrow("Telegram bot tokens must be unique");
   });
 
   it("treats a disabled bot as unavailable without disabling a healthy fallback bot", () => {

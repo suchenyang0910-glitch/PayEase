@@ -325,6 +325,11 @@ integration("public applicant access", () => {
     process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
     process.env.REQUIRE_TELEGRAM_AUTH = "true";
     try {
+      const personalProfile = {
+        fullName: "Authenticated Applicant",
+        phone: "+85512345678",
+        employerName: "Pilot Factory",
+      };
       const unauthenticatedList = await brokerApi.app.inject({
         method: "GET",
         url: "/v1/local/public/applications",
@@ -356,6 +361,21 @@ integration("public applicant access", () => {
       );
       expect(replayGuard.rows[0]?.retained).toBe(true);
 
+      const missingProfile = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: { cookie: firstCookie },
+        payload: {
+          preferredLanguage: "en",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+        },
+      });
+      expect(missingProfile.statusCode).toBe(422);
+      expect(missingProfile.json()).toEqual({
+        code: "PERSONAL_PROFILE_REQUIRED",
+      });
+
       const created = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",
@@ -365,6 +385,7 @@ integration("public applicant access", () => {
           preferredLanguage: "en",
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
+          personalProfile,
         },
       });
       expect(created.statusCode).toBe(201);
@@ -443,6 +464,7 @@ integration("public applicant access", () => {
           preferredLanguage: "zh-CN",
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
+          personalProfile,
         },
       });
       expect(activeApplicationRetry.statusCode).toBe(409);
@@ -466,6 +488,7 @@ integration("public applicant access", () => {
           preferredLanguage: "zh-CN",
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
+          personalProfile,
         },
       });
       expect(unresolvedRejectionRetry.statusCode).toBe(409);
@@ -504,6 +527,7 @@ integration("public applicant access", () => {
           preferredLanguage: "zh-CN",
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
+          personalProfile,
         },
       });
       expect(eligibleRetry.statusCode).toBe(201);

@@ -908,6 +908,9 @@ app.post("/v1/local/applications", async (request, reply) => {
   if (requiresTelegramAuthentication() && !applicant) {
     return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
   }
+  if (requiresTelegramAuthentication() && !input.personalProfile) {
+    return reply.code(422).send({ code: "PERSONAL_PROFILE_REQUIRED" });
+  }
   const telegramUserRef = applicant?.telegramUserRef ?? input.telegramUserRef;
   if (!telegramUserRef) {
     return reply.code(400).send({ code: "TELEGRAM_USER_REFERENCE_REQUIRED" });

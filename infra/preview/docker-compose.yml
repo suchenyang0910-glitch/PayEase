@@ -40,6 +40,10 @@ services:
       # A base64-encoded 32-byte AES key. It stays in the VPS-local env file;
       # applications with personal details fail closed when it is absent.
       PAYEASE_PII_ENCRYPTION_KEY: ${PAYEASE_PII_ENCRYPTION_KEY:-}
+      # A later rotation uses a JSON object of { version: base64Key } and makes
+      # PAYEASE_PII_ENCRYPTION_KEY_VERSION the active encryption key.
+      PAYEASE_PII_ENCRYPTION_KEYS_JSON: ${PAYEASE_PII_ENCRYPTION_KEYS_JSON:-}
+      PAYEASE_PII_ENCRYPTION_KEY_VERSION: ${PAYEASE_PII_ENCRYPTION_KEY_VERSION:-v1}
     ports:
       - "127.0.0.1:3100:3100"
 

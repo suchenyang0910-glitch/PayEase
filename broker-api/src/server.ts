@@ -36,7 +36,10 @@ import {
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
 import { requiresTelegramAuthentication } from "./telegram-auth-policy.js";
-import { encryptPersonalProfile } from "./personal-profile.js";
+import {
+  encryptPersonalProfile,
+  personalDataKeyVersion,
+} from "./personal-profile.js";
 import { runDatabaseMigrations } from "./database-migrations.js";
 
 declare module "fastify" {
@@ -931,6 +934,20 @@ app.post("/v1/local/applications", async (request, reply) => {
         .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
     }
   }
+  let activePersonalDataKeyVersion: string | undefined;
+  if (encryptedPersonalProfile) {
+    try {
+      activePersonalDataKeyVersion = personalDataKeyVersion();
+    } catch (error) {
+      request.log.error(
+        { err: error },
+        "personal profile key version unavailable",
+      );
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+  }
 
   const client = await pool.connect();
   try {
@@ -945,7 +962,7 @@ app.post("/v1/local/applications", async (request, reply) => {
        VALUES (
          $1, $2, $3::bytea, $4::bytea, $5::bytea, $6,
          CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END,
-         CASE WHEN $3::bytea IS NULL THEN NULL ELSE 'v1' END
+         CASE WHEN $3::bytea IS NULL THEN NULL ELSE $7 END
        )
        ON CONFLICT (telegram_user_ref) DO UPDATE SET
          preferred_language = EXCLUDED.preferred_language,
@@ -964,6 +981,7 @@ app.post("/v1/local/applications", async (request, reply) => {
         encryptedPersonalProfile?.phone,
         encryptedPersonalProfile?.employerName,
         "PAYEASE-PERSONAL-DATA-v1",
+        activePersonalDataKeyVersion,
       ],
     );
     const existing = await client.query<{

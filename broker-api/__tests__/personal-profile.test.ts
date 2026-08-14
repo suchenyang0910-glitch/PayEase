@@ -5,10 +5,18 @@ import {
 } from "../src/personal-profile.js";
 
 const originalKey = process.env.PAYEASE_PII_ENCRYPTION_KEY;
+const originalKeyVersion = process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION;
+const originalKeyring = process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON;
 
 afterEach(() => {
   if (originalKey === undefined) delete process.env.PAYEASE_PII_ENCRYPTION_KEY;
   else process.env.PAYEASE_PII_ENCRYPTION_KEY = originalKey;
+  if (originalKeyVersion === undefined)
+    delete process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION;
+  else process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION = originalKeyVersion;
+  if (originalKeyring === undefined)
+    delete process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON;
+  else process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON = originalKeyring;
 });
 
 describe("personal profile encryption", () => {
@@ -46,5 +54,25 @@ describe("personal profile encryption", () => {
         employerName: "Factory",
       }),
     ).toThrow("base64-encoded 32-byte key");
+  });
+
+  it("decrypts existing data after the active key moves to a new keyring version", () => {
+    const keyV1 = Buffer.alloc(32, 3).toString("base64");
+    const keyV2 = Buffer.alloc(32, 9).toString("base64");
+    process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON = JSON.stringify({
+      v1: keyV1,
+      v2: keyV2,
+    });
+    process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION = "v1";
+    const existing = encryptPersonalProfile({
+      fullName: "Existing applicant",
+      phone: "+85512345678",
+      employerName: "Pilot Factory",
+    });
+
+    process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION = "v2";
+    expect(decryptPersonalProfile(existing).fullName).toBe(
+      "Existing applicant",
+    );
   });
 });

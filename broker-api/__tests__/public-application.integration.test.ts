@@ -1,8 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { createHash, createHmac } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { runDatabaseMigrations } from "../src/database-migrations.js";
 import {
   decryptPersonalProfile,
   decryptPersonalValue,
@@ -95,38 +94,15 @@ integration("public applicant access", () => {
   beforeAll(async () => {
     database = new Pool({ connectionString: integrationDatabaseUrl, max: 1 });
     await database.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
-    const migrationDir = join(
-      process.cwd(),
-      "..",
-      "broker-platform",
-      "db",
-      "migrations",
+    await runDatabaseMigrations(database);
+    // A production restart must not rerun or mutate an applied migration.
+    await runDatabaseMigrations(database);
+    const appliedMigrations = await database.query<{ filename: string }>(
+      "SELECT filename FROM schema_migrations ORDER BY filename",
     );
-    for (const filename of [
-      "V0001__controlled_pilot.sql",
-      "V0002__reconciliation_work_items.sql",
-      "V0003__admin_rbac_and_sessions.sql",
-      "V0004__employer_finance_verification.sql",
-      "V0005__user_offer_access.sql",
-      "V0006__loan_terms_and_repayment_schedule.sql",
-      "V0007__repayment_installment_dual_control.sql",
-      "V0008__telegram_multi_bot_auth_sessions.sql",
-      "V0009__protect_paid_repayment_installments.sql",
-      "V0010__encrypted_personal_profiles.sql",
-      "V0011__user_contract_confirmation.sql",
-      "V0012__supplement_review_rounds.sql",
-      "V0013__repayment_amount_integrity.sql",
-      "V0014__application_status_transition_integrity.sql",
-      "V0015__manual_action_idempotency.sql",
-      "V0016__telegram_session_idle_timeout.sql",
-      "V0017__allow_precontract_applicant_withdrawal.sql",
-      "V0018__applicant_service_cases.sql",
-      "V0019__lender_complaint_officer_role.sql",
-    ]) {
-      await database.query(
-        await readFile(join(migrationDir, filename), "utf8"),
-      );
-    }
+    expect(appliedMigrations.rows.at(-1)).toEqual({
+      filename: "V0019__lender_complaint_officer_role.sql",
+    });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
     process.env.PAYEASE_PII_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString(

@@ -103,9 +103,16 @@ function applicantAccessToken(
 function applicantSessionToken(
   cookieHeader: string | undefined,
 ): string | undefined {
-  return cookieHeader
-    ?.split(";")
-    .map((part) => part.trim())
+  const cookies = cookieHeader?.split(";").map((part) => part.trim()) ?? [];
+  // Keep accepting the previous name only until its short-lived cookie ages
+  // out. New Telegram iframe sessions use __Host- plus Partitioned, so they
+  // cannot be scoped to another host or silently reused outside the container.
+  const hostCookie = cookies.find((part) =>
+    part.startsWith("__Host-payease_applicant_session="),
+  );
+  if (hostCookie)
+    return hostCookie.slice("__Host-payease_applicant_session=".length);
+  return cookies
     .find((part) => part.startsWith("payease_applicant_session="))
     ?.slice("payease_applicant_session=".length);
 }
@@ -1272,7 +1279,7 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     await client.query(
       `INSERT INTO telegram_auth_sessions
         (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
-       VALUES ($1, $2, $3, now() + interval '30 minutes')`,
+       VALUES ($1, $2, $3, now() + interval '15 minutes')`,
       [
         eventHash([sessionToken]),
         identity.telegramUserRef,
@@ -1282,7 +1289,7 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     await client.query("COMMIT");
     reply.header(
       "Set-Cookie",
-      `payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=1800`,
+      `__Host-payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=900`,
     );
     return reply.code(201).send({ authenticated: true });
   } catch (error) {
@@ -1305,10 +1312,10 @@ app.post(
         WHERE token_hash = $1 AND revoked_at IS NULL`,
       [eventHash([token])],
     );
-    reply.header(
-      "Set-Cookie",
+    reply.header("Set-Cookie", [
+      "__Host-payease_applicant_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0",
       "payease_applicant_session=; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=0",
-    );
+    ]);
     return { loggedOut: true };
   },
 );

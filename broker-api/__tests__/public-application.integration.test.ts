@@ -794,9 +794,24 @@ integration("public applicant access", () => {
         },
       });
       expect(firstLogin.statusCode).toBe(201);
+      expect(firstLogin.headers["set-cookie"]).toContain(
+        "__Host-payease_applicant_session=",
+      );
+      expect(firstLogin.headers["set-cookie"]).toContain("Max-Age=900");
+      expect(firstLogin.headers["set-cookie"]).toContain("SameSite=None");
+      expect(firstLogin.headers["set-cookie"]).toContain("Partitioned");
       const firstCookie = String(firstLogin.headers["set-cookie"]).split(
         ";",
       )[0]!;
+      const applicantSessionTtl = await database.query<{
+        expires_soon: boolean;
+      }>(
+        `SELECT expires_at <= now() + interval '15 minutes 5 seconds' AS expires_soon
+           FROM telegram_auth_sessions
+          WHERE token_hash = $1`,
+        [createHash("sha256").update(firstCookie.split("=")[1]!).digest("hex")],
+      );
+      expect(applicantSessionTtl.rows[0]?.expires_soon).toBe(true);
       const replayGuard = await database.query<{ retained: boolean }>(
         `SELECT expires_at > now() + interval '119 minutes' AS retained
            FROM telegram_initdata_replay_guards

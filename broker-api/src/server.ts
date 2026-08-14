@@ -140,9 +140,9 @@ async function requireOpsAdmin(
 app.addHook("onRequest", async (request, reply) => {
   const isPublicUserApplicationSubmission =
     request.method === "POST" && request.url === "/v1/local/applications";
-  const isPublicUserApplicationView = request.url.startsWith(
-    "/v1/local/public/applications/",
-  );
+  const isPublicUserApplicationView =
+    request.url === "/v1/local/public/applications" ||
+    request.url.startsWith("/v1/local/public/applications/");
   if (
     !request.url.startsWith("/v1/local/") ||
     request.url.startsWith("/v1/local/auth/") ||
@@ -943,7 +943,11 @@ app.get(
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const token = applicantAccessToken(request.headers.cookie);
-    if (!token || token.length < 32) {
+    const authenticatedUser = await authenticatedApplicant(
+      request.headers.cookie,
+    );
+    const hasApplicationAccessToken = Boolean(token && token.length >= 32);
+    if (!hasApplicationAccessToken && !authenticatedUser) {
       return reply.code(401).send({ code: "USER_APPLICATION_ACCESS_DENIED" });
     }
     const result = await pool.query<{
@@ -957,8 +961,21 @@ app.get(
     }>(
       `SELECT id, application_no, requested_amount_minor::text, currency, tenor_days, status,
             approved_amount_minor::text
-       FROM applications WHERE application_no = $1 AND applicant_access_token_hash = $2`,
-      [params.applicationNo, eventHash([token])],
+       FROM applications
+       WHERE application_no = $1
+         AND (
+           applicant_access_token_hash = $2
+           OR EXISTS (
+             SELECT 1 FROM users
+             WHERE users.id = applications.user_id
+               AND users.telegram_user_ref = $3
+           )
+         )`,
+      [
+        params.applicationNo,
+        eventHash([hasApplicationAccessToken ? token! : ""]),
+        authenticatedUser?.telegramUserRef ?? "",
+      ],
     );
     if (!result.rowCount) {
       return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
@@ -979,6 +996,46 @@ app.get(
     );
   },
 );
+
+app.get("/v1/local/public/applications", async (request, reply) => {
+  const authenticatedUser = await authenticatedApplicant(
+    request.headers.cookie,
+  );
+  if (!authenticatedUser) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const applications = await pool.query<{
+    application_no: string;
+    status: string;
+    requested_amount_minor: string;
+    currency: string;
+    tenor_days: number;
+    approved_amount_minor: string | null;
+    created_at: Date;
+  }>(
+    `SELECT applications.application_no, applications.status,
+            applications.requested_amount_minor::text, applications.currency,
+            applications.tenor_days, applications.approved_amount_minor::text,
+            applications.created_at
+       FROM applications
+       JOIN users ON users.id = applications.user_id
+      WHERE users.telegram_user_ref = $1
+      ORDER BY applications.created_at DESC
+      LIMIT 20`,
+    [authenticatedUser.telegramUserRef],
+  );
+  return {
+    applications: applications.rows.map((application) => ({
+      applicationNo: application.application_no,
+      status: application.status,
+      requestedAmountMinor: application.requested_amount_minor,
+      currency: application.currency,
+      tenorDays: application.tenor_days,
+      approvedAmountMinor: application.approved_amount_minor,
+      createdAt: application.created_at.toISOString(),
+    })),
+  };
+});
 
 app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
   const params = z

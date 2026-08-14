@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHmac } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -9,6 +10,28 @@ const integrationDatabaseUrl = process.env.PAYEASE_TEST_DATABASE_URL;
 const integration = integrationDatabaseUrl ? describe : describe.skip;
 
 type BrokerApi = typeof import("../src/server.js");
+
+function signedInitData(
+  botToken: string,
+  telegramUserId: number,
+  queryId: string,
+): string {
+  const parameters = new URLSearchParams({
+    auth_date: String(Math.floor(Date.now() / 1000)),
+    query_id: queryId,
+    user: JSON.stringify({ id: telegramUserId, first_name: "Integration" }),
+  });
+  const dataCheckString = [...parameters.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secret = createHmac("sha256", "WebAppData").update(botToken).digest();
+  parameters.set(
+    "hash",
+    createHmac("sha256", secret).update(dataCheckString).digest("hex"),
+  );
+  return parameters.toString();
+}
 
 integration("public applicant access", () => {
   let database: Pool;
@@ -151,5 +174,93 @@ integration("public applicant access", () => {
       headers: { cookie: otherCookie },
     });
     expect(otherUserView.statusCode).toBe(404);
+  });
+
+  it("restores the same user's applications after authenticating through a second trusted bot", async () => {
+    const originalBotConfig = process.env.TELEGRAM_BOTS_JSON;
+    const originalRequireTelegramAuth = process.env.REQUIRE_TELEGRAM_AUTH;
+    const botA = {
+      botId: "123456789",
+      botToken: "123456789:integration-bot-token-alpha-123456",
+    };
+    const botB = {
+      botId: "987654321",
+      botToken: "987654321:integration-bot-token-bravo-123456",
+    };
+    process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
+    process.env.REQUIRE_TELEGRAM_AUTH = "true";
+    try {
+      const firstLogin = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions",
+        payload: {
+          initData: signedInitData(botA.botToken, 42424242, "bot-a-session"),
+        },
+      });
+      expect(firstLogin.statusCode).toBe(201);
+      const firstCookie = String(firstLogin.headers["set-cookie"]).split(
+        ";",
+      )[0]!;
+
+      const created = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: { cookie: firstCookie },
+        payload: {
+          telegramUserRef: "spoofed-user-ref-is-ignored",
+          preferredLanguage: "en",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const applicationNo = (created.json() as { applicationNo: string })
+        .applicationNo;
+
+      const secondLogin = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions",
+        payload: {
+          initData: signedInitData(botB.botToken, 42424242, "bot-b-session"),
+        },
+      });
+      expect(secondLogin.statusCode).toBe(201);
+      const secondCookie = String(secondLogin.headers["set-cookie"]).split(
+        ";",
+      )[0]!;
+
+      const list = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+        headers: { cookie: secondCookie },
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json()).toMatchObject({
+        applications: [
+          {
+            applicationNo,
+            requestedAmountMinor: "10000",
+            status: "BROKER_REVIEW",
+          },
+        ],
+      });
+
+      const detail = await brokerApi.app.inject({
+        method: "GET",
+        url: `/v1/local/public/applications/${applicationNo}`,
+        headers: { cookie: secondCookie },
+      });
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json()).toMatchObject({
+        application: { applicationNo, requestedAmountMinor: "10000" },
+      });
+    } finally {
+      if (originalBotConfig === undefined)
+        delete process.env.TELEGRAM_BOTS_JSON;
+      else process.env.TELEGRAM_BOTS_JSON = originalBotConfig;
+      if (originalRequireTelegramAuth === undefined)
+        delete process.env.REQUIRE_TELEGRAM_AUTH;
+      else process.env.REQUIRE_TELEGRAM_AUTH = originalRequireTelegramAuth;
+    }
   });
 });

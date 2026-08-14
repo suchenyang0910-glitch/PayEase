@@ -42,6 +42,12 @@ type UserSummary = {
   };
 };
 
+type ApplicationList = {
+  applications: Array<{
+    applicationNo: string;
+  }>;
+};
+
 function usd(minor: string | null | undefined): string {
   return `$${(Number(minor ?? "0") / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -210,11 +216,33 @@ export function App(): JSX.Element {
   useEffect(() => {
     const initData = telegramInitData();
     if (!initData) return;
-    void fetch("/api/v1/local/public/telegram-sessions", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ initData }),
+    void (async () => {
+      const authentication = await fetch(
+        "/api/v1/local/public/telegram-sessions",
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ initData }),
+        },
+      );
+      // A repeat initData may return 409 after a prior request already created
+      // the HttpOnly session. In either case, a valid session can restore the
+      // applicant's latest record without relying on the original Bot.
+      if (![201, 409].includes(authentication.status)) return;
+      const applications = await fetch("/api/v1/local/public/applications", {
+        credentials: "include",
+      });
+      if (!applications.ok) return;
+      const payload = (await applications.json()) as ApplicationList;
+      const latest = payload.applications[0];
+      if (!latest) return;
+      setApplicationNo(latest.applicationNo);
+      setStage("submitted");
+    })().catch(() => {
+      // The controlled browser preview has no Telegram container. It remains
+      // usable for UX review without turning an authentication failure into a
+      // client-side identity fallback.
     });
   }, []);
 

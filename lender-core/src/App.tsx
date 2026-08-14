@@ -40,13 +40,15 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 
 function SignIn({
   complete,
+  initialError = "",
 }: {
   complete: (identity: Identity) => void;
+  initialError?: string;
 }): JSX.Element {
   const [language, setLanguage] = useState<LenderLanguage>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const copy = LENDER_COPY[language];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -150,6 +152,7 @@ export function App(): JSX.Element {
   const [firstDueDate, setFirstDueDate] = useState("");
   const [evidenceReference, setEvidenceReference] = useState("MANUAL-RECEIPT-");
   const [notice, setNotice] = useState("");
+  const [signInError, setSignInError] = useState("");
   const [runningAction, setRunningAction] = useState<string>();
   useEffect(() => {
     api("/v1/local/auth/me")
@@ -159,7 +162,8 @@ export function App(): JSX.Element {
       .finally(() => setChecking(false));
   }, []);
   if (checking) return <main style={shell}>{LENDER_COPY.en.checking}</main>;
-  if (!identity) return <SignIn complete={setIdentity} />;
+  if (!identity)
+    return <SignIn complete={setIdentity} initialError={signInError} />;
   const copy = LENDER_COPY[identity.preferredLanguage];
   const finalTermsValid = hasValidFinalReviewTerms({
     approvedAmountMinor,
@@ -252,7 +256,12 @@ export function App(): JSX.Element {
           ),
         copy,
       );
-      setNotice(result);
+      if (result.sessionExpired) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      setNotice(result.notice);
     } finally {
       // A client-side error after the request must not permanently lock the
       // manual approval console's controls.

@@ -26,6 +26,7 @@ describe("lender console translations", () => {
       expect(copy.signIn).not.toHaveLength(0);
       expect(copy.loginFailed).not.toHaveLength(0);
       expect(copy.sessionFailed).not.toHaveLength(0);
+      expect(copy.sessionExpired).not.toHaveLength(0);
       expect(copy.actionFailed).not.toHaveLength(0);
       expect(copy.manualApproval).not.toHaveLength(0);
       for (const key of actionKeys)

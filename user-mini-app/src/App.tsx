@@ -75,6 +75,53 @@ type ApplicationList = {
 
 type ApplicationListEntry = ApplicationHistoryEntry;
 
+type TelegramEntryPoints = {
+  entrypoints: unknown;
+};
+
+function recoveryEntryPointLabel(
+  language: LanguageCode,
+  index: number,
+): string {
+  if (language === "zh-CN")
+    return `通过备用 Telegram Bot ${index + 1} 重新打开`;
+  if (language === "km") return `បើកឡើងវិញតាម Telegram Bot បម្រុង ${index + 1}`;
+  return `Reopen from backup Telegram Bot ${index + 1}`;
+}
+
+function ApplicantError({
+  message,
+  entryPoints,
+  language,
+}: {
+  message: string;
+  entryPoints: string[];
+  language: LanguageCode;
+}): JSX.Element {
+  return (
+    <div className="error" role="alert">
+      <p>{message}</p>
+      {entryPoints.length ? (
+        <div
+          className="recovery-entrypoints"
+          aria-label="Telegram recovery options"
+        >
+          {entryPoints.map((entryPoint, index) => (
+            <a
+              key={entryPoint}
+              href={entryPoint}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {recoveryEntryPointLabel(language, index)}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function applicantRejectionNotice(
   noticeCode: UserSummary["application"]["rejectionNoticeCode"],
   language: LanguageCode,
@@ -312,6 +359,7 @@ export function App(): JSX.Element {
     ApplicationListEntry[]
   >([]);
   const [applicantSession, setApplicantSession] = useState(false);
+  const [recoveryEntryPoints, setRecoveryEntryPoints] = useState<string[]>([]);
   const [withdrawalConfirmationRequested, setWithdrawalConfirmationRequested] =
     useState(false);
   const [serviceCaseType, setServiceCaseType] = useState<
@@ -349,6 +397,28 @@ export function App(): JSX.Element {
     });
   }
 
+  async function recoverApplicantSession() {
+    setApplicantSession(false);
+    setError(applicantSessionRecoveryMessage(language));
+    try {
+      const response = await applicantRequest(
+        "/api/v1/local/public/telegram-entrypoints",
+      );
+      const payload = (await response.json()) as TelegramEntryPoints;
+      if (!response.ok || !Array.isArray(payload.entrypoints)) return;
+      setRecoveryEntryPoints(
+        [...new Set(payload.entrypoints)].filter(
+          (entryPoint): entryPoint is string =>
+            typeof entryPoint === "string" &&
+            /^https:\/\/(?:www\.)?t\.me\//.test(entryPoint),
+        ),
+      );
+    } catch {
+      // Recovery text remains actionable even if the optional public directory
+      // is temporarily unavailable.
+    }
+  }
+
   useEffect(() => {
     const existingApplication = new URLSearchParams(window.location.search).get(
       "application",
@@ -376,14 +446,14 @@ export function App(): JSX.Element {
       // the HttpOnly session. In either case, a valid session can restore the
       // applicant's latest record without relying on the original Bot.
       if (![201, 409].includes(authentication.status)) {
-        setError(applicantSessionRecoveryMessage(language));
+        await recoverApplicantSession();
         return;
       }
       const applications = await applicantRequest(
         "/api/v1/local/public/applications",
       );
       if (!applications.ok) {
-        setError(applicantSessionRecoveryMessage(language));
+        await recoverApplicantSession();
         return;
       }
       const payload = (await applications.json()) as ApplicationList;
@@ -405,7 +475,7 @@ export function App(): JSX.Element {
         ) ?? payload.applications[0];
       if (!restored) return;
       await checkStatus(restored.applicationNo);
-    })().catch(() => setError(applicantSessionRecoveryMessage(language)));
+    })().catch(() => void recoverApplicantSession());
   }, []);
 
   useEffect(() => {
@@ -444,13 +514,11 @@ export function App(): JSX.Element {
       )
         .then((response) => {
           if (!response.ok) {
-            setApplicantSession(false);
-            setError(applicantSessionRecoveryMessage(language));
+            void recoverApplicantSession();
           }
         })
         .catch(() => {
-          setApplicantSession(false);
-          setError(applicantSessionRecoveryMessage(language));
+          void recoverApplicantSession();
         });
     };
     window.addEventListener("pointerdown", recordApplicantActivity, {
@@ -572,7 +640,7 @@ export function App(): JSX.Element {
         { credentials: "include" },
       );
       if (response.status === 401 || response.status === 403) {
-        setError(applicantSessionRecoveryMessage(language));
+        await recoverApplicantSession();
         return;
       }
       const payload = (await response.json()) as UserSummary;
@@ -647,7 +715,7 @@ export function App(): JSX.Element {
         { method: "POST", credentials: "include" },
       );
       if (response.status === 401 || response.status === 403) {
-        setError(applicantSessionRecoveryMessage(language));
+        await recoverApplicantSession();
         return;
       }
       const payload = (await response.json()) as {
@@ -711,7 +779,7 @@ export function App(): JSX.Element {
         },
       );
       if (response.status === 401 || response.status === 403) {
-        setError(applicantSessionRecoveryMessage(language));
+        await recoverApplicantSession();
         return;
       }
       const payload = (await response.json().catch(() => undefined)) as
@@ -883,9 +951,11 @@ export function App(): JSX.Element {
               </div>
               <p className="estimate-note">{t.noOffer}</p>
               {error && (
-                <p className="error" role="alert">
-                  {error}
-                </p>
+                <ApplicantError
+                  message={error}
+                  entryPoints={recoveryEntryPoints}
+                  language={language}
+                />
               )}
               <button className="primary" onClick={() => setStage("details")}>
                 {t.start}
@@ -935,9 +1005,11 @@ export function App(): JSX.Element {
                 <span>{t.consent}</span>
               </label>
               {error && (
-                <p className="error" role="alert">
-                  {error}
-                </p>
+                <ApplicantError
+                  message={error}
+                  entryPoints={recoveryEntryPoints}
+                  language={language}
+                />
               )}
               <button
                 className="primary"
@@ -966,9 +1038,11 @@ export function App(): JSX.Element {
             {t.review}: {t.reviewing}
           </div>
           {error ? (
-            <p className="error" role="alert">
-              {error}
-            </p>
+            <ApplicantError
+              message={error}
+              entryPoints={recoveryEntryPoints}
+              language={language}
+            />
           ) : null}
           <button
             className="primary"
@@ -1007,9 +1081,11 @@ export function App(): JSX.Element {
                     : t.reviewing}
           </h2>
           {error ? (
-            <p className="error" role="alert">
-              {error}
-            </p>
+            <ApplicantError
+              message={error}
+              entryPoints={recoveryEntryPoints}
+              language={language}
+            />
           ) : null}
           <p>
             {result === "withdrawn"

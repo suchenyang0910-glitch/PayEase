@@ -902,10 +902,12 @@ integration("public applicant access", () => {
     const botA = {
       botId: "123456789",
       botToken: "123456789:integration-bot-token-alpha-123456",
+      entryUrl: "https://t.me/payease_primary?startapp=apply",
     };
     const botB = {
       botId: "987654321",
       botToken: "987654321:integration-bot-token-bravo-123456",
+      entryUrl: "https://t.me/payease_recovery?startapp=apply",
     };
     process.env.REQUIRE_TELEGRAM_AUTH = "true";
     try {
@@ -937,6 +939,14 @@ integration("public applicant access", () => {
       });
 
       process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
+      const publicRecoveryEntryPoints = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/telegram-entrypoints",
+      });
+      expect(publicRecoveryEntryPoints.statusCode).toBe(200);
+      expect(publicRecoveryEntryPoints.json()).toEqual({
+        entrypoints: [botA.entryUrl, botB.entryUrl],
+      });
       const personalProfile = {
         fullName: "Authenticated Applicant",
         phone: "+85512345678",

@@ -102,6 +102,25 @@ select {
   background: #e8f8ee;
   color: #136b3d;
 }
+.error p {
+  margin: 0;
+}
+.recovery-entrypoints {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+.recovery-entrypoints a {
+  display: block;
+  border: 1px solid #d59e5f;
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: #714516;
+  background: #fffaf1;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
 .installments {
   display: grid;
   gap: 5px;

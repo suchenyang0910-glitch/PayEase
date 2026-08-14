@@ -19,10 +19,24 @@ Bot 都应设置同一个 PayEase Mini App URL。
 
 ```json
 [
-  { "botId": "BOT_A_ID", "botToken": "SET_IN_SECRET_MANAGER", "enabled": true },
-  { "botId": "BOT_B_ID", "botToken": "SET_IN_SECRET_MANAGER", "enabled": true }
+  {
+    "botId": "BOT_A_ID",
+    "botToken": "SET_IN_SECRET_MANAGER",
+    "enabled": true,
+    "entryUrl": "https://t.me/PAYEASE_PRIMARY_BOT?startapp=apply"
+  },
+  {
+    "botId": "BOT_B_ID",
+    "botToken": "SET_IN_SECRET_MANAGER",
+    "enabled": true,
+    "entryUrl": "https://t.me/PAYEASE_RECOVERY_BOT?startapp=apply"
+  }
 ]
 ```
+
+`entryUrl` 可选，但生产建议为每个 Bot 填写其公开 HTTPS `t.me` 深链接；格式不合法会阻止
+API 启动。用户会话失效时，Mini App 只请求并展示 **已启用** Bot 的这些公开入口，以便用户
+立即切换；此接口绝不返回 Bot ID、Token 或任何申请资料。
 
 还必须设置：
 
@@ -46,6 +60,7 @@ Bot 时，登录接口返回服务不可用，而不能回退到客户端提供�
 2. 将该 Bot 在 `TELEGRAM_BOTS_JSON` 中改为 `enabled: false`，保留至少一个健康备用 Bot。
 3. 通过受控发布更新 API 配置。API 会在每个用户请求重新检查 Bot allowlist：被停用 Bot
    签发的既有会话立即不可用；用户必须从健康 Bot 获取新的 `initData` 并重新登录。
+   如果健康 Bot 配置了 `entryUrl`，失效页面会显示该入口；停用 Bot 的入口不会显示。
 4. 以一个测试 Telegram 账号验证：
    - 受影响 Bot 的旧会话访问用户 API 返回 `401`；
    - 备用 Bot 可登录；

@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   configuredTelegramBots,
+  enabledTelegramBotEntryUrls,
   isTelegramBotEnabled,
   requireEnabledTelegramBot,
   requireTelegramRecoveryTopology,
@@ -186,5 +187,43 @@ describe("Telegram multi-bot Mini App verification", () => {
         2000000001,
       ),
     ).toMatchObject({ authenticatedBotId: "777777777" });
+  });
+
+  it("returns only enabled public Bot entry URLs for session recovery", () => {
+    const source = JSON.stringify([
+      {
+        botId: "700000001",
+        botToken: "m".repeat(24),
+        enabled: true,
+        entryUrl: "https://t.me/payease_primary?startapp=apply",
+      },
+      {
+        botId: "700000002",
+        botToken: "n".repeat(24),
+        enabled: false,
+        entryUrl: "https://t.me/payease_recovery",
+      },
+      {
+        botId: "700000003",
+        botToken: "o".repeat(24),
+        enabled: true,
+        entryUrl: "https://t.me/payease_recovery",
+      },
+    ]);
+    expect(enabledTelegramBotEntryUrls(source)).toEqual([
+      "https://t.me/payease_primary?startapp=apply",
+      "https://t.me/payease_recovery",
+    ]);
+    expect(() =>
+      configuredTelegramBots(
+        JSON.stringify([
+          {
+            botId: "700000004",
+            botToken: "p".repeat(24),
+            entryUrl: "http://not-telegram.example/unsafe",
+          },
+        ]),
+      ),
+    ).toThrow("entry URL is invalid");
   });
 });

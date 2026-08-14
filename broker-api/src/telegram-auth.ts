@@ -4,6 +4,7 @@ export type TelegramBotConfig = Readonly<{
   botId: string;
   botToken: string;
   enabled: boolean;
+  entryUrl?: string;
 }>;
 
 export type VerifiedTelegramIdentity = Readonly<{
@@ -13,6 +14,30 @@ export type VerifiedTelegramIdentity = Readonly<{
 }>;
 
 const maxInitDataAgeSeconds = 5 * 60;
+
+function configuredTelegramEntryUrl(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string")
+    throw new Error("Telegram bot entry URL is invalid");
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Telegram bot entry URL is invalid");
+  }
+  const supportedHost = url.hostname === "t.me" || url.hostname === "www.t.me";
+  if (
+    url.protocol !== "https:" ||
+    !supportedHost ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    !/^\/[A-Za-z0-9_]{5,}(?:\/[A-Za-z0-9_]{1,64})?$/.test(url.pathname)
+  ) {
+    throw new Error("Telegram bot entry URL is invalid");
+  }
+  return url.toString();
+}
 
 export function configuredTelegramBots(
   source = process.env.TELEGRAM_BOTS_JSON,
@@ -31,6 +56,7 @@ export function configuredTelegramBots(
     const botId = typeof config.botId === "string" ? config.botId : "";
     const botToken = typeof config.botToken === "string" ? config.botToken : "";
     const enabled = config.enabled;
+    const entryUrl = configuredTelegramEntryUrl(config.entryUrl);
     if (
       !/^\d{5,20}$/.test(botId) ||
       botToken.length < 20 ||
@@ -49,8 +75,26 @@ export function configuredTelegramBots(
       botId,
       botToken,
       enabled: enabled ?? true,
+      entryUrl,
     };
   });
+}
+
+/**
+ * Entry links are intentionally optional operational metadata. They let a
+ * user recover through another enabled Bot without ever exposing Bot tokens
+ * or internal numeric IDs in the Mini App.
+ */
+export function enabledTelegramBotEntryUrls(
+  source = process.env.TELEGRAM_BOTS_JSON,
+): string[] {
+  return [
+    ...new Set(
+      configuredTelegramBots(source)
+        .filter((bot) => bot.enabled && bot.entryUrl)
+        .map((bot) => bot.entryUrl!),
+    ),
+  ];
 }
 
 /**

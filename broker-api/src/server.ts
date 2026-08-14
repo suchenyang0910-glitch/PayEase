@@ -38,6 +38,7 @@ import {
 } from "./repayment.js";
 import {
   configuredTelegramBots,
+  enabledTelegramBotEntryUrls,
   isTelegramBotEnabled,
   requireTelegramRecoveryTopology,
   verifyTelegramMiniAppInitData,
@@ -238,6 +239,9 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicUserApplicationView =
     requestPath === "/v1/local/public/applications" ||
     requestPath.startsWith("/v1/local/public/applications/");
+  const isPublicTelegramEntryPoints =
+    request.method === "GET" &&
+    requestPath === "/v1/local/public/telegram-entrypoints";
   const isApplicantStateChange =
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
@@ -307,7 +311,8 @@ app.addHook("onRequest", async (request, reply) => {
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
     isPublicApplicantLanguagePreference ||
-    isPublicUserApplicationView
+    isPublicUserApplicationView ||
+    isPublicTelegramEntryPoints
   )
     return;
   const token = sessionToken(request.headers.cookie);
@@ -1539,6 +1544,13 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     client.release();
   }
 });
+
+// This remains readable without an applicant session so a person whose Bot
+// was disabled can still navigate to another enabled PayEase Bot. It exposes
+// only configured public t.me entry URLs, never a Bot ID or token.
+app.get("/v1/local/public/telegram-entrypoints", async () => ({
+  entrypoints: enabledTelegramBotEntryUrls(),
+}));
 
 app.post(
   "/v1/local/public/telegram-sessions/logout",

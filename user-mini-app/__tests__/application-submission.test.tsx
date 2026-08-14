@@ -126,13 +126,25 @@ describe("applicant submission", () => {
           status: 401,
           headers: { "content-type": "application/json" },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            entrypoints: ["https://t.me/payease_recovery?startapp=apply"],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Telegram");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("link")).toHaveAttribute(
+      "href",
+      "https://t.me/payease_recovery?startapp=apply",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("renews an authenticated applicant session only after continued interaction", async () => {

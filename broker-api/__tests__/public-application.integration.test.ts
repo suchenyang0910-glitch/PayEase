@@ -283,6 +283,32 @@ integration("public applicant access", () => {
     expect(row.personal_data_key_version).toBe("v1");
     expect(row.phone_consent_version).toBe("PAYEASE-PERSONAL-DATA-v1");
     expect(row.phone_consented_at).toBeInstanceOf(Date);
+
+    const brokerProfile = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/applications/${applicationNo}/personal-profile`,
+      headers: {
+        cookie: await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      },
+    });
+    expect(brokerProfile.statusCode).toBe(200);
+    expect(brokerProfile.json()).toMatchObject({ applicationNo, profile });
+
+    const lenderProfile = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/applications/${applicationNo}/personal-profile`,
+      headers: { cookie: await lenderCreditOfficerCookie(database) },
+    });
+    expect(lenderProfile.statusCode).toBe(403);
+    const audit = await database.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM audit_events
+        WHERE entity_id = (
+          SELECT id FROM applications WHERE application_no = $1
+        ) AND event_type = 'PERSONAL_PROFILE_VIEWED'`,
+      [applicationNo],
+    );
+    expect(audit.rows[0]!.count).toBe("1");
   });
 
   it("restores the same user's applications after authenticating through a second trusted bot", async () => {

@@ -37,6 +37,7 @@ import {
 } from "./telegram-auth.js";
 import { requiresTelegramAuthentication } from "./telegram-auth-policy.js";
 import {
+  decryptPersonalProfile,
   encryptPersonalProfile,
   personalDataKeyVersion,
 } from "./personal-profile.js";
@@ -1204,6 +1205,101 @@ app.put(
       return reply.code(404).send({ code: "TELEGRAM_USER_NOT_FOUND" });
     }
     return { preferredLanguage: input.preferredLanguage };
+  },
+);
+
+// Broker reviewers need the minimum profile fields to conduct the manual
+// application review.  This endpoint intentionally excludes every other
+// domain; lender/enterprise access must use separately approved data-sharing
+// contracts rather than this broker-side record.
+app.get(
+  "/v1/local/applications/:applicationNo/personal-profile",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const profile = await client.query<{
+        application_id: string;
+        full_name_encrypted: Buffer | null;
+        phone_encrypted: Buffer | null;
+        employer_name_encrypted: Buffer | null;
+        personal_data_consent_version: string | null;
+        personal_data_consented_at: Date | null;
+        phone_consent_version: string | null;
+        phone_consented_at: Date | null;
+      }>(
+        `SELECT a.id AS application_id,
+                u.full_name_encrypted, u.phone_encrypted, u.employer_name_encrypted,
+                u.personal_data_consent_version, u.personal_data_consented_at,
+                u.phone_consent_version, u.phone_consented_at
+           FROM applications a
+           JOIN users u ON u.id = a.user_id
+          WHERE a.application_no = $1
+          FOR UPDATE`,
+        [params.applicationNo],
+      );
+      const stored = profile.rows[0];
+      if (!stored) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (
+        !stored.full_name_encrypted ||
+        !stored.phone_encrypted ||
+        !stored.employer_name_encrypted
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "PERSONAL_PROFILE_NOT_AVAILABLE" });
+      }
+      let decrypted;
+      try {
+        decrypted = decryptPersonalProfile({
+          fullName: stored.full_name_encrypted,
+          phone: stored.phone_encrypted,
+          employerName: stored.employer_name_encrypted,
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          "personal profile decryption unavailable",
+        );
+        await client.query("ROLLBACK");
+        return reply
+          .code(503)
+          .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+      }
+      await addAuditEvent(
+        client,
+        stored.application_id,
+        "PERSONAL_PROFILE_VIEWED",
+        request.adminIdentity!.loginName,
+        {
+          actorRole: "BROKER_OFFICER",
+          fields: ["fullName", "phone", "employerName"],
+        },
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        profile: decrypted,
+        consent: {
+          personalDataVersion: stored.personal_data_consent_version,
+          personalDataConsentedAt:
+            stored.personal_data_consented_at?.toISOString() ?? null,
+          phoneVersion: stored.phone_consent_version,
+          phoneConsentedAt: stored.phone_consented_at?.toISOString() ?? null,
+        },
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 );
 

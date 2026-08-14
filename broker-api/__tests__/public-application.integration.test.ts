@@ -117,6 +117,16 @@ integration("public applicant access", () => {
     process.env.PAYEASE_PII_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString(
       "base64",
     );
+    // Lifecycle fixtures mint a server-side test session.  Keep its Bot in the
+    // same allowlist that production requests enforce, rather than relying on
+    // an untrusted session row that could never exist in production.
+    process.env.TELEGRAM_BOTS_JSON = JSON.stringify([
+      {
+        botId: "444444444",
+        botToken: "integration-test-token-not-real-0001",
+        enabled: true,
+      },
+    ]);
     brokerApi = await import("../src/server.js");
   });
 
@@ -677,7 +687,7 @@ integration("public applicant access", () => {
     await database.query(
       `INSERT INTO telegram_auth_sessions
         (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
-       VALUES ($1, $2, 'integration-bot', now() + interval '30 minutes')`,
+       VALUES ($1, $2, '444444444', now() + interval '30 minutes')`,
       [
         createHash("sha256").update(applicantSessionToken).digest("hex"),
         "integration-lifecycle-user",
@@ -753,7 +763,7 @@ integration("public applicant access", () => {
     await database.query(
       `INSERT INTO telegram_auth_sessions
         (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
-       VALUES ($1, $2, 'integration-bot', now() + interval '30 minutes')`,
+       VALUES ($1, $2, '444444444', now() + interval '30 minutes')`,
       [
         createHash("sha256").update(otherApplicantSessionToken).digest("hex"),
         "integration-lifecycle-other-user",

@@ -822,6 +822,9 @@ integration("public applicant access", () => {
   it("restores the same user's applications after authenticating through a second trusted bot", async () => {
     const originalBotConfig = process.env.TELEGRAM_BOTS_JSON;
     const originalRequireTelegramAuth = process.env.REQUIRE_TELEGRAM_AUTH;
+    const originalNodeEnvironment = process.env.NODE_ENV;
+    const originalApplicantOrigins =
+      process.env.PAYEASE_APPLICANT_ALLOWED_ORIGINS;
     const botA = {
       botId: "123456789",
       botToken: "123456789:integration-bot-token-alpha-123456",
@@ -1186,6 +1189,47 @@ integration("public applicant access", () => {
       });
       expect(eligibleRetry.statusCode).toBe(201);
 
+      const applicantCsrfToken = String(
+        secondLogin.headers["set-cookie"],
+      ).match(/__Host-payease_applicant_csrf=([^;,]+)/)?.[1];
+      expect(applicantCsrfToken).toBeTruthy();
+      process.env.NODE_ENV = "production";
+      process.env.PAYEASE_APPLICANT_ALLOWED_ORIGINS =
+        "https://payease-user.example.test";
+      try {
+        const missingApplicantCsrf = await brokerApi.app.inject({
+          method: "PUT",
+          url: "/v1/local/public/profile/preferred-language",
+          headers: {
+            cookie: `${secondCookie}; __Host-payease_applicant_csrf=${applicantCsrfToken}`,
+            origin: "https://payease-user.example.test",
+          },
+          payload: { preferredLanguage: "en" },
+        });
+        expect(missingApplicantCsrf.statusCode).toBe(403);
+        expect(missingApplicantCsrf.json()).toEqual({
+          code: "CSRF_TOKEN_INVALID",
+        });
+        const acceptedApplicantCsrf = await brokerApi.app.inject({
+          method: "PUT",
+          url: "/v1/local/public/profile/preferred-language",
+          headers: {
+            cookie: `${secondCookie}; __Host-payease_applicant_csrf=${applicantCsrfToken}`,
+            origin: "https://payease-user.example.test",
+            "x-csrf-token": applicantCsrfToken!,
+          },
+          payload: { preferredLanguage: "en" },
+        });
+        expect(acceptedApplicantCsrf.statusCode).toBe(200);
+      } finally {
+        process.env.NODE_ENV = originalNodeEnvironment;
+        if (originalApplicantOrigins === undefined)
+          delete process.env.PAYEASE_APPLICANT_ALLOWED_ORIGINS;
+        else
+          process.env.PAYEASE_APPLICANT_ALLOWED_ORIGINS =
+            originalApplicantOrigins;
+      }
+
       const logout = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/public/telegram-sessions/logout",
@@ -1212,6 +1256,12 @@ integration("public applicant access", () => {
       if (originalRequireTelegramAuth === undefined)
         delete process.env.REQUIRE_TELEGRAM_AUTH;
       else process.env.REQUIRE_TELEGRAM_AUTH = originalRequireTelegramAuth;
+      if (originalApplicantOrigins === undefined)
+        delete process.env.PAYEASE_APPLICANT_ALLOWED_ORIGINS;
+      else
+        process.env.PAYEASE_APPLICANT_ALLOWED_ORIGINS =
+          originalApplicantOrigins;
+      process.env.NODE_ENV = originalNodeEnvironment;
     }
   });
 

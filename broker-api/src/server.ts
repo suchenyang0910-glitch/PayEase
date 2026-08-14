@@ -2675,7 +2675,7 @@ app.post(
         amount_due_minor: string;
         installment_no: number;
       }>(
-        `SELECT id, amount_due_minor::text FROM repayment_installments
+        `SELECT id, amount_due_minor::text, installment_no FROM repayment_installments
          WHERE application_id = $1 AND status = 'PENDING'
          ORDER BY installment_no ASC LIMIT 1 FOR UPDATE`,
         [application.id],

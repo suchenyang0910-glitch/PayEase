@@ -948,10 +948,7 @@ integration("public applicant access", () => {
     const brokerSupplements = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/applications/${applicationNo}/supplement-responses`,
-      headers: {
-        cookie: brokerCookie,
-        "idempotency-key": "broker-approve-supplement-001",
-      },
+      headers: { cookie: brokerCookie },
     });
     expect(brokerSupplements.statusCode).toBe(200);
     expect(brokerSupplements.json()).toMatchObject({
@@ -972,7 +969,10 @@ integration("public applicant access", () => {
     const approved = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/applications/${applicationNo}/broker-review`,
-      headers: { cookie: brokerCookie },
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "broker-approve-supplement-001",
+      },
       payload: { decision: "APPROVED", reasonCode: "SUPPLEMENT_RECEIVED" },
     });
     expect(approved.statusCode).toBe(200);

@@ -29,7 +29,12 @@ export function configuredTelegramBots(
     const config = entry as Record<string, unknown>;
     const botId = typeof config.botId === "string" ? config.botId : "";
     const botToken = typeof config.botToken === "string" ? config.botToken : "";
-    if (!/^\d{5,20}$/.test(botId) || botToken.length < 20) {
+    const enabled = config.enabled;
+    if (
+      !/^\d{5,20}$/.test(botId) ||
+      botToken.length < 20 ||
+      (enabled !== undefined && typeof enabled !== "boolean")
+    ) {
       throw new Error("Telegram bot configuration is invalid");
     }
     if (botIds.has(botId)) throw new Error("Telegram bot IDs must be unique");
@@ -37,7 +42,7 @@ export function configuredTelegramBots(
     return {
       botId,
       botToken,
-      enabled: config.enabled !== false,
+      enabled: enabled ?? true,
     };
   });
 }

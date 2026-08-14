@@ -95,6 +95,17 @@ describe("Telegram multi-bot Mini App verification", () => {
     expect(() =>
       configuredTelegramBots(
         JSON.stringify([
+          {
+            botId: "444444444",
+            botToken: "z".repeat(24),
+            enabled: "false",
+          },
+        ]),
+      ),
+    ).toThrow("invalid");
+    expect(() =>
+      configuredTelegramBots(
+        JSON.stringify([
           { botId: "555555555", botToken: "d".repeat(24) },
           { botId: "555555555", botToken: "e".repeat(24) },
         ]),

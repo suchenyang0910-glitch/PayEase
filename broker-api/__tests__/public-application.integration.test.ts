@@ -259,6 +259,13 @@ integration("public applicant access", () => {
       const firstCookie = String(firstLogin.headers["set-cookie"]).split(
         ";",
       )[0]!;
+      const replayGuard = await database.query<{ retained: boolean }>(
+        `SELECT expires_at > now() + interval '119 minutes' AS retained
+           FROM telegram_initdata_replay_guards
+          WHERE authenticated_bot_id = $1`,
+        [botA.botId],
+      );
+      expect(replayGuard.rows[0]?.retained).toBe(true);
 
       const created = await brokerApi.app.inject({
         method: "POST",

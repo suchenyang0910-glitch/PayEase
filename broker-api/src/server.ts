@@ -827,7 +827,10 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     const replay = await client.query(
       `INSERT INTO telegram_initdata_replay_guards
         (initdata_hash, authenticated_bot_id, expires_at)
-       VALUES ($1, $2, now() + interval '5 minutes')
+       -- Keep the replay guard longer than the applicant session.  A session
+       -- expiring or being revoked must not make an otherwise-valid initData
+       -- immediately usable to mint a replacement session.
+       VALUES ($1, $2, now() + interval '2 hours')
        ON CONFLICT (initdata_hash) DO NOTHING`,
       [identity.initDataHash, identity.authenticatedBotId],
     );

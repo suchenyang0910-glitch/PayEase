@@ -53,14 +53,19 @@ function Login({
   const [error, setError] = useState("");
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const response = await request("/v1/local/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ loginName, password }),
-    });
-    if (!response.ok) return setError(BROKER_COPY[language].loginFailed);
-    const me = await request("/v1/local/auth/me");
-    if (!me.ok) return setError(BROKER_COPY[language].sessionFailed);
-    onLogin((await me.json()) as Identity);
+    setError("");
+    try {
+      const response = await request("/v1/local/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ loginName, password }),
+      });
+      if (!response.ok) return setError(BROKER_COPY[language].loginFailed);
+      const me = await request("/v1/local/auth/me");
+      if (!me.ok) return setError(BROKER_COPY[language].sessionFailed);
+      onLogin((await me.json()) as Identity);
+    } catch {
+      setError(BROKER_COPY[language].sessionFailed);
+    }
   };
   return (
     <main style={shell}>

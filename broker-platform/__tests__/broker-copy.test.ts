@@ -8,6 +8,8 @@ describe("broker console language copy", () => {
       expect(LANGUAGE_LABELS[language].trim()).not.toBe("");
       expect(copy.title.trim()).not.toBe("");
       expect(copy.signIn.trim()).not.toBe("");
+      expect(copy.loginFailed.trim()).not.toBe("");
+      expect(copy.sessionFailed.trim()).not.toBe("");
       expect(copy.reviewTitle.trim()).not.toBe("");
       expect(copy.directoryTitle.trim()).not.toBe("");
       expect(copy.profileAccessRecorded.trim()).not.toBe("");

@@ -6,6 +6,8 @@ export type ApplicantServiceCase = Readonly<{
   updatedAt: string;
 }>;
 
+export type ApplicantCaseLanguage = "zh-CN" | "en" | "km";
+
 const serviceCaseStatuses = new Set<ApplicantServiceCase["status"]>([
   "OPEN",
   "ACKNOWLEDGED",
@@ -49,4 +51,50 @@ export function parseApplicantServiceCaseList(
     });
   }
   return parsed;
+}
+
+const labels: Readonly<
+  Record<
+    ApplicantCaseLanguage,
+    Readonly<{
+      type: Readonly<Record<ApplicantServiceCase["caseType"], string>>;
+      status: Readonly<Record<ApplicantServiceCase["status"], string>>;
+    }>
+  >
+> = {
+  en: {
+    type: { SERVICE_QUERY: "Service question", COMPLAINT: "Complaint" },
+    status: {
+      OPEN: "Received",
+      ACKNOWLEDGED: "Being handled",
+      REFERRED_TO_LENDER: "With the licensed lender",
+      RESOLVED: "Final outcome recorded",
+    },
+  },
+  "zh-CN": {
+    type: { SERVICE_QUERY: "客服咨询", COMPLAINT: "投诉" },
+    status: {
+      OPEN: "已收到",
+      ACKNOWLEDGED: "处理中",
+      REFERRED_TO_LENDER: "已转交持牌机构",
+      RESOLVED: "最终处理结果已记录",
+    },
+  },
+  km: {
+    type: { SERVICE_QUERY: "សំណួរសេវាកម្ម", COMPLAINT: "បណ្តឹង" },
+    status: {
+      OPEN: "បានទទួល",
+      ACKNOWLEDGED: "កំពុងដំណើរការ",
+      REFERRED_TO_LENDER: "បានបញ្ជូនទៅស្ថាប័នមានអាជ្ញាប័ណ្ណ",
+      RESOLVED: "បានកត់ត្រាលទ្ធផលចុងក្រោយ",
+    },
+  },
+};
+
+export function applicantServiceCaseLabel(
+  serviceCase: ApplicantServiceCase,
+  language: ApplicantCaseLanguage,
+): string {
+  const copy = labels[language];
+  return `${copy.type[serviceCase.caseType]} · ${copy.status[serviceCase.status]}`;
 }

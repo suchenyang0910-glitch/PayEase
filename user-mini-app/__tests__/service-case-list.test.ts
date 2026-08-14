@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseApplicantServiceCaseList } from "../src/service-case-list.ts";
+import {
+  applicantServiceCaseLabel,
+  parseApplicantServiceCaseList,
+} from "../src/service-case-list.ts";
 
 describe("applicant service-case list", () => {
   it("accepts applicant-safe metadata only", () => {
@@ -39,5 +42,26 @@ describe("applicant service-case list", () => {
         ],
       }),
     ).toBeUndefined();
+  });
+
+  it("maps internal type and status codes to each applicant language", () => {
+    const serviceCase = parseApplicantServiceCaseList({
+      cases: [
+        {
+          caseNo: "CASE-1",
+          caseType: "COMPLAINT",
+          status: "REFERRED_TO_LENDER",
+          createdAt: "now",
+          updatedAt: "now",
+        },
+      ],
+    })![0]!;
+    expect(applicantServiceCaseLabel(serviceCase, "en")).toBe(
+      "Complaint · With the licensed lender",
+    );
+    expect(applicantServiceCaseLabel(serviceCase, "zh-CN")).toBe(
+      "投诉 · 已转交持牌机构",
+    );
+    expect(applicantServiceCaseLabel(serviceCase, "km")).toContain("បណ្តឹង");
   });
 });

@@ -1154,7 +1154,7 @@ describe("applicant submission", () => {
     expect(
       screen.getByText(/licensed lender is responsible for the final outcome/i),
     ).toBeVisible();
-    expect(await screen.findByText(/COMPLAINT · OPEN/)).toBeVisible();
+    expect(await screen.findByText(/Complaint · Received/)).toBeVisible();
     expect(fetchMock.mock.calls[2]).toEqual([
       "/api/v1/local/public/applications/APP-SUPPORT-001/service-cases",
       { credentials: "include" },

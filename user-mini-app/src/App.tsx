@@ -22,6 +22,7 @@ import { usdInputToMinor } from "./usd-amount.ts";
 import { applicantProfileValidationError } from "./applicant-profile.ts";
 import {
   parseApplicantServiceCaseList,
+  applicantServiceCaseLabel,
   type ApplicantServiceCase,
 } from "./service-case-list.ts";
 import "./app.css";
@@ -1938,7 +1939,7 @@ export function App(): JSX.Element {
                         <li key={serviceCase.caseNo}>
                           <strong>{serviceCase.caseNo}</strong>
                           <span>
-                            {serviceCase.caseType} · {serviceCase.status}
+                            {applicantServiceCaseLabel(serviceCase, language)}
                           </span>
                         </li>
                       ))}

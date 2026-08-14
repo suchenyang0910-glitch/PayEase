@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "tsc -b && vitest run",
     "lint": "echo 'lender-core lint placeholder'"
   },
   "dependencies": {

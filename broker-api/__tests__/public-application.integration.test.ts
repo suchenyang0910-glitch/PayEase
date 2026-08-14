@@ -107,6 +107,7 @@ integration("public applicant access", () => {
       "V0010__encrypted_personal_profiles.sql",
       "V0011__user_contract_confirmation.sql",
       "V0012__supplement_review_rounds.sql",
+      "V0013__repayment_amount_integrity.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -221,6 +222,15 @@ integration("public applicant access", () => {
         [applicationId],
       ),
     ).rejects.toThrow("immutable");
+
+    await expect(
+      database.query(
+        `UPDATE repayment_installments
+            SET amount_paid_minor = amount_due_minor + 1
+          WHERE application_id = $1 AND installment_no = 2`,
+        [applicationId],
+      ),
+    ).rejects.toThrow("repayment_installments_paid_amount_integrity");
 
     const otherUser = await brokerApi.app.inject({
       method: "POST",

@@ -275,7 +275,11 @@ type FinalReviewTerms = Readonly<{
 
 class DualControlConflictError extends Error {}
 
-type ManualActionName = "DISBURSEMENT_CONFIRMATION" | "REPAYMENT_CONFIRMATION";
+type ManualActionName =
+  | "DISBURSEMENT_RELEASE"
+  | "DISBURSEMENT_CONFIRMATION"
+  | "REPAYMENT_WRITE_OFF"
+  | "REPAYMENT_CONFIRMATION";
 
 type ManualActionReplay =
   | Readonly<{
@@ -2337,10 +2341,16 @@ app.post(
   "/v1/local/applications/:applicationNo/disbursement-release",
   async (request, reply) => {
     if (!requireRole(request, reply, "LENDER_DISBURSEMENT_MAKER")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = makerApprovalSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -2348,6 +2358,22 @@ app.post(
       if (!application) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "DISBURSEMENT_RELEASE",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
       }
       if (application.status !== "DISBURSEMENT_PENDING") {
         await client.query("ROLLBACK");
@@ -2360,18 +2386,30 @@ app.post(
         client,
         application,
         "DISBURSEMENT_RELEASE",
-        request.adminIdentity!.loginName,
+        actorUserRef,
         "LENDER_DISBURSEMENT_MAKER",
         input.reasonCode,
       );
-      await client.query("COMMIT");
-      return {
+      const result = {
         applicationNo: params.applicationNo,
         status: "DISBURSEMENT_PENDING",
         approval: "MAKER_RECORDED",
       };
+      await recordManualActionResult(
+        client,
+        application,
+        "DISBURSEMENT_RELEASE",
+        actorUserRef,
+        replay,
+        result,
+      );
+      await client.query("COMMIT");
+      return result;
     } catch (error) {
       await client.query("ROLLBACK");
+      if (error instanceof DualControlConflictError) {
+        return reply.code(409).send({ code: "DUAL_CONTROL_CONFLICT" });
+      }
       throw error;
     } finally {
       client.release();
@@ -2571,10 +2609,16 @@ app.post(
   "/v1/local/applications/:applicationNo/repayment-write-off",
   async (request, reply) => {
     if (!requireRole(request, reply, "LENDER_REPAYMENT_MAKER")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
     const params = z
       .object({ applicationNo: z.string().min(1) })
       .parse(request.params);
     const input = makerApprovalSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -2582,6 +2626,22 @@ app.post(
       if (!application) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "REPAYMENT_WRITE_OFF",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
       }
       if (application.status !== "REPAYMENT_ACTIVE") {
         await client.query("ROLLBACK");
@@ -2605,19 +2665,31 @@ app.post(
         client,
         application,
         "REPAYMENT_WRITE_OFF",
-        request.adminIdentity!.loginName,
+        actorUserRef,
         "LENDER_REPAYMENT_MAKER",
         input.reasonCode,
         nextInstallment.installment_no,
       );
-      await client.query("COMMIT");
-      return {
+      const result = {
         applicationNo: params.applicationNo,
         status: "REPAYMENT_ACTIVE",
         approval: "MAKER_RECORDED",
       };
+      await recordManualActionResult(
+        client,
+        application,
+        "REPAYMENT_WRITE_OFF",
+        actorUserRef,
+        replay,
+        result,
+      );
+      await client.query("COMMIT");
+      return result;
     } catch (error) {
       await client.query("ROLLBACK");
+      if (error instanceof DualControlConflictError) {
+        return reply.code(409).send({ code: "DUAL_CONTROL_CONFLICT" });
+      }
       throw error;
     } finally {
       client.release();

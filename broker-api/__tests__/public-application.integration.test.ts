@@ -1210,12 +1210,29 @@ integration("public applicant access", () => {
       { reasonCode: "MANUAL_DISBURSEMENT_OPENED" },
       "DISBURSEMENT_PENDING",
     );
+    const disbursementReleaseKey = "disbursement-release-0001";
     await call(
       "disbursement-release",
       disbursementMaker,
       { reasonCode: "MANUAL_DISBURSEMENT_RECORDED" },
       "DISBURSEMENT_PENDING",
+      disbursementReleaseKey,
     );
+    const repeatedDisbursementRelease = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/disbursement-release`,
+      headers: {
+        cookie: disbursementMaker,
+        "idempotency-key": disbursementReleaseKey,
+      },
+      payload: { reasonCode: "MANUAL_DISBURSEMENT_RECORDED" },
+    });
+    expect(repeatedDisbursementRelease.statusCode).toBe(200);
+    expect(repeatedDisbursementRelease.json()).toEqual({
+      applicationNo,
+      status: "DISBURSEMENT_PENDING",
+      approval: "MAKER_RECORDED",
+    });
     const disbursementChecker = await adminCookieForRole(
       database,
       "LENDER_DISBURSEMENT_CHECKER",
@@ -1289,12 +1306,29 @@ integration("public applicant access", () => {
       { reasonCode: "REPAYMENT_OPENED" },
       "REPAYMENT_ACTIVE",
     );
+    const firstRepaymentWriteOffKey = "repayment-write-off-period-0001";
     await call(
       "repayment-write-off",
       repaymentMaker,
       { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
       "REPAYMENT_ACTIVE",
+      firstRepaymentWriteOffKey,
     );
+    const repeatedFirstRepaymentWriteOff = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/repayment-write-off`,
+      headers: {
+        cookie: repaymentMaker,
+        "idempotency-key": firstRepaymentWriteOffKey,
+      },
+      payload: { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
+    });
+    expect(repeatedFirstRepaymentWriteOff.statusCode).toBe(200);
+    expect(repeatedFirstRepaymentWriteOff.json()).toEqual({
+      applicationNo,
+      status: "REPAYMENT_ACTIVE",
+      approval: "MAKER_RECORDED",
+    });
     const repaymentChecker = await adminCookieForRole(
       database,
       "LENDER_REPAYMENT_CHECKER",
@@ -1340,6 +1374,7 @@ integration("public applicant access", () => {
       repaymentMaker,
       { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
       "REPAYMENT_ACTIVE",
+      "repayment-write-off-period-0002",
     );
     await call(
       "repayment-confirmation",

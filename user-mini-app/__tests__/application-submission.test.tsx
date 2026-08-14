@@ -63,6 +63,60 @@ describe("applicant submission", () => {
     });
   });
 
+  it("shows a retryable status error after an application was submitted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            applicationNo: "APP-STATUS-ERROR",
+            status: "BROKER_REVIEW",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: "INTERNAL_ERROR" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Test Applicant" },
+    });
+    fireEvent.change(screen.getByLabelText("Mobile number"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(screen.getByLabelText("Employer"), {
+      target: { value: "Pilot Factory" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /personal-data authorization and privacy notice/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /submit for broker review/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+
+    expect(
+      await screen.findByText("We could not refresh the application status."),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /view application status/i }),
+    ).toBeVisible();
+  });
+
   it("renders the approved terms and repayment dashboard returned for the applicant", async () => {
     window.history.replaceState(null, "", "/?application=APP-LOAN-001");
     const fetchMock = vi.fn().mockResolvedValue(

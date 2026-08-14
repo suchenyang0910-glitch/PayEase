@@ -665,6 +665,11 @@ export function App(): JSX.Element {
             <span className="pulse" />
             {t.review}: {t.reviewing}
           </div>
+          {error ? (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          ) : null}
           <button
             className="primary"
             disabled={loading}

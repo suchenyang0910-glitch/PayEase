@@ -324,6 +324,28 @@ export function App(): JSX.Element {
     ? applicantPhase(summary.application.status)
     : undefined;
 
+  function applicantRequest(input: RequestInfo | URL, init?: RequestInit) {
+    const existingHeaders = init?.headers as Record<string, string> | undefined;
+    let headers = existingHeaders;
+    if (
+      ["POST", "PUT", "PATCH", "DELETE"].includes(
+        (init?.method ?? "GET").toUpperCase(),
+      )
+    ) {
+      const token = document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith("__Host-payease_applicant_csrf="))
+        ?.slice("__Host-payease_applicant_csrf=".length);
+      if (token) headers = { ...existingHeaders, "X-CSRF-Token": token };
+    }
+    return fetch(input, {
+      ...init,
+      credentials: "include",
+      ...(headers ? { headers } : {}),
+    });
+  }
+
   useEffect(() => {
     const existingApplication = new URLSearchParams(window.location.search).get(
       "application",
@@ -338,7 +360,7 @@ export function App(): JSX.Element {
     const initData = telegramInitData();
     if (!initData) return;
     void (async () => {
-      const authentication = await fetch(
+      const authentication = await applicantRequest(
         "/api/v1/local/public/telegram-sessions",
         {
           method: "POST",
@@ -354,9 +376,9 @@ export function App(): JSX.Element {
         setError(applicantSessionRecoveryMessage(language));
         return;
       }
-      const applications = await fetch("/api/v1/local/public/applications", {
-        credentials: "include",
-      });
+      const applications = await applicantRequest(
+        "/api/v1/local/public/applications",
+      );
       if (!applications.ok) {
         setError(applicantSessionRecoveryMessage(language));
         return;
@@ -376,7 +398,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!applicantSession || !languageChangedByApplicant.current) return;
-    void fetch("/api/v1/local/public/profile/preferred-language", {
+    void applicantRequest("/api/v1/local/public/profile/preferred-language", {
       method: "PUT",
       credentials: "include",
       headers: { "content-type": "application/json" },
@@ -401,10 +423,13 @@ export function App(): JSX.Element {
       )
         return;
       lastApplicantKeepaliveAt.current = now;
-      void fetch("/api/v1/local/public/telegram-sessions/keepalive", {
-        method: "POST",
-        credentials: "include",
-      })
+      void applicantRequest(
+        "/api/v1/local/public/telegram-sessions/keepalive",
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      )
         .then((response) => {
           if (!response.ok) {
             setApplicantSession(false);
@@ -444,7 +469,7 @@ export function App(): JSX.Element {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/v1/local/applications", {
+      const response = await applicantRequest("/api/v1/local/applications", {
         method: "POST",
         // Same-origin HttpOnly cookie retains the opaque application access
         // token; it is never readable by JavaScript or placed in the URL.
@@ -530,7 +555,7 @@ export function App(): JSX.Element {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(
+      const response = await applicantRequest(
         `/api/v1/local/public/applications/${encodeURIComponent(targetApplicationNo)}`,
         { credentials: "include" },
       );
@@ -565,7 +590,7 @@ export function App(): JSX.Element {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(
+      const response = await applicantRequest(
         `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/contract-confirmation`,
         { method: "POST", credentials: "include" },
       );
@@ -605,7 +630,7 @@ export function App(): JSX.Element {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(
+      const response = await applicantRequest(
         `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/withdraw`,
         { method: "POST", credentials: "include" },
       );
@@ -661,7 +686,7 @@ export function App(): JSX.Element {
     setError("");
     setServiceCaseNotice("");
     try {
-      const response = await fetch(
+      const response = await applicantRequest(
         `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/service-cases`,
         {
           method: "POST",
@@ -725,7 +750,7 @@ export function App(): JSX.Element {
   async function logoutApplicant() {
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await applicantRequest(
         "/api/v1/local/public/telegram-sessions/logout",
         { method: "POST", credentials: "include" },
       );

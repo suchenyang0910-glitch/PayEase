@@ -14,10 +14,15 @@ describe("applicant submission", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, "Telegram");
+    Reflect.deleteProperty(document, "cookie");
     window.history.replaceState(null, "", "/");
   });
 
   it("sends explicit personal-data and phone consent with the profile", async () => {
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "__Host-payease_applicant_csrf=applicant-csrf-test-token",
+    });
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -54,6 +59,10 @@ describe("applicant submission", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toMatchObject({
+      "content-type": "application/json",
+      "X-CSRF-Token": "applicant-csrf-test-token",
+    });
     expect(JSON.parse(String(init.body))).toMatchObject({
       preferredLanguage: "en",
       personalProfile: {

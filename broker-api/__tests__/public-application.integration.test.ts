@@ -222,6 +222,7 @@ integration("public applicant access", () => {
     expect(valid.statusCode).toBe(200);
     expect(valid.headers["set-cookie"]).toContain("HttpOnly");
     expect(valid.headers["set-cookie"]).toContain("Max-Age=1800");
+    expect(valid.headers["set-cookie"]).toContain("__Host-payease_admin_csrf=");
     const sessionCookie = String(valid.headers["set-cookie"]).split(";")[0]!;
     const storedSession = await database.query<{ expires_soon: boolean }>(
       `SELECT expires_at <= now() + interval '30 minutes 5 seconds' AS expires_soon
@@ -298,6 +299,48 @@ integration("public applicant access", () => {
           .digest("hex"),
       },
     ]);
+  });
+
+  it("rejects a protected back-office mutation without the double-submit CSRF token", async () => {
+    const cookie = await adminCookieForRole(database, "OPS_ADMIN", "OPS");
+    const previousNodeEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const missingToken = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/admin/departments",
+        headers: { cookie },
+        payload: {
+          domain: "OPS",
+          code: "CSRF_MISSING",
+          displayNameZh: "CSRF 测试",
+          displayNameEn: "CSRF test",
+          displayNameKm: "CSRF test",
+        },
+      });
+      expect(missingToken.statusCode).toBe(403);
+      expect(missingToken.json()).toEqual({ code: "CSRF_TOKEN_INVALID" });
+
+      const csrfToken = "integration-csrf-token";
+      const accepted = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/admin/departments",
+        headers: {
+          cookie: `${cookie}; __Host-payease_admin_csrf=${csrfToken}`,
+          "x-csrf-token": csrfToken,
+        },
+        payload: {
+          domain: "OPS",
+          code: "CSRF_ACCEPTED",
+          displayNameZh: "CSRF 测试通过",
+          displayNameEn: "CSRF test accepted",
+          displayNameKm: "CSRF test accepted",
+        },
+      });
+      expect(accepted.statusCode).toBe(201);
+    } finally {
+      process.env.NODE_ENV = previousNodeEnvironment;
+    }
   });
 
   it("lets a different platform administrator disable an account and revoke its sessions", async () => {

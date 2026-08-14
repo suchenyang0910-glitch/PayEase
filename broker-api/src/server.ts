@@ -58,6 +58,12 @@ import {
 } from "./personal-profile.js";
 import { runDatabaseMigrations } from "./database-migrations.js";
 import { applicantRejectionNoticeCode } from "./applicant-rejection-notice.js";
+import {
+  cookieValue,
+  csrfCookie,
+  expiredCsrfCookie,
+  hasValidDoubleSubmitCsrf,
+} from "./csrf.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -92,21 +98,13 @@ app.setErrorHandler((error, request, reply) => {
 });
 
 function sessionToken(cookieHeader: string | undefined): string | undefined {
-  return cookieHeader
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("payease_session="))
-    ?.slice("payease_session=".length);
+  return cookieValue(cookieHeader, "payease_session");
 }
 
 function applicantAccessToken(
   cookieHeader: string | undefined,
 ): string | undefined {
-  return cookieHeader
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("payease_application="))
-    ?.slice("payease_application=".length);
+  return cookieValue(cookieHeader, "payease_application");
 }
 
 function applicantSessionToken(
@@ -199,6 +197,9 @@ app.addHook("onRequest", async (request, reply) => {
     (requestPath === "/v1/local/public/telegram-sessions" ||
       requestPath === "/v1/local/public/telegram-sessions/logout" ||
       requestPath === "/v1/local/public/telegram-sessions/keepalive");
+  const isTelegramSessionCreation =
+    request.method === "POST" &&
+    requestPath === "/v1/local/public/telegram-sessions";
   const isPublicApplicantLanguagePreference =
     request.method === "PUT" &&
     requestPath === "/v1/local/public/profile/preferred-language";
@@ -214,6 +215,19 @@ app.addHook("onRequest", async (request, reply) => {
       request.method === "PATCH" ||
       request.method === "DELETE") &&
       requestPath.startsWith("/v1/local/public/applications/"));
+  const isMutation = ["POST", "PUT", "PATCH", "DELETE"].includes(
+    request.method,
+  );
+  const isApplicantCsrfProtected =
+    isApplicantStateChange && !isTelegramSessionCreation;
+  const isAdminCsrfProtected =
+    isMutation &&
+    requestPath.startsWith("/v1/local/") &&
+    !isPublicUserApplicationSubmission &&
+    !isPublicTelegramSession &&
+    !isPublicApplicantLanguagePreference &&
+    requestPath !== "/v1/local/auth/login" &&
+    requestPath !== "/v1/local/auth/bootstrap";
   // In production, the Telegram iframe's fetch Origin is the Mini App's own
   // HTTPS origin. Reject any other browser context before it can send a
   // cookie-backed state change. Test fixtures exercise the parser separately
@@ -228,6 +242,32 @@ app.addHook("onRequest", async (request, reply) => {
     )
   ) {
     return reply.code(403).send({ code: "APPLICANT_ORIGIN_FORBIDDEN" });
+  }
+  // Browser cookies authenticate both applicant and back-office state changes.
+  // Require a same-site readable token in addition to the HttpOnly session
+  // cookie. The initial Telegram initData exchange is exempt because there is
+  // no session yet and initData itself is a signed, short-lived proof.
+  if (
+    process.env.NODE_ENV !== "test" &&
+    isApplicantCsrfProtected &&
+    !hasValidDoubleSubmitCsrf(
+      "applicant",
+      request.headers.cookie,
+      request.headers["x-csrf-token"],
+    )
+  ) {
+    return reply.code(403).send({ code: "CSRF_TOKEN_INVALID" });
+  }
+  if (
+    process.env.NODE_ENV !== "test" &&
+    isAdminCsrfProtected &&
+    !hasValidDoubleSubmitCsrf(
+      "admin",
+      request.headers.cookie,
+      request.headers["x-csrf-token"],
+    )
+  ) {
+    return reply.code(403).send({ code: "CSRF_TOKEN_INVALID" });
   }
   if (
     !requestPath.startsWith("/v1/local/") ||
@@ -890,10 +930,10 @@ app.post("/v1/local/auth/login", async (request, reply) => {
       authPayload,
     );
     await client.query("COMMIT");
-    reply.header(
-      "Set-Cookie",
+    reply.header("Set-Cookie", [
       `payease_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=1800`,
-    );
+      csrfCookie("admin", randomBytes(32).toString("base64url"), 1800),
+    ]);
     return {
       loginName: input.loginName,
       preferredLanguage: row.preferred_language,
@@ -909,10 +949,10 @@ app.post("/v1/local/auth/login", async (request, reply) => {
 app.post("/v1/local/auth/logout", async (request, reply) => {
   const token = sessionToken(request.headers.cookie);
   if (!token) {
-    reply.header(
-      "Set-Cookie",
+    reply.header("Set-Cookie", [
       "payease_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
-    );
+      expiredCsrfCookie("admin"),
+    ]);
     return reply.code(204).send();
   }
   const client = await pool.connect();
@@ -948,10 +988,10 @@ app.post("/v1/local/auth/logout", async (request, reply) => {
   } finally {
     client.release();
   }
-  reply.header(
-    "Set-Cookie",
+  reply.header("Set-Cookie", [
     "payease_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
-  );
+    expiredCsrfCookie("admin"),
+  ]);
   return reply.code(204).send();
 });
 
@@ -1396,10 +1436,10 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
       ],
     );
     await client.query("COMMIT");
-    reply.header(
-      "Set-Cookie",
+    reply.header("Set-Cookie", [
       `__Host-payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=900`,
-    );
+      csrfCookie("applicant", randomBytes(32).toString("base64url"), 900),
+    ]);
     return reply.code(201).send({ authenticated: true });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -1424,6 +1464,7 @@ app.post(
     reply.header("Set-Cookie", [
       "__Host-payease_applicant_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0",
       "payease_applicant_session=; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=0",
+      expiredCsrfCookie("applicant"),
     ]);
     return { loggedOut: true };
   },

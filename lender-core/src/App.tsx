@@ -74,10 +74,26 @@ const card = {
 const form = { display: "grid", gap: 10, maxWidth: 520 } as const;
 
 async function api(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (
+    ["POST", "PUT", "PATCH", "DELETE"].includes(
+      (init?.method ?? "GET").toUpperCase(),
+    )
+  ) {
+    const token = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("__Host-payease_admin_csrf="))
+      ?.slice("__Host-payease_admin_csrf=".length);
+    if (token) headers["X-CSRF-Token"] = token;
+  }
   return fetch(`/api${path}`, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers,
   });
 }
 

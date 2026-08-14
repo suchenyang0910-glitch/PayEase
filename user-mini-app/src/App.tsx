@@ -608,6 +608,16 @@ export function App(): JSX.Element {
     setLanguage(nextLanguage);
   }
 
+  function startNewApplication() {
+    setSummary(undefined);
+    setApprovedAmountMinor(undefined);
+    setApplicationNo("");
+    setWithdrawalConfirmationRequested(false);
+    setError("");
+    window.history.replaceState(null, "", window.location.pathname);
+    setStage("welcome");
+  }
+
   async function logoutApplicant() {
     setLoading(true);
     try {
@@ -958,16 +968,7 @@ export function App(): JSX.Element {
               <strong>{formatUsdMinor(approvedAmountMinor)}</strong>
             </p>
           ) : result === "rejected-resolved" ? (
-            <button
-              className="primary"
-              onClick={() => {
-                setSummary(undefined);
-                setApprovedAmountMinor(undefined);
-                setApplicationNo("");
-                window.history.replaceState(null, "", window.location.pathname);
-                setStage("welcome");
-              }}
-            >
+            <button className="primary" onClick={startNewApplication}>
               {language === "en"
                 ? "Start a new application"
                 : language === "zh-CN"
@@ -977,6 +978,11 @@ export function App(): JSX.Element {
           ) : (
             <p className="response-note">{t.expected}</p>
           )}
+          {result === "withdrawn" ? (
+            <button className="primary" onClick={startNewApplication}>
+              {t.start}
+            </button>
+          ) : null}
           {summary ? (
             <section className="loan-dashboard" aria-label="Loan dashboard">
               <div className="dashboard-heading">

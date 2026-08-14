@@ -532,10 +532,21 @@ describe("applicant submission", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
     expect(await screen.findByText("Application withdrawn")).toBeVisible();
+    expect(
+      screen.getByText(
+        "No further action is required for this withdrawn application.",
+      ),
+    ).toBeVisible();
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/v1/local/public/applications/APP-WITHDRAW-001/withdraw",
       { method: "POST", credentials: "include" },
     ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start application" }));
+    expect(
+      screen.getByRole("button", { name: /^Start application/ }),
+    ).toBeVisible();
+    expect(window.location.search).toBe("");
   });
 
   it("records an applicant's explicit confirmation of approved terms", async () => {

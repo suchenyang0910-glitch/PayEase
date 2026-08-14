@@ -459,6 +459,8 @@ export function App(): JSX.Element {
   >("SERVICE_QUERY");
   const [serviceCaseMessage, setServiceCaseMessage] = useState("");
   const [serviceCaseNotice, setServiceCaseNotice] = useState("");
+  const [supplementMessage, setSupplementMessage] = useState("");
+  const [supplementNotice, setSupplementNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -507,6 +509,8 @@ export function App(): JSX.Element {
     setConsent(false);
     setServiceCaseMessage("");
     setServiceCaseNotice("");
+    setSupplementMessage("");
+    setSupplementNotice("");
   }
 
   async function recoverApplicantSession() {
@@ -950,6 +954,47 @@ export function App(): JSX.Element {
     }
   }
 
+  async function submitSupplementResponse() {
+    if (!applicationNo || supplementMessage.trim().length < 10) return;
+    setLoading(true);
+    setError("");
+    setSupplementNotice("");
+    try {
+      const response = await applicantRequest(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/supplement-responses`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: supplementMessage.trim() }),
+        },
+      );
+      const payload = (await response.json().catch(() => undefined)) as
+        { responseNo?: unknown } | undefined;
+      if (!response.ok || typeof payload?.responseNo !== "string") {
+        throw new Error("supplement response submission failed");
+      }
+      setSupplementMessage("");
+      setSupplementNotice(
+        language === "en"
+          ? `Your response ${payload.responseNo} has been sent to the broker review team.`
+          : language === "zh-CN"
+            ? `你的补充说明 ${payload.responseNo} 已发送给助贷审核团队。`
+            : `ការឆ្លើយតបបន្ថែម ${payload.responseNo} របស់អ្នកត្រូវបានផ្ញើទៅក្រុមពិនិត្យរួចហើយ។`,
+      );
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not send your supplementary response. Please try again."
+          : language === "zh-CN"
+            ? "暂时无法发送补充说明，请稍后重试。"
+            : "មិនអាចផ្ញើការឆ្លើយតបបន្ថែមបានទេ សូមព្យាយាមម្ដងទៀត។",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function changeLanguage(nextLanguage: LanguageCode) {
     languageChangedByApplicant.current = true;
     setLanguage(nextLanguage);
@@ -1303,6 +1348,54 @@ export function App(): JSX.Element {
                     ? "持牌机构可为本次申请提供下一步指引。"
                     : "ស្ថាប័នផ្តល់កម្ចីអាចផ្តល់ការណែនាំសម្រាប់ជំហានបន្ទាប់នៃពាក្យសុំនេះ។")}
             </p>
+          ) : null}
+          {result === "supplement-requested" ? (
+            <section
+              className="next-payment supplement-response"
+              aria-label="Supplementary response"
+            >
+              <strong>
+                {language === "en"
+                  ? "Send a supplementary response"
+                  : language === "zh-CN"
+                    ? "提交补充说明"
+                    : "ផ្ញើការឆ្លើយតបបន្ថែម"}
+              </strong>
+              <small>
+                {language === "en"
+                  ? "Explain what you have corrected or when you can provide the requested item. Do not include passwords, full card numbers, one-time codes, ID images or bank documents here."
+                  : language === "zh-CN"
+                    ? "请说明已更正的内容，或何时可提供所需材料。请勿在此填写密码、完整银行卡号、一次性验证码、证件照片或银行文件。"
+                    : "សូមពន្យល់អំពីអ្វីដែលអ្នកបានកែតម្រូវ ឬពេលវេលាដែលអាចផ្តល់ឯកសារបាន។ កុំបញ្ចូលពាក្យសម្ងាត់ លេខកាតពេញ លេខកូដម្តង រូបថតអត្តសញ្ញាណប័ណ្ណ ឬឯកសារធនាគារនៅទីនេះ។"}
+              </small>
+              <label className="field-label">
+                {language === "en"
+                  ? "Your response"
+                  : language === "zh-CN"
+                    ? "你的补充说明"
+                    : "ការឆ្លើយតបរបស់អ្នក"}
+                <textarea
+                  value={supplementMessage}
+                  onChange={(event) => setSupplementMessage(event.target.value)}
+                  maxLength={2000}
+                  rows={4}
+                />
+              </label>
+              <button
+                className="primary"
+                disabled={loading || supplementMessage.trim().length < 10}
+                onClick={() => void submitSupplementResponse()}
+              >
+                {language === "en"
+                  ? "Send response"
+                  : language === "zh-CN"
+                    ? "发送说明"
+                    : "ផ្ញើការឆ្លើយតប"}
+              </button>
+              {supplementNotice ? (
+                <p className="response-note">{supplementNotice}</p>
+              ) : null}
+            </section>
           ) : null}
           <div className="application-number">
             <span>{t.status}</span>

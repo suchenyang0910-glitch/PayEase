@@ -106,6 +106,13 @@ export const applicantServiceCaseCreateSchema = z.object({
   message: z.string().trim().min(10).max(2000),
 });
 
+export const applicantSupplementResponseSchema = z.object({
+  // This is deliberately a text-only acknowledgement/explanation channel.
+  // Identity documents and banking details require the separate, approved
+  // encrypted-document collection flow and must never be pasted into it.
+  message: z.string().trim().min(10).max(2000),
+});
+
 export const applicantServiceCaseLenderResolutionSchema = z.object({
   reasonCode: z
     .string()

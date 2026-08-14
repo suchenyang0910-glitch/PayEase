@@ -11,6 +11,7 @@ import {
   adminAccountRolesUpdateSchema,
   applicantServiceCaseCreateSchema,
   applicantServiceCaseLenderResolutionSchema,
+  applicantSupplementResponseSchema,
   departmentCreateSchema,
   roleCreateSchema,
   contractConfirmationSchema,
@@ -2352,6 +2353,224 @@ app.post(
     } finally {
       client.release();
     }
+  },
+);
+
+app.post(
+  "/v1/local/public/applications/:applicationNo/supplement-responses",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = applicantSupplementResponseSchema.parse(request.body);
+    let encryptedMessage: Buffer;
+    let keyVersion: string;
+    try {
+      encryptedMessage = encryptPersonalValue(input.message);
+      keyVersion = personalDataKeyVersion();
+    } catch (error) {
+      request.log.error(
+        { err: error },
+        "supplement response encryption unavailable",
+      );
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const owned = await client.query<{
+        application_id: string;
+        user_id: string;
+        preferred_language: "km" | "en" | "zh-CN";
+        supplement_requested: boolean;
+      }>(
+        `SELECT applications.id AS application_id, users.id AS user_id,
+                users.preferred_language, applications.supplement_requested
+           FROM applications JOIN users ON users.id = applications.user_id
+          WHERE applications.application_no = $1
+            AND users.telegram_user_ref = $2
+          FOR UPDATE`,
+        [params.applicationNo, applicant.telegramUserRef],
+      );
+      const application = owned.rows[0];
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (!application.supplement_requested) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "SUPPLEMENT_NOT_REQUESTED" });
+      }
+      const responseNo = `SUP-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const created = await client.query<{
+        id: string;
+        response_no: string;
+        submitted_at: string;
+      }>(
+        `INSERT INTO applicant_supplement_responses
+          (response_no, application_id, user_id, message_encrypted, message_key_version, applicant_language)
+         VALUES ($1, $2, $3, $4::bytea, $5, $6)
+         RETURNING id, response_no, submitted_at`,
+        [
+          responseNo,
+          application.application_id,
+          application.user_id,
+          encryptedMessage,
+          keyVersion,
+          application.preferred_language,
+        ],
+      );
+      const response = created.rows[0]!;
+      await addAuditEvent(
+        client,
+        response.id,
+        "APPLICANT_SUPPLEMENT_RESPONSE_CREATED",
+        applicant.telegramUserRef,
+        {
+          responseNo: response.response_no,
+          applicationNo: params.applicationNo,
+        },
+        "SUPPLEMENT_RESPONSE",
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send({
+        responseNo: response.response_no,
+        submittedAt: response.submitted_at,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get(
+  "/v1/local/public/applications/:applicationNo/supplement-responses",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const responses = await pool.query<{
+      response_no: string;
+      submitted_at: string;
+    }>(
+      `SELECT r.response_no, r.submitted_at
+         FROM applicant_supplement_responses r
+         JOIN applications a ON a.id = r.application_id
+         JOIN users u ON u.id = r.user_id
+        WHERE a.application_no = $1 AND u.telegram_user_ref = $2
+        ORDER BY r.submitted_at DESC`,
+      [params.applicationNo, applicant.telegramUserRef],
+    );
+    return {
+      responses: responses.rows.map((response) => ({
+        responseNo: response.response_no,
+        submittedAt: response.submitted_at,
+      })),
+    };
+  },
+);
+
+app.get(
+  "/v1/local/applications/:applicationNo/supplement-responses",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const responses = await pool.query<{
+      response_no: string;
+      applicant_language: "km" | "en" | "zh-CN";
+      submitted_at: string;
+    }>(
+      `SELECT r.response_no, r.applicant_language, r.submitted_at
+         FROM applicant_supplement_responses r
+         JOIN applications a ON a.id = r.application_id
+        WHERE a.application_no = $1
+        ORDER BY r.submitted_at DESC`,
+      [params.applicationNo],
+    );
+    return {
+      responses: responses.rows.map((response) => ({
+        responseNo: response.response_no,
+        applicantLanguage: response.applicant_language,
+        submittedAt: response.submitted_at,
+      })),
+    };
+  },
+);
+
+app.get(
+  "/v1/local/supplement-responses/:responseNo",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const params = z
+      .object({ responseNo: z.string().min(1) })
+      .parse(request.params);
+    const result = await pool.query<{
+      id: string;
+      response_no: string;
+      application_no: string;
+      message_encrypted: Buffer;
+      submitted_at: string;
+    }>(
+      `SELECT r.id, r.response_no, a.application_no, r.message_encrypted, r.submitted_at
+         FROM applicant_supplement_responses r
+         JOIN applications a ON a.id = r.application_id
+        WHERE r.response_no = $1`,
+      [params.responseNo],
+    );
+    const response = result.rows[0];
+    if (!response)
+      return reply.code(404).send({ code: "SUPPLEMENT_RESPONSE_NOT_FOUND" });
+    let message: string;
+    try {
+      message = decryptPersonalValue(response.message_encrypted);
+    } catch (error) {
+      request.log.error(
+        { err: error },
+        "supplement response decryption unavailable",
+      );
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+    const auditClient = await pool.connect();
+    try {
+      await auditClient.query("BEGIN");
+      await addAuditEvent(
+        auditClient,
+        response.id,
+        "APPLICANT_SUPPLEMENT_RESPONSE_VIEWED",
+        request.adminIdentity!.loginName,
+        { responseNo: response.response_no },
+        "SUPPLEMENT_RESPONSE",
+      );
+      await auditClient.query("COMMIT");
+    } catch (error) {
+      await auditClient.query("ROLLBACK");
+      throw error;
+    } finally {
+      auditClient.release();
+    }
+    return {
+      responseNo: response.response_no,
+      applicationNo: response.application_no,
+      message,
+      submittedAt: response.submitted_at,
+    };
   },
 );
 

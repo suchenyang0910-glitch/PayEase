@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0022__admin_login_failure_lookup.sql",
+      filename: "V0023__encrypted_applicant_supplement_responses.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -864,6 +864,67 @@ integration("public applicant access", () => {
     expect(applicantView.statusCode).toBe(200);
     expect(applicantView.json()).toMatchObject({
       application: { supplementRequested: true },
+    });
+    const submittedSupplement = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/supplement-responses`,
+      headers: { cookie: applicantCookie },
+      payload: {
+        message:
+          "I have corrected the information requested by the broker review team.",
+      },
+    });
+    expect(submittedSupplement.statusCode).toBe(201);
+    const responseNo = (submittedSupplement.json() as { responseNo: string })
+      .responseNo;
+    const encryptedSupplement = await database.query<{
+      message_encrypted: Buffer;
+      message_key_version: string;
+    }>(
+      "SELECT message_encrypted, message_key_version FROM applicant_supplement_responses WHERE response_no = $1",
+      [responseNo],
+    );
+    expect(
+      encryptedSupplement.rows[0]!.message_encrypted.toString("utf8"),
+    ).not.toContain("corrected the information");
+    expect(
+      decryptPersonalValue(encryptedSupplement.rows[0]!.message_encrypted),
+    ).toBe(
+      "I have corrected the information requested by the broker review team.",
+    );
+    expect(encryptedSupplement.rows[0]!.message_key_version).toBe("v1");
+    const applicantSupplements = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/applications/${applicationNo}/supplement-responses`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(applicantSupplements.statusCode).toBe(200);
+    expect(applicantSupplements.json()).toMatchObject({
+      responses: [{ responseNo }],
+    });
+    expect(JSON.stringify(applicantSupplements.json())).not.toContain(
+      "corrected the information",
+    );
+    const brokerSupplements = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/applications/${applicationNo}/supplement-responses`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(brokerSupplements.statusCode).toBe(200);
+    expect(brokerSupplements.json()).toMatchObject({
+      responses: [{ responseNo, applicantLanguage: "en" }],
+    });
+    const brokerSupplementDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/supplement-responses/${responseNo}`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(brokerSupplementDetail.statusCode).toBe(200);
+    expect(brokerSupplementDetail.json()).toMatchObject({
+      responseNo,
+      applicationNo,
+      message:
+        "I have corrected the information requested by the broker review team.",
     });
     const approved = await brokerApi.app.inject({
       method: "POST",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createApplicationSchema,
   disbursementDualControlSchema,
+  applicantSupplementResponseSchema,
   lenderFinalReviewSchema,
 } from "../src/validation.js";
 
@@ -106,5 +107,21 @@ describe("controlled-pilot application validation", () => {
         firstDueDate: "2026-09-13",
       }).success,
     ).toBe(true);
+  });
+
+  it("allows only bounded non-empty text for a supplement response", () => {
+    expect(
+      applicantSupplementResponseSchema.safeParse({
+        message: "I have corrected the requested information.",
+      }).success,
+    ).toBe(true);
+    expect(
+      applicantSupplementResponseSchema.safeParse({ message: "short" }).success,
+    ).toBe(false);
+    expect(
+      applicantSupplementResponseSchema.safeParse({
+        message: "x".repeat(2001),
+      }).success,
+    ).toBe(false);
   });
 });

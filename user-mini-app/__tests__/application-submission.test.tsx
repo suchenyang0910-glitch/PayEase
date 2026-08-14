@@ -872,6 +872,81 @@ describe("applicant submission", () => {
     expect(screen.queryByText("SALARY_NOT_VERIFIED")).toBeNull();
   });
 
+  it("submits a supplement response only for a returned application", async () => {
+    window.history.replaceState(null, "", "/?application=APP-SUPPLEMENT-001");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-SUPPLEMENT-001",
+              status: "BROKER_REVIEW",
+              requestedAmountMinor: "5000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: null,
+              rejectionConditionResolved: false,
+              rejectionNoticeCode: null,
+              supplementRequested: true,
+            },
+            terms: null,
+            repayment: {
+              periodCount: 0,
+              paidPeriods: 0,
+              unpaidPeriods: 0,
+              overduePeriods: 0,
+              totalDueMinor: "0",
+              totalPaidMinor: "0",
+              outstandingMinor: "0",
+              overdueOutstandingMinor: "0",
+              nextInstallment: null,
+              installments: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ responseNo: "SUP-20260815-ABCD1234" }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+    await screen.findByText("Additional information needed");
+    fireEvent.change(screen.getByLabelText("Your response"), {
+      target: { value: "I have corrected the requested information." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/v1/local/public/applications/APP-SUPPLEMENT-001/supplement-responses",
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: "I have corrected the requested information.",
+        }),
+      },
+    ]);
+    expect(
+      await screen.findByText(
+        "Your response SUP-20260815-ABCD1234 has been sent to the broker review team.",
+      ),
+    ).toBeVisible();
+  });
+
   it("requires a second applicant action before withdrawing a pre-contract application", async () => {
     window.history.replaceState(null, "", "/?application=APP-WITHDRAW-001");
     const fetchMock = vi

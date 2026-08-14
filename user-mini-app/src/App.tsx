@@ -389,10 +389,19 @@ export function App(): JSX.Element {
         setLanguage(payload.preferredLanguage);
       }
       setApplicationHistory(payload.applications);
-      const latest = payload.applications[0];
-      if (!latest) return;
-      setApplicationNo(latest.applicationNo);
-      setStage("submitted");
+      const requestedApplicationNo = new URLSearchParams(
+        window.location.search,
+      ).get("application");
+      // Restore the record the applicant explicitly opened when it is still
+      // available; otherwise surface the newest record.  A returning Telegram
+      // user should see their current decision, balance and next payment
+      // directly instead of needing a second "view status" tap.
+      const restored =
+        payload.applications.find(
+          (item) => item.applicationNo === requestedApplicationNo,
+        ) ?? payload.applications[0];
+      if (!restored) return;
+      await checkStatus(restored.applicationNo);
     })().catch(() => setError(applicantSessionRecoveryMessage(language)));
   }, []);
 

@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
+import {
+  applicantPhase,
+  progressStepForPhase,
+  type ApplicantPhase,
+} from "./application-progress";
 import { applicantResult } from "./application-result";
 import "./app.css";
 
@@ -53,6 +58,45 @@ type ApplicationList = {
 
 function usd(minor: string | null | undefined): string {
   return `$${(Number(minor ?? "0") / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function applicantPhaseLabel(
+  phase: ApplicantPhase,
+  language: LanguageCode,
+): string {
+  const labelsByLanguage: Record<
+    LanguageCode,
+    Record<ApplicantPhase, string>
+  > = {
+    "zh-CN": {
+      "broker-review": "助贷资料审核中",
+      "employer-verification": "企业在职与薪资核验中",
+      "lender-review": "持牌机构审核中",
+      "contract-and-disbursement": "签约 / 放款处理中",
+      repayment: "还款进行中",
+      settled: "已结清",
+      rejected: "未获批准",
+    },
+    en: {
+      "broker-review": "Broker document review",
+      "employer-verification": "Employer verification",
+      "lender-review": "Licensed lender review",
+      "contract-and-disbursement": "Contract / disbursement in progress",
+      repayment: "Repayment in progress",
+      settled: "Settled",
+      rejected: "Not approved",
+    },
+    km: {
+      "broker-review": "កំពុងពិនិត្យឯកសារដោយក្រុមការងារ",
+      "employer-verification": "កំពុងផ្ទៀងផ្ទាត់ដោយក្រុមហ៊ុន",
+      "lender-review": "កំពុងពិនិត្យដោយស្ថាប័នមានអាជ្ញាប័ណ្ណ",
+      "contract-and-disbursement": "កំពុងចុះកិច្ចសន្យា / បើកប្រាក់",
+      repayment: "កំពុងសងប្រាក់",
+      settled: "បានបិទបញ្ចប់",
+      rejected: "មិនត្រូវបានអនុម័ត",
+    },
+  };
+  return labelsByLanguage[language][phase];
 }
 
 const labels: Record<LanguageCode, Record<string, string>> = {
@@ -202,6 +246,9 @@ export function App(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const t = labels[language];
   const result = applicantResult(summary?.application);
+  const visiblePhase = summary
+    ? applicantPhase(summary.application.status)
+    : undefined;
   const repaymentHint = useMemo(
     () => Math.ceil((amount * 1.03) / Math.max(1, term / 30)),
     [amount, term],
@@ -349,8 +396,9 @@ export function App(): JSX.Element {
     });
   }
 
-  const currentStep =
-    stage === "welcome" || stage === "details"
+  const currentStep = visiblePhase
+    ? progressStepForPhase(visiblePhase)
+    : stage === "welcome" || stage === "details"
       ? 0
       : stage === "submitted"
         ? 1
@@ -607,7 +655,12 @@ export function App(): JSX.Element {
                       ? "ព័ត៌មានឥណទានរបស់អ្នក"
                       : "我的贷款信息"}
                 </strong>
-                <span>{summary.application.status}</span>
+                <span>
+                  {applicantPhaseLabel(
+                    applicantPhase(summary.application.status),
+                    language,
+                  )}
+                </span>
               </div>
               <div className="metric-grid">
                 <div>

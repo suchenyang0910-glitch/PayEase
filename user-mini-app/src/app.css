@@ -269,15 +269,6 @@ footer {
   font-weight: 800;
   letter-spacing: -1.5px;
 }
-.amount-display small {
-  font-size: 20px;
-  margin-right: 3px;
-}
-.amount-display em {
-  font-size: 17px;
-  color: #90a297;
-  font-style: normal;
-}
 .choices,
 .term-choices {
   display: flex;
@@ -307,6 +298,20 @@ footer {
   margin: 18px 0 8px;
   color: #66786b;
   font-size: 13px;
+}
+.amount-input {
+  width: 100%;
+  border: 1px solid #d7e3d8;
+  border-radius: 11px;
+  padding: 12px;
+  background: #fff;
+  color: #17291e;
+  outline-color: #15965a;
+}
+.amount-hint {
+  margin: 6px 0 0;
+  color: #728177;
+  font-size: 11px;
 }
 .estimate {
   gap: 18px;

@@ -18,6 +18,7 @@ import { applicantSessionRecoveryMessage } from "./applicant-session-message.ts"
 import { shouldKeepApplicantSessionAlive } from "./applicant-session-keepalive.ts";
 import { isControlledPreviewBuild } from "./deployment-mode.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
+import { usdInputToMinor } from "./usd-amount.ts";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -287,6 +288,8 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     welcome: "工资到账前，资金周转更从容",
     intro: "面向合作企业员工的薪资周转服务。授信、合同与放款均由持牌机构负责。",
     amount: "申请金额",
+    customAmount: "输入申请金额（USD 10–500）",
+    amountInvalid: "请输入 USD 10.00 至 500.00 的金额，最多两位小数。",
     term: "借款期限",
     start: "开始申请",
     details: "填写个人资料",
@@ -325,6 +328,9 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     intro:
       "Salary liquidity support for employees of partner companies. The licensed lender controls credit, contracts and disbursement.",
     amount: "Requested amount",
+    customAmount: "Enter requested amount (USD 10–500)",
+    amountInvalid:
+      "Enter an amount from USD 10.00 to 500.00, with up to two decimals.",
     term: "Loan term",
     start: "Start application",
     details: "Your details",
@@ -364,6 +370,9 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     intro:
       "សេវាសម្រាប់បុគ្គលិកក្រុមហ៊ុនដៃគូ។ ស្ថាប័នមានអាជ្ញាប័ណ្ណជាអ្នកសម្រេចឥណទាន កិច្ចសន្យា និងការបើកប្រាក់។",
     amount: "ចំនួនទឹកប្រាក់ស្នើ",
+    customAmount: "បញ្ចូលចំនួនទឹកប្រាក់ (USD 10–500)",
+    amountInvalid:
+      "សូមបញ្ចូលចំនួនចាប់ពី USD 10.00 ដល់ 500.00 ដោយមានទសភាគអតិបរមាពីរខ្ទង់។",
     term: "រយៈពេល",
     start: "ចាប់ផ្តើមដាក់ពាក្យ",
     details: "ព័ត៌មានរបស់អ្នក",
@@ -425,7 +434,7 @@ export function App(): JSX.Element {
   const languageChangedByApplicant = useRef(false);
   const lastApplicantKeepaliveAt = useRef(0);
   const [stage, setStage] = useState<Stage>("welcome");
-  const [amount, setAmount] = useState(50);
+  const [amountInput, setAmountInput] = useState("50");
   const [term, setTerm] = useState(30);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -449,6 +458,9 @@ export function App(): JSX.Element {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
+  const amountInputError =
+    t.amountInvalid ?? "Enter an amount from USD 10.00 to 500.00.";
+  const requestedAmountMinor = usdInputToMinor(amountInput);
   const showPreviewBadge = isControlledPreviewBuild(
     import.meta.env.VITE_PAYEASE_DEPLOYMENT_MODE,
   );
@@ -635,6 +647,11 @@ export function App(): JSX.Element {
   }, [applicantSession, language]);
 
   async function submit() {
+    const amountMinor = requestedAmountMinor;
+    if (!amountMinor) {
+      setError(amountInputError);
+      return;
+    }
     if (!name.trim() || !phone.trim() || !employer.trim() || !consent) {
       setError(
         language === "en"
@@ -658,7 +675,7 @@ export function App(): JSX.Element {
           telegramUserRef: telegramUserRef(),
           preferredLanguage: language,
           requestedAmount: {
-            amountMinor: String(amount * 100),
+            amountMinor,
             currency: "USD",
           },
           tenorDays: term,
@@ -700,7 +717,7 @@ export function App(): JSX.Element {
         prependApplicationHistory(current, {
           applicationNo: payload.applicationNo!,
           status: "BROKER_REVIEW",
-          requestedAmountMinor: String(amount * 100),
+          requestedAmountMinor: amountMinor,
           currency: "USD",
           tenorDays: term,
           approvedAmountMinor: null,
@@ -1029,21 +1046,36 @@ export function App(): JSX.Element {
                 <b>{t.usd}</b>
               </div>
               <div className="amount-display">
-                <small>$</small>
-                {amount}
-                <em>.00</em>
+                {requestedAmountMinor
+                  ? formatUsdMinor(requestedAmountMinor)
+                  : "—"}
               </div>
               <div className="choices">
                 {amountOptions.map((value) => (
                   <button
                     key={value}
-                    className={amount === value ? "selected" : ""}
-                    onClick={() => setAmount(value)}
+                    className={amountInput === String(value) ? "selected" : ""}
+                    onClick={() => setAmountInput(String(value))}
                   >
                     ${value}
                   </button>
                 ))}
               </div>
+              <label className="field-label" htmlFor="requested-amount">
+                {t.customAmount}
+              </label>
+              <input
+                id="requested-amount"
+                className="amount-input"
+                value={amountInput}
+                onChange={(event) => setAmountInput(event.target.value)}
+                inputMode="decimal"
+                autoComplete="off"
+                aria-describedby="requested-amount-hint"
+              />
+              <p id="requested-amount-hint" className="amount-hint">
+                USD 10.00–500.00
+              </p>
               <label className="field-label">{t.term}</label>
               <div className="term-choices">
                 {terms.map((value) => (
@@ -1068,7 +1100,18 @@ export function App(): JSX.Element {
                   language={language}
                 />
               )}
-              <button className="primary" onClick={() => setStage("details")}>
+              <button
+                className="primary"
+                onClick={() => {
+                  const amountMinor = requestedAmountMinor;
+                  if (!amountMinor) {
+                    setError(amountInputError);
+                    return;
+                  }
+                  setError("");
+                  setStage("details");
+                }}
+              >
                 {t.start}
                 <span>→</span>
               </button>

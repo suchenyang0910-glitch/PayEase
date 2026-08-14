@@ -38,6 +38,12 @@ describe("applicant submission", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
       target: { value: "en" },
     });
+    fireEvent.change(
+      screen.getByLabelText("Enter requested amount (USD 10–500)"),
+      {
+        target: { value: "123.45" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: /start application/i }));
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Test Applicant" },
@@ -65,6 +71,7 @@ describe("applicant submission", () => {
     });
     expect(JSON.parse(String(init.body))).toMatchObject({
       preferredLanguage: "en",
+      requestedAmount: { amountMinor: "12345", currency: "USD" },
       personalProfile: {
         fullName: "Test Applicant",
         phone: "+85512345678",

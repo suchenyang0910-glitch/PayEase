@@ -57,6 +57,7 @@ import {
   personalDataKeyVersion,
 } from "./personal-profile.js";
 import { runDatabaseMigrations } from "./database-migrations.js";
+import { applicantRejectionNoticeCode } from "./applicant-rejection-notice.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -1621,9 +1622,15 @@ app.get(
       approved_amount_minor: string | null;
       rejection_condition_resolved: boolean;
       supplement_requested: boolean;
+      rejected_reason_code: string | null;
     }>(
       `SELECT id, application_no, requested_amount_minor::text, currency, tenor_days, status,
-            approved_amount_minor::text, rejection_condition_resolved, supplement_requested
+            approved_amount_minor::text, rejection_condition_resolved, supplement_requested,
+            (
+              SELECT reason_code FROM approval_events
+               WHERE application_id = applications.id AND decision = 'REJECTED'
+               ORDER BY occurred_at DESC LIMIT 1
+            ) AS rejected_reason_code
        FROM applications
        WHERE application_no = $1
          AND (
@@ -1655,6 +1662,10 @@ app.get(
         tenorDays: application.tenor_days,
         approvedAmountMinor: application.approved_amount_minor,
         rejectionConditionResolved: application.rejection_condition_resolved,
+        rejectionNoticeCode: applicantRejectionNoticeCode(
+          application.status,
+          application.rejected_reason_code,
+        ),
         supplementRequested: application.supplement_requested,
       },
       loanDetails.terms,
@@ -1683,12 +1694,18 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     approved_amount_minor: string | null;
     rejection_condition_resolved: boolean;
     supplement_requested: boolean;
+    rejected_reason_code: string | null;
     created_at: Date;
   }>(
     `SELECT applications.application_no, applications.status,
             applications.requested_amount_minor::text, applications.currency,
             applications.tenor_days, applications.approved_amount_minor::text,
             applications.rejection_condition_resolved, applications.supplement_requested,
+            (
+              SELECT reason_code FROM approval_events
+               WHERE application_id = applications.id AND decision = 'REJECTED'
+               ORDER BY occurred_at DESC LIMIT 1
+            ) AS rejected_reason_code,
             applications.created_at
        FROM applications
        JOIN users ON users.id = applications.user_id
@@ -1707,6 +1724,10 @@ app.get("/v1/local/public/applications", async (request, reply) => {
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
       rejectionConditionResolved: application.rejection_condition_resolved,
+      rejectionNoticeCode: applicantRejectionNoticeCode(
+        application.status,
+        application.rejected_reason_code,
+      ),
       supplementRequested: application.supplement_requested,
       createdAt: application.created_at.toISOString(),
     })),
@@ -1908,6 +1929,10 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
       rejectionConditionResolved: application.rejection_condition_resolved,
+      rejectionNoticeCode: applicantRejectionNoticeCode(
+        application.status,
+        null,
+      ),
       supplementRequested: application.supplement_requested,
     },
     loanDetails.terms,

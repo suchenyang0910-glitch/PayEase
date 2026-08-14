@@ -29,6 +29,12 @@ type UserSummary = {
     tenorDays: number;
     approvedAmountMinor: string | null;
     rejectionConditionResolved: boolean;
+    rejectionNoticeCode:
+      | "INFORMATION_INCOMPLETE"
+      | "EMPLOYMENT_OR_INCOME_UNVERIFIED"
+      | "PRODUCT_ELIGIBILITY_NOT_MET"
+      | "LENDER_DECISION"
+      | null;
     supplementRequested: boolean;
   };
   terms: null | {
@@ -68,6 +74,46 @@ type ApplicationList = {
 };
 
 type ApplicationListEntry = ApplicationHistoryEntry;
+
+function applicantRejectionNotice(
+  noticeCode: UserSummary["application"]["rejectionNoticeCode"],
+  language: LanguageCode,
+): string | undefined {
+  if (!noticeCode) return undefined;
+  const copy: Record<
+    LanguageCode,
+    Record<NonNullable<typeof noticeCode>, string>
+  > = {
+    en: {
+      INFORMATION_INCOMPLETE:
+        "Please complete or correct the application information before applying again.",
+      EMPLOYMENT_OR_INCOME_UNVERIFIED:
+        "Please complete employment or income verification before applying again.",
+      PRODUCT_ELIGIBILITY_NOT_MET:
+        "The current product eligibility requirements are not met. Contact the licensed lender for available options.",
+      LENDER_DECISION:
+        "This application was not approved. Contact the licensed lender's customer service team if you need assistance.",
+    },
+    "zh-CN": {
+      INFORMATION_INCOMPLETE: "请补充或更正申请资料后再重新申请。",
+      EMPLOYMENT_OR_INCOME_UNVERIFIED: "请先完成在职或收入核验后再重新申请。",
+      PRODUCT_ELIGIBILITY_NOT_MET:
+        "当前未满足产品申请条件；请联系持牌机构了解可申请的产品。",
+      LENDER_DECISION: "本次申请未获批准；如需协助，请联系持牌机构客服。",
+    },
+    km: {
+      INFORMATION_INCOMPLETE:
+        "សូមបំពេញ ឬកែតម្រូវព័ត៌មានពាក្យសុំ មុនពេលដាក់ពាក្យម្ដងទៀត។",
+      EMPLOYMENT_OR_INCOME_UNVERIFIED:
+        "សូមបំពេញការផ្ទៀងផ្ទាត់ការងារ ឬប្រាក់ចំណូល មុនពេលដាក់ពាក្យម្ដងទៀត។",
+      PRODUCT_ELIGIBILITY_NOT_MET:
+        "លក្ខខណ្ឌផលិតផលបច្ចុប្បន្នមិនត្រូវគ្នាទេ។ សូមទាក់ទងស្ថាប័នផ្តល់កម្ចី។",
+      LENDER_DECISION:
+        "ពាក្យសុំរបស់អ្នកមិនត្រូវបានអនុម័តទេ។ សូមទាក់ទងផ្នែកសេវាកម្មអតិថិជនរបស់ស្ថាប័នផ្តល់កម្ចី។",
+    },
+  };
+  return copy[language][noticeCode];
+}
 
 function applicantPhaseLabel(
   phase: ApplicantPhase,
@@ -455,6 +501,7 @@ export function App(): JSX.Element {
           tenorDays: term,
           approvedAmountMinor: null,
           rejectionConditionResolved: false,
+          rejectionNoticeCode: null,
           supplementRequested: false,
           createdAt: new Date().toISOString(),
         }),
@@ -960,6 +1007,19 @@ export function App(): JSX.Element {
                           : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
                       : t.noOffer}
           </p>
+          {result.startsWith("rejected") ? (
+            <p className="response-note" aria-label="Reapplication guidance">
+              {applicantRejectionNotice(
+                summary?.application.rejectionNoticeCode ?? null,
+                language,
+              ) ??
+                (language === "en"
+                  ? "The licensed lender can provide the next-step guidance for this application."
+                  : language === "zh-CN"
+                    ? "持牌机构可为本次申请提供下一步指引。"
+                    : "ស្ថាប័នផ្តល់កម្ចីអាចផ្តល់ការណែនាំសម្រាប់ជំហានបន្ទាប់នៃពាក្យសុំនេះ។")}
+            </p>
+          ) : null}
           <div className="application-number">
             <span>{t.status}</span>
             <strong>{applicationNo}</strong>

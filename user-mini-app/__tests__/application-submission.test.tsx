@@ -464,6 +464,56 @@ describe("applicant submission", () => {
     expect(screen.queryByText("Estimated monthly payment")).toBeNull();
   });
 
+  it("shows a controlled reapplication explanation without exposing a lender reason code", async () => {
+    window.history.replaceState(null, "", "/?application=APP-REJECTED-001");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          application: {
+            applicationNo: "APP-REJECTED-001",
+            status: "REJECTED",
+            requestedAmountMinor: "25000",
+            currency: "USD",
+            tenorDays: 30,
+            approvedAmountMinor: null,
+            rejectionConditionResolved: false,
+            rejectionNoticeCode: "EMPLOYMENT_OR_INCOME_UNVERIFIED",
+            supplementRequested: false,
+          },
+          terms: null,
+          repayment: {
+            periodCount: 0,
+            paidPeriods: 0,
+            unpaidPeriods: 0,
+            overduePeriods: 0,
+            totalDueMinor: "0",
+            totalPaidMinor: "0",
+            outstandingMinor: "0",
+            overdueOutstandingMinor: "0",
+            nextInstallment: null,
+            installments: [],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+
+    expect(await screen.findByText("Application not approved")).toBeVisible();
+    expect(screen.getByLabelText("Reapplication guidance")).toHaveTextContent(
+      "Please complete employment or income verification before applying again.",
+    );
+    expect(screen.queryByText("SALARY_NOT_VERIFIED")).toBeNull();
+  });
+
   it("requires a second applicant action before withdrawing a pre-contract application", async () => {
     window.history.replaceState(null, "", "/?application=APP-WITHDRAW-001");
     const fetchMock = vi

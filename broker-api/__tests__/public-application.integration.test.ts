@@ -1024,6 +1024,27 @@ integration("public applicant access", () => {
           WHERE application_no = $1`,
         [applicationNo],
       );
+      await database.query(
+        `INSERT INTO approval_events
+          (application_id, stage, decision, actor_user_ref, actor_role, reason_code, review_round, occurred_at)
+         VALUES ($1, 'LENDER_FINAL_REVIEW', 'REJECTED', 'integration-lender', 'LENDER_CREDIT_OFFICER', 'SALARY_NOT_VERIFIED', 1, now())`,
+        [applicationId],
+      );
+      const rejectedDetail = await brokerApi.app.inject({
+        method: "GET",
+        url: `/v1/local/public/applications/${applicationNo}`,
+        headers: { cookie: secondCookie },
+      });
+      expect(rejectedDetail.statusCode).toBe(200);
+      expect(rejectedDetail.headers["cache-control"]).toBe("no-store");
+      expect(rejectedDetail.json()).toMatchObject({
+        application: {
+          rejectionNoticeCode: "EMPLOYMENT_OR_INCOME_UNVERIFIED",
+        },
+      });
+      expect(JSON.stringify(rejectedDetail.json())).not.toContain(
+        "SALARY_NOT_VERIFIED",
+      );
       const unresolvedRejectionRetry = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",

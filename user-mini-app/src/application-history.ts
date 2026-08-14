@@ -6,6 +6,12 @@ export type ApplicationHistoryEntry = Readonly<{
   tenorDays: number;
   approvedAmountMinor: string | null;
   rejectionConditionResolved: boolean;
+  rejectionNoticeCode:
+    | "INFORMATION_INCOMPLETE"
+    | "EMPLOYMENT_OR_INCOME_UNVERIFIED"
+    | "PRODUCT_ELIGIBILITY_NOT_MET"
+    | "LENDER_DECISION"
+    | null;
   supplementRequested: boolean;
   createdAt: string;
 }>;

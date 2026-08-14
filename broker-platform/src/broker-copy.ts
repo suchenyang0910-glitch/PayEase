@@ -27,6 +27,7 @@ export type BrokerCopy = Readonly<{
   phoneConsent: string;
   notRecorded: string;
   profileUnavailable: string;
+  profileRequestFailed: string;
   profileAccessRecorded: string;
   recorded: string;
   blocked: string;
@@ -80,6 +81,8 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     phoneConsent: "Phone consent",
     notRecorded: "Not recorded",
     profileUnavailable: "Profile unavailable",
+    profileRequestFailed:
+      "The profile could not be retrieved. No profile data is displayed.",
     profileAccessRecorded: "Profile access recorded in the audit log.",
     recorded: "Recorded",
     blocked: "Action blocked",
@@ -134,6 +137,7 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     phoneConsent: "手机号授权",
     notRecorded: "未记录",
     profileUnavailable: "资料不可用",
+    profileRequestFailed: "暂时无法读取资料，当前未展示任何资料数据。",
     profileAccessRecorded: "资料访问已写入审计日志。",
     recorded: "已记录",
     blocked: "操作被阻止",
@@ -186,6 +190,8 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     phoneConsent: "ការយល់ព្រមលេខទូរស័ព្ទ",
     notRecorded: "មិនបានកត់ត្រា",
     profileUnavailable: "មិនអាចប្រើព័ត៌មានបាន",
+    profileRequestFailed:
+      "មិនអាចទាញយកព័ត៌មានបានទេ។ មិនមានព័ត៌មានត្រូវបានបង្ហាញទេ។",
     profileAccessRecorded:
       "ការចូលមើលព័ត៌មានត្រូវបានកត់ត្រាក្នុងកំណត់ហេតុសវនកម្ម។",
     recorded: "បានកត់ត្រា",

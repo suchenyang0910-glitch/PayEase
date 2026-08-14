@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BROKER_COPY, LANGUAGE_LABELS } from "./broker-copy";
+import { brokerProfileResult } from "./broker-profile-action";
 import { brokerReviewNotice } from "./broker-review-action";
 
 type Language = "zh-CN" | "en" | "km";
@@ -19,6 +20,24 @@ type PersonalProfileResponse = Readonly<{
     phoneConsentedAt: string | null;
   };
 }>;
+
+function isPersonalProfileResponse(
+  payload: unknown,
+): payload is PersonalProfileResponse {
+  if (!payload || typeof payload !== "object") return false;
+  const candidate = payload as {
+    applicationNo?: unknown;
+    profile?: { fullName?: unknown; phone?: unknown; employerName?: unknown };
+    consent?: unknown;
+  };
+  return (
+    typeof candidate.applicationNo === "string" &&
+    typeof candidate.profile?.fullName === "string" &&
+    typeof candidate.profile?.phone === "string" &&
+    typeof candidate.profile?.employerName === "string" &&
+    Boolean(candidate.consent)
+  );
+}
 
 const domains: Domain[] = ["OPS", "BROKER", "LENDER", "EMPLOYER"];
 const shell = {
@@ -141,6 +160,7 @@ export function App(): JSX.Element {
   const [reviewInProgress, setReviewInProgress] = useState(false);
   const [personalProfile, setPersonalProfile] =
     useState<PersonalProfileResponse>();
+  const [profileLoading, setProfileLoading] = useState(false);
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
   const [department, setDepartment] = useState({
@@ -227,18 +247,24 @@ export function App(): JSX.Element {
   };
   const loadPersonalProfile = async () => {
     setPersonalProfile(undefined);
-    const response = await request(
-      `/v1/local/applications/${encodeURIComponent(applicationNo)}/personal-profile`,
+    setNotice("");
+    setProfileLoading(true);
+    const result = await brokerProfileResult(
+      () =>
+        request(
+          `/v1/local/applications/${encodeURIComponent(applicationNo)}/personal-profile`,
+        ),
+      copy,
     );
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      setNotice(
-        `${copy.profileUnavailable} (${response.status}): ${JSON.stringify(payload)}`,
-      );
+    if (isPersonalProfileResponse(result.payload)) {
+      setPersonalProfile(result.payload);
+    } else if (result.payload) {
+      setNotice(`${copy.profileUnavailable}: ${copy.profileRequestFailed}`);
+      setProfileLoading(false);
       return;
     }
-    setPersonalProfile((await response.json()) as PersonalProfileResponse);
-    setNotice(copy.profileAccessRecorded);
+    setNotice(result.notice);
+    setProfileLoading(false);
   };
   if (checking) return <main style={shell}>{copy.checkingSession}</main>;
   if (!identity) return <Login onLogin={setIdentity} />;
@@ -293,10 +319,10 @@ export function App(): JSX.Element {
             </label>
             <div style={{ display: "flex", gap: 12 }}>
               <button
-                disabled={!applicationNo}
+                disabled={!applicationNo || profileLoading}
                 onClick={() => void loadPersonalProfile()}
               >
-                {copy.viewProfile}
+                {profileLoading ? "…" : copy.viewProfile}
               </button>
               <button
                 disabled={!applicationNo || reviewInProgress}

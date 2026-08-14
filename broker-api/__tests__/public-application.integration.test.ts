@@ -852,7 +852,12 @@ integration("public applicant access", () => {
         payload: { initData: "x".repeat(32) },
       });
       expect(malformedConfig.statusCode).toBe(500);
-      expect(malformedConfig.json()).toEqual({ code: "INTERNAL_ERROR" });
+      expect(malformedConfig.json()).toMatchObject({
+        code: "INTERNAL_ERROR",
+        request_id: expect.stringMatching(
+          /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i,
+        ),
+      });
 
       process.env.TELEGRAM_BOTS_JSON = JSON.stringify([botA, botB]);
       const personalProfile = {

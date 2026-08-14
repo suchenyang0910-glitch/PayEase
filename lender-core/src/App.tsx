@@ -1,6 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { finalReviewPayload, type ReviewDecision } from "./review-payload";
-import { LENDER_COPY, type LenderActionKey } from "./lender-copy";
+import {
+  LENDER_COPY,
+  type LenderActionKey,
+  type LenderLanguage,
+} from "./lender-copy";
 
 type Identity = {
   loginName: string;
@@ -34,27 +38,35 @@ function SignIn({
 }: {
   complete: (identity: Identity) => void;
 }): JSX.Element {
+  const [language, setLanguage] = useState<LenderLanguage>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const copy = LENDER_COPY[language];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const login = await api("/v1/local/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ loginName, password }),
-    });
-    if (!login.ok) return setError("Login failed.");
-    const me = await api("/v1/local/auth/me");
-    if (!me.ok) return setError("Unable to establish session.");
-    complete((await me.json()) as Identity);
+    setError("");
+    try {
+      const login = await api("/v1/local/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ loginName, password }),
+      });
+      if (!login.ok) return setError(copy.loginFailed);
+      const me = await api("/v1/local/auth/me");
+      if (!me.ok) return setError(copy.sessionFailed);
+      complete((await me.json()) as Identity);
+    } catch {
+      setError(copy.sessionFailed);
+    }
   };
   return (
     <main style={shell}>
       <section style={card}>
-        <h1>PayEase lender console</h1>
+        <h1>{copy.title}</h1>
+        <p>{copy.signInDescription}</p>
         <form onSubmit={submit} style={form}>
           <label>
-            Account
+            {copy.account}
             <input
               autoComplete="username"
               value={loginName}
@@ -63,7 +75,7 @@ function SignIn({
             />
           </label>
           <label>
-            Password
+            {copy.password}
             <input
               type="password"
               autoComplete="current-password"
@@ -72,7 +84,24 @@ function SignIn({
               required
             />
           </label>
-          <button>Sign in</button>
+          <label>
+            {language === "en"
+              ? "Language"
+              : language === "zh-CN"
+                ? "语言"
+                : "ភាសា"}
+            <select
+              value={language}
+              onChange={(event) =>
+                setLanguage(event.target.value as LenderLanguage)
+              }
+            >
+              <option value="en">English</option>
+              <option value="zh-CN">中文</option>
+              <option value="km">ខ្មែរ</option>
+            </select>
+          </label>
+          <button>{copy.signIn}</button>
           {error ? <p role="alert">{error}</p> : null}
         </form>
       </section>

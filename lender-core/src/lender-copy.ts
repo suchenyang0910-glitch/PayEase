@@ -14,6 +14,12 @@ export type LenderActionKey =
 
 type LenderCopy = Readonly<{
   title: string;
+  signInDescription: string;
+  account: string;
+  password: string;
+  signIn: string;
+  loginFailed: string;
+  sessionFailed: string;
   signedInAs: string;
   signOut: string;
   manualApproval: string;
@@ -39,6 +45,12 @@ type LenderCopy = Readonly<{
 export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   en: {
     title: "PayEase lender console",
+    signInDescription: "Sign in to use controlled lender operations.",
+    account: "Account",
+    password: "Password",
+    signIn: "Sign in",
+    loginFailed: "Login failed. Check your account and password.",
+    sessionFailed: "Unable to establish a secure session. Please try again.",
     signedInAs: "Signed in as",
     signOut: "Sign out",
     manualApproval: "Controlled manual approval",
@@ -74,6 +86,12 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   },
   "zh-CN": {
     title: "PayEase 持牌机构后台",
+    signInDescription: "登录后使用受控的持牌机构操作。",
+    account: "账号",
+    password: "密码",
+    signIn: "登录",
+    loginFailed: "登录失败，请检查账号和密码。",
+    sessionFailed: "无法建立安全会话，请重试。",
     signedInAs: "当前登录账号",
     signOut: "退出登录",
     manualApproval: "受控人工审批",
@@ -109,6 +127,13 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   },
   km: {
     title: "ផ្ទាំងគ្រប់គ្រងស្ថាប័នឥណទាន PayEase",
+    signInDescription:
+      "ចូលប្រើដើម្បីប្រើប្រតិបត្តិការរបស់ស្ថាប័នផ្តល់កម្ចីដែលត្រូវបានគ្រប់គ្រង។",
+    account: "គណនី",
+    password: "ពាក្យសម្ងាត់",
+    signIn: "ចូលប្រើ",
+    loginFailed: "មិនអាចចូលប្រើបានទេ។ សូមពិនិត្យគណនី និងពាក្យសម្ងាត់។",
+    sessionFailed: "មិនអាចបង្កើតសម័យសុវត្ថិភាពបានទេ។ សូមព្យាយាមម្តងទៀត។",
     signedInAs: "បានចូលដោយ",
     signOut: "ចាកចេញ",
     manualApproval: "ការអនុម័តដោយដៃដែលមានការគ្រប់គ្រង",

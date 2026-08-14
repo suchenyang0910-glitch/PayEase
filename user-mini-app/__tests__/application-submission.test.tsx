@@ -12,6 +12,7 @@ describe("applicant submission", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    Reflect.deleteProperty(window, "Telegram");
     window.history.replaceState(null, "", "/");
   });
 
@@ -100,6 +101,28 @@ describe("applicant submission", () => {
         body: JSON.stringify({ preferredLanguage: "en" }),
       },
     ]);
+  });
+
+  it("tells an applicant to reopen Telegram when replayed initData cannot restore a session", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "replayed-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: "UNAUTHENTICATED" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Telegram");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("shows a retryable status error after an application was submitted", async () => {

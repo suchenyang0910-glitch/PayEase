@@ -292,11 +292,17 @@ export function App(): JSX.Element {
       // A repeat initData may return 409 after a prior request already created
       // the HttpOnly session. In either case, a valid session can restore the
       // applicant's latest record without relying on the original Bot.
-      if (![201, 409].includes(authentication.status)) return;
+      if (![201, 409].includes(authentication.status)) {
+        setError(applicantSessionRecoveryMessage(language));
+        return;
+      }
       const applications = await fetch("/api/v1/local/public/applications", {
         credentials: "include",
       });
-      if (!applications.ok) return;
+      if (!applications.ok) {
+        setError(applicantSessionRecoveryMessage(language));
+        return;
+      }
       const payload = (await applications.json()) as ApplicationList;
       setApplicantSession(true);
       if (payload.preferredLanguage && !languageChangedByApplicant.current) {
@@ -307,11 +313,7 @@ export function App(): JSX.Element {
       if (!latest) return;
       setApplicationNo(latest.applicationNo);
       setStage("submitted");
-    })().catch(() => {
-      // The controlled browser preview has no Telegram container. It remains
-      // usable for UX review without turning an authentication failure into a
-      // client-side identity fallback.
-    });
+    })().catch(() => setError(applicantSessionRecoveryMessage(language)));
   }, []);
 
   useEffect(() => {
@@ -601,6 +603,11 @@ export function App(): JSX.Element {
                 ))}
               </div>
               <p className="estimate-note">{t.noOffer}</p>
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
               <button className="primary" onClick={() => setStage("details")}>
                 {t.start}
                 <span>→</span>

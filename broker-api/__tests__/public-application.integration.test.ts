@@ -884,6 +884,11 @@ integration("public applicant access", () => {
       expect(created.statusCode).toBe(201);
       const applicationNo = (created.json() as { applicationNo: string })
         .applicationNo;
+      const applicationRecord = await database.query<{ id: string }>(
+        "SELECT id FROM applications WHERE application_no = $1",
+        [applicationNo],
+      );
+      const applicationId = applicationRecord.rows[0]!.id;
       // Production authentication must not leave a long-lived opaque
       // application cookie that could outlive a disabled Bot session.
       expect(created.headers["set-cookie"]).toBeUndefined();

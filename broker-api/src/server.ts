@@ -1426,11 +1426,7 @@ app.post(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const locked = await client.query<{ id: string; status: string }>(
-        "SELECT id, status FROM applications WHERE application_no = $1 FOR UPDATE",
-        [params.applicationNo],
-      );
-      const application = locked.rows[0];
+      const application = await lockApplication(client, params.applicationNo);
       if (!application) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
@@ -1442,46 +1438,16 @@ app.post(
           currentStatus: application.status,
         });
       }
-      const toStatus =
-        input.decision === "APPROVED"
-          ? "EMPLOYER_VERIFICATION"
-          : input.decision === "REJECTED"
-            ? "REJECTED"
-            : "BROKER_REVIEW";
-      await client.query(
-        `INSERT INTO approval_events (application_id, stage, decision, actor_user_ref, actor_role, reason_code, occurred_at)
-       VALUES ($1, 'BROKER_REVIEW', $2, $3, $4, $5, now())`,
-        [
-          application.id,
-          input.decision,
-          actorUserRef,
-          "BROKER_OFFICER",
-          input.reasonCode,
-        ],
-      );
-      if (toStatus !== application.status) {
-        await client.query(
-          "UPDATE applications SET status = $1, updated_at = now() WHERE id = $2",
-          [toStatus, application.id],
-        );
-        await client.query(
-          `INSERT INTO application_status_events (application_id, from_status, to_status, actor_user_ref, reason_code, occurred_at)
-         VALUES ($1, $2, $3, $4, $5, now())`,
-          [
-            application.id,
-            application.status,
-            toStatus,
-            actorUserRef,
-            input.reasonCode,
-          ],
-        );
-      }
-      await addAuditEvent(
+      const toStatus = await recordSingleApproval(
         client,
-        application.id,
-        "BROKER_REVIEW_RECORDED",
-        actorUserRef,
-        { ...input, actorUserRef, actorRole: "BROKER_OFFICER" },
+        application,
+        "BROKER_REVIEW",
+        {
+          ...input,
+          actorUserRef,
+          actorRole: "BROKER_OFFICER",
+        },
+        "EMPLOYER_VERIFICATION",
       );
       await client.query("COMMIT");
       return {

@@ -20,6 +20,10 @@ import { isControlledPreviewBuild } from "./deployment-mode.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
 import { usdInputToMinor } from "./usd-amount.ts";
 import { applicantProfileValidationError } from "./applicant-profile.ts";
+import {
+  parseApplicantServiceCaseList,
+  type ApplicantServiceCase,
+} from "./service-case-list.ts";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -459,6 +463,9 @@ export function App(): JSX.Element {
   >("SERVICE_QUERY");
   const [serviceCaseMessage, setServiceCaseMessage] = useState("");
   const [serviceCaseNotice, setServiceCaseNotice] = useState("");
+  const [serviceCases, setServiceCases] = useState<ApplicantServiceCase[]>([]);
+  const [serviceCasesLoaded, setServiceCasesLoaded] = useState(false);
+  const [serviceCasesLoading, setServiceCasesLoading] = useState(false);
   const [supplementMessage, setSupplementMessage] = useState("");
   const [supplementNotice, setSupplementNotice] = useState("");
   const [error, setError] = useState("");
@@ -766,6 +773,10 @@ export function App(): JSX.Element {
 
   async function checkStatus(targetApplicationNo = applicationNo) {
     if (!targetApplicationNo) return;
+    if (targetApplicationNo !== applicationNo) {
+      setServiceCases([]);
+      setServiceCasesLoaded(false);
+    }
     setLoading(true);
     setError("");
     try {
@@ -941,6 +952,7 @@ export function App(): JSX.Element {
             ? `已收到你的工单 ${payload.caseNo}。如需最终处理，助贷团队将协调持牌机构。`
             : `យើងបានទទួលសំណើ ${payload.caseNo} របស់អ្នក។ ក្រុមសេវាកម្មនឹងសម្របសម្រួលជាមួយស្ថាប័នមានអាជ្ញាប័ណ្ណនៅពេលចាំបាច់។`,
       );
+      await loadServiceCases({ quiet: true });
     } catch {
       setError(
         language === "en"
@@ -951,6 +963,50 @@ export function App(): JSX.Element {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadServiceCases(options: { quiet?: boolean } = {}) {
+    if (!applicationNo) return;
+    setServiceCasesLoading(true);
+    try {
+      const response = await applicantRequest(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/service-cases`,
+        { credentials: "include" },
+      );
+      if (response.status === 401 || response.status === 403) {
+        await recoverApplicantSession();
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      const cases = response.ok
+        ? parseApplicantServiceCaseList(payload)
+        : undefined;
+      if (!cases && !options.quiet) {
+        setServiceCaseNotice(
+          language === "en"
+            ? "Your case history is temporarily unavailable."
+            : language === "zh-CN"
+              ? "暂时无法读取你的工单记录。"
+              : "មិនអាចមើលប្រវត្តិសំណើរបស់អ្នកបានជាបណ្តោះអាសន្នទេ។",
+        );
+        return;
+      }
+      if (!cases) return;
+      setServiceCases(cases);
+      setServiceCasesLoaded(true);
+    } catch {
+      if (!options.quiet) {
+        setServiceCaseNotice(
+          language === "en"
+            ? "Your case history is temporarily unavailable."
+            : language === "zh-CN"
+              ? "暂时无法读取你的工单记录。"
+              : "មិនអាចមើលប្រវត្តិសំណើរបស់អ្នកបានជាបណ្តោះអាសន្នទេ។",
+        );
+      }
+    } finally {
+      setServiceCasesLoading(false);
     }
   }
 
@@ -1005,6 +1061,8 @@ export function App(): JSX.Element {
     setSummary(undefined);
     setApprovedAmountMinor(undefined);
     setApplicationNo("");
+    setServiceCases([]);
+    setServiceCasesLoaded(false);
     setWithdrawalConfirmationRequested(false);
     setError("");
     window.history.replaceState(null, "", window.location.pathname);
@@ -1025,6 +1083,8 @@ export function App(): JSX.Element {
       setSummary(undefined);
       setApprovedAmountMinor(undefined);
       setApplicationNo("");
+      setServiceCases([]);
+      setServiceCasesLoaded(false);
       window.history.replaceState(null, "", window.location.pathname);
       setStage("welcome");
     } catch {
@@ -1847,8 +1907,43 @@ export function App(): JSX.Element {
                       ? "提交客服工单"
                       : "ដាក់សំណើសេវាកម្ម"}
                 </button>
+                <button
+                  className="secondary"
+                  disabled={loading || serviceCasesLoading}
+                  onClick={() => void loadServiceCases()}
+                >
+                  {serviceCasesLoading
+                    ? "…"
+                    : language === "en"
+                      ? "View my case history"
+                      : language === "zh-CN"
+                        ? "查看我的工单记录"
+                        : "មើលប្រវត្តិសំណើរបស់ខ្ញុំ"}
+                </button>
                 {serviceCaseNotice ? (
                   <p className="response-note">{serviceCaseNotice}</p>
+                ) : null}
+                {serviceCasesLoaded ? (
+                  serviceCases.length === 0 ? (
+                    <p className="response-note">
+                      {language === "en"
+                        ? "No support cases have been recorded for this application."
+                        : language === "zh-CN"
+                          ? "该申请暂无客服或投诉工单。"
+                          : "មិនទាន់មានសំណើសេវាកម្ម ឬបណ្តឹងសម្រាប់ពាក្យស្នើសុំនេះទេ។"}
+                    </p>
+                  ) : (
+                    <ul className="application-history">
+                      {serviceCases.map((serviceCase) => (
+                        <li key={serviceCase.caseNo}>
+                          <strong>{serviceCase.caseNo}</strong>
+                          <span>
+                            {serviceCase.caseType} · {serviceCase.status}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )
                 ) : null}
               </section>
             </section>

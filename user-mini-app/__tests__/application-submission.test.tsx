@@ -1093,6 +1093,22 @@ describe("applicant submission", () => {
           }),
           { status: 201, headers: { "content-type": "application/json" } },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            cases: [
+              {
+                caseNo: "CASE-20260815-ABCDEFGH",
+                caseType: "COMPLAINT",
+                status: "OPEN",
+                createdAt: "2026-08-15T00:00:00.000Z",
+                updatedAt: "2026-08-15T00:00:00.000Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1138,6 +1154,11 @@ describe("applicant submission", () => {
     expect(
       screen.getByText(/licensed lender is responsible for the final outcome/i),
     ).toBeVisible();
+    expect(await screen.findByText(/COMPLAINT · OPEN/)).toBeVisible();
+    expect(fetchMock.mock.calls[2]).toEqual([
+      "/api/v1/local/public/applications/APP-SUPPORT-001/service-cases",
+      { credentials: "include" },
+    ]);
   });
 
   it("records an applicant's explicit confirmation of approved terms", async () => {

@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { HR_COPY, HR_LANGUAGE_LABELS, type HrLanguage } from "./hr-copy";
+import { hrVerificationNotice } from "./hr-verification-action";
 
 type Identity = {
   loginName: string;
-  preferredLanguage: "zh-CN" | "en" | "km";
+  preferredLanguage: HrLanguage;
   roles: string[];
 };
 const layout = {
@@ -26,30 +28,51 @@ async function api(path: string, init?: RequestInit) {
 }
 
 function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
+  const [language, setLanguage] = useState<HrLanguage>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const copy = HR_COPY[language];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const response = await api("/v1/local/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ loginName, password }),
-    });
-    if (!response.ok) return setError("Login failed.");
-    const me = await api("/v1/local/auth/me");
-    if (!me.ok) return setError("Unable to establish session.");
-    done((await me.json()) as Identity);
+    setError("");
+    try {
+      const response = await api("/v1/local/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ loginName, password }),
+      });
+      if (!response.ok) return setError(copy.loginFailed);
+      const me = await api("/v1/local/auth/me");
+      if (!me.ok) return setError(copy.sessionFailed);
+      let identity = (await me.json()) as Identity;
+      if (identity.preferredLanguage !== language) {
+        try {
+          const persisted = await api("/v1/local/auth/me/preferred-language", {
+            method: "PATCH",
+            body: JSON.stringify({ preferredLanguage: language }),
+          });
+          if (persisted.ok)
+            identity = { ...identity, preferredLanguage: language };
+        } catch {
+          // A preference retry must not discard an already authenticated
+          // session. It is persisted on a later language update or login.
+        }
+      }
+      done(identity);
+    } catch {
+      setError(copy.sessionFailed);
+    }
   };
   return (
     <main style={layout}>
       <section style={panel}>
-        <h1>Employer verification portal</h1>
+        <h1>{copy.title}</h1>
         <form
           onSubmit={submit}
           style={{ display: "grid", gap: 10, maxWidth: 400 }}
         >
           <label>
-            Account
+            {copy.account}
             <input
               autoComplete="username"
               value={loginName}
@@ -58,7 +81,7 @@ function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
             />
           </label>
           <label>
-            Password
+            {copy.password}
             <input
               type="password"
               autoComplete="current-password"
@@ -67,7 +90,20 @@ function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
               required
             />
           </label>
-          <button>Sign in</button>
+          <label>
+            {copy.language}
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as HrLanguage)}
+            >
+              {Object.entries(HR_LANGUAGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button>{copy.signIn}</button>
           {error ? <p role="alert">{error}</p> : null}
         </form>
       </section>
@@ -83,6 +119,7 @@ export function App(): JSX.Element {
     "EMPLOYMENT_AND_SALARY_RANGE_CONFIRMED",
   );
   const [notice, setNotice] = useState("");
+  const [running, setRunning] = useState(false);
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (response) => {
@@ -93,37 +130,40 @@ export function App(): JSX.Element {
       })
       .finally(() => setChecking(false));
   }, []);
-  if (checking) return <main style={layout}>Checking secure session…</main>;
-  if (!identity) return <Login done={setIdentity} />;
-  const route = identity.roles.includes("EMPLOYER_HR")
+  const language = identity?.preferredLanguage ?? "en";
+  const copy = HR_COPY[language];
+  const route = identity?.roles.includes("EMPLOYER_HR")
     ? "employer-verification"
-    : identity.roles.includes("EMPLOYER_FINANCE")
+    : identity?.roles.includes("EMPLOYER_FINANCE")
       ? "employer-finance-verification"
       : undefined;
-  const label =
-    route === "employer-verification"
-      ? "Confirm employment"
-      : "Confirm authorised salary range";
   const run = async (decision: "APPROVED" | "REJECTED" | "RETURNED") => {
     if (!route) return;
-    const response = await api(
-      `/v1/local/applications/${encodeURIComponent(applicationNo)}/${route}`,
-      { method: "POST", body: JSON.stringify({ decision, reasonCode }) },
-    );
-    const payload = await response.json().catch(() => ({}));
-    setNotice(
-      response.ok
-        ? `Recorded: ${JSON.stringify(payload)}`
-        : `Blocked (${response.status}): ${JSON.stringify(payload)}`,
-    );
+    setRunning(true);
+    setNotice("");
+    try {
+      setNotice(
+        await hrVerificationNotice(
+          () =>
+            api(
+              `/v1/local/applications/${encodeURIComponent(applicationNo)}/${route}`,
+              {
+                method: "POST",
+                body: JSON.stringify({ decision, reasonCode }),
+              },
+            ),
+          copy,
+        ),
+      );
+    } finally {
+      setRunning(false);
+    }
   };
   const logout = async () => {
     await api("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
   };
-  const updateLanguage = async (
-    preferredLanguage: Identity["preferredLanguage"],
-  ) => {
+  const updateLanguage = async (preferredLanguage: HrLanguage) => {
     const response = await api("/v1/local/auth/me/preferred-language", {
       method: "PATCH",
       body: JSON.stringify({ preferredLanguage }),
@@ -133,39 +173,42 @@ export function App(): JSX.Element {
         current ? { ...current, preferredLanguage } : current,
       );
   };
+  if (checking) return <main style={layout}>{copy.checking}</main>;
+  if (!identity) return <Login done={setIdentity} />;
   return (
     <main style={layout}>
       <header style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
-          <h1>Employer verification portal</h1>
+          <h1>{copy.title}</h1>
           <p>
-            {identity.loginName} ·{" "}
+            {copy.signedInAs}: {identity.loginName} ·{" "}
             <select
               value={identity.preferredLanguage}
               onChange={(e) =>
-                void updateLanguage(
-                  e.target.value as Identity["preferredLanguage"],
-                )
+                void updateLanguage(e.target.value as HrLanguage)
               }
             >
-              <option value="zh-CN">中文</option>
-              <option value="en">English</option>
-              <option value="km">ខ្មែរ</option>
+              {Object.entries(HR_LANGUAGE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </p>
         </div>
-        <button onClick={logout}>Sign out</button>
+        <button onClick={logout}>{copy.signOut}</button>
       </header>
       <section style={panel}>
         {route ? (
           <>
-            <h2>{label}</h2>
-            <p>
-              Only employment status and the authorised salary range are
-              recorded; no payroll document is sent to the broker.
-            </p>
+            <h2>
+              {route === "employer-verification"
+                ? copy.confirmEmployment
+                : copy.confirmSalaryRange}
+            </h2>
+            <p>{copy.privacyBoundary}</p>
             <label>
-              Application number
+              {copy.applicationNumber}
               <input
                 value={applicationNo}
                 onChange={(e) => setApplicationNo(e.target.value)}
@@ -173,21 +216,30 @@ export function App(): JSX.Element {
               />
             </label>
             <label style={{ display: "block", marginTop: 10 }}>
-              Reason code
+              {copy.reasonCode}
               <input
                 value={reasonCode}
                 onChange={(e) => setReasonCode(e.target.value)}
               />
             </label>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <button disabled={!applicationNo} onClick={() => run("APPROVED")}>
-                Confirm
+              <button
+                disabled={!applicationNo || running}
+                onClick={() => void run("APPROVED")}
+              >
+                {copy.confirm}
               </button>
-              <button disabled={!applicationNo} onClick={() => run("RETURNED")}>
-                Request correction
+              <button
+                disabled={!applicationNo || running}
+                onClick={() => void run("RETURNED")}
+              >
+                {copy.requestCorrection}
               </button>
-              <button disabled={!applicationNo} onClick={() => run("REJECTED")}>
-                Cannot verify
+              <button
+                disabled={!applicationNo || running}
+                onClick={() => void run("REJECTED")}
+              >
+                {copy.cannotVerify}
               </button>
             </div>
             {notice ? (
@@ -198,8 +250,8 @@ export function App(): JSX.Element {
           </>
         ) : (
           <>
-            <h2>Verification unavailable</h2>
-            <p>Your account has no employer HR or finance verification role.</p>
+            <h2>{copy.unavailable}</h2>
+            <p>{copy.unavailableDescription}</p>
           </>
         )}
       </section>

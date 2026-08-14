@@ -33,9 +33,11 @@ services:
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
       # Production must set both values in the VPS-local environment file. The
       # JSON contains one or more enabled Bot ID/token pairs and is never
-      # committed; controlled preview stays explicitly disabled by default.
+      # committed. A controlled preview still requires Telegram authentication
+      # unless the additional opt-out below is set by its operator.
       PAYEASE_DEPLOYMENT_MODE: "controlled-preview"
       REQUIRE_TELEGRAM_AUTH: ${REQUIRE_TELEGRAM_AUTH:-false}
+      PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW: ${PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW:-false}
       TELEGRAM_BOTS_JSON: ${TELEGRAM_BOTS_JSON:-}
       # A base64-encoded 32-byte AES key. It stays in the VPS-local env file;
       # applications with personal details fail closed when it is absent.

@@ -30,9 +30,11 @@ REQUIRE_TELEGRAM_AUTH=true
 PAYEASE_DEPLOYMENT_MODE=production
 ```
 
-生产环境不允许以 `controlled-preview` 方式绕过认证。Bot ID 必须唯一；配置格式
-错误或没有任何已启用 Bot 时，登录接口返回服务不可用，而不能回退到客户端提供的
-用户 ID。
+生产环境不允许以 `controlled-preview` 方式绕过认证。受控预览也默认要求 Telegram
+认证；只有同时设置 `PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW=true` 且
+`REQUIRE_TELEGRAM_AUTH=false` 时，才允许无认证 UX 演示。该开关只适用于受访问
+控制的短期演示，绝不能用于公开域名。Bot ID 必须唯一；配置格式错误或没有任何已启用
+Bot 时，登录接口返回服务不可用，而不能回退到客户端提供的用户 ID。
 
 ## 3. Bot 故障或疑似泄露时的操作
 

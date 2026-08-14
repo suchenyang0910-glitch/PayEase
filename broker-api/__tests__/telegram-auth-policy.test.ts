@@ -11,11 +11,22 @@ describe("Telegram authentication deployment policy", () => {
     );
   });
 
-  it("permits unauthenticated UX review only in an explicitly labelled preview", () => {
+  it("keeps a controlled preview authenticated until its operator opts out explicitly", () => {
     expect(
       requiresTelegramAuthentication({
         NODE_ENV: "production",
         PAYEASE_DEPLOYMENT_MODE: "controlled-preview",
+        REQUIRE_TELEGRAM_AUTH: "false",
+      }),
+    ).toBe(true);
+  });
+
+  it("permits unauthenticated UX review only with both preview markers", () => {
+    expect(
+      requiresTelegramAuthentication({
+        NODE_ENV: "production",
+        PAYEASE_DEPLOYMENT_MODE: "controlled-preview",
+        PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW: "true",
         REQUIRE_TELEGRAM_AUTH: "false",
       }),
     ).toBe(false);
@@ -36,6 +47,7 @@ describe("Telegram authentication deployment policy", () => {
       requiresTelegramAuthentication({
         NODE_ENV: "production",
         PAYEASE_DEPLOYMENT_MODE: "controlled-preview",
+        PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW: "true",
         REQUIRE_TELEGRAM_AUTH: "true",
       }),
     ).toBe(true);

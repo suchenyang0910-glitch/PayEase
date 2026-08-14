@@ -1,6 +1,7 @@
 type TelegramAuthEnvironment = Readonly<{
   NODE_ENV?: string;
   PAYEASE_DEPLOYMENT_MODE?: string;
+  PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW?: string;
   REQUIRE_TELEGRAM_AUTH?: string;
 }>;
 
@@ -12,10 +13,11 @@ export function isControlledPreview(
 }
 
 /**
- * Applicant identity is verified by default.  The only opt-out is the
- * explicitly labelled controlled-preview deployment, where UX work can be
- * reviewed without real Telegram traffic.  Tests retain an explicit opt-in so
- * their disposable fixtures can cover both paths.
+ * Applicant identity is verified by default. A controlled preview remains
+ * verified unless its operator also supplies the explicit opt-out marker.
+ * This prevents a public preview label alone from becoming a production
+ * authentication bypass. Tests retain an explicit opt-in so disposable
+ * fixtures can cover both paths.
  */
 export function requiresTelegramAuthentication(
   environment: TelegramAuthEnvironment = process.env,
@@ -24,7 +26,10 @@ export function requiresTelegramAuthentication(
     return environment.REQUIRE_TELEGRAM_AUTH === "true";
   }
   if (isControlledPreview(environment)) {
-    return environment.REQUIRE_TELEGRAM_AUTH === "true";
+    return (
+      environment.REQUIRE_TELEGRAM_AUTH === "true" ||
+      environment.PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW !== "true"
+    );
   }
   return true;
 }

@@ -10,6 +10,7 @@ import {
   type ApplicationHistoryEntry,
 } from "./application-history";
 import { applicantResult } from "./application-result";
+import { applicantSessionRecoveryMessage } from "./applicant-session-message";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -393,6 +394,10 @@ export function App(): JSX.Element {
         `/api/v1/local/public/applications/${encodeURIComponent(targetApplicationNo)}`,
         { credentials: "include" },
       );
+      if (response.status === 401 || response.status === 403) {
+        setError(applicantSessionRecoveryMessage(language));
+        return;
+      }
       const payload = (await response.json()) as UserSummary;
       if (!response.ok) throw new Error("STATUS_FAILED");
       setApprovedAmountMinor(

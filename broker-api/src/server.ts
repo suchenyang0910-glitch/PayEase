@@ -44,6 +44,10 @@ import {
   requiresTelegramAuthentication,
 } from "./telegram-auth-policy.js";
 import {
+  isAllowedApplicantOrigin,
+  requireConfiguredApplicantOrigins,
+} from "./applicant-origin.js";
+import {
   decryptPersonalProfile,
   encryptPersonalProfile,
   personalDataKeyVersion,
@@ -182,22 +186,47 @@ async function requireOpsAdmin(
 }
 
 app.addHook("onRequest", async (request, reply) => {
+  const requestPath = request.url.split("?", 1)[0]!;
   const isPublicUserApplicationSubmission =
-    request.method === "POST" && request.url === "/v1/local/applications";
+    request.method === "POST" && requestPath === "/v1/local/applications";
   const isPublicTelegramSession =
     request.method === "POST" &&
-    (request.url === "/v1/local/public/telegram-sessions" ||
-      request.url === "/v1/local/public/telegram-sessions/logout" ||
-      request.url === "/v1/local/public/telegram-sessions/keepalive");
+    (requestPath === "/v1/local/public/telegram-sessions" ||
+      requestPath === "/v1/local/public/telegram-sessions/logout" ||
+      requestPath === "/v1/local/public/telegram-sessions/keepalive");
   const isPublicApplicantLanguagePreference =
     request.method === "PUT" &&
-    request.url === "/v1/local/public/profile/preferred-language";
+    requestPath === "/v1/local/public/profile/preferred-language";
   const isPublicUserApplicationView =
-    request.url === "/v1/local/public/applications" ||
-    request.url.startsWith("/v1/local/public/applications/");
+    requestPath === "/v1/local/public/applications" ||
+    requestPath.startsWith("/v1/local/public/applications/");
+  const isApplicantStateChange =
+    isPublicUserApplicationSubmission ||
+    isPublicTelegramSession ||
+    isPublicApplicantLanguagePreference ||
+    ((request.method === "POST" ||
+      request.method === "PUT" ||
+      request.method === "PATCH" ||
+      request.method === "DELETE") &&
+      requestPath.startsWith("/v1/local/public/applications/"));
+  // In production, the Telegram iframe's fetch Origin is the Mini App's own
+  // HTTPS origin. Reject any other browser context before it can send a
+  // cookie-backed state change. Test fixtures exercise the parser separately
+  // and intentionally omit browser headers.
   if (
-    !request.url.startsWith("/v1/local/") ||
-    request.url.startsWith("/v1/local/auth/") ||
+    process.env.NODE_ENV !== "test" &&
+    requiresTelegramAuthentication() &&
+    isApplicantStateChange &&
+    !isAllowedApplicantOrigin(
+      request.headers.origin,
+      requireConfiguredApplicantOrigins(),
+    )
+  ) {
+    return reply.code(403).send({ code: "APPLICANT_ORIGIN_FORBIDDEN" });
+  }
+  if (
+    !requestPath.startsWith("/v1/local/") ||
+    requestPath.startsWith("/v1/local/auth/") ||
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
     isPublicApplicantLanguagePreference ||
@@ -3070,7 +3099,10 @@ if (process.env.NODE_ENV !== "test") {
   // Fail before opening the port when real applicant authentication would be
   // impossible. Per-request configuration is still used so a compromised Bot
   // can be disabled without a restart.
-  if (requiresTelegramAuthentication()) requireEnabledTelegramBot();
+  if (requiresTelegramAuthentication()) {
+    requireEnabledTelegramBot();
+    requireConfiguredApplicantOrigins();
+  }
   await runDatabaseMigrations(pool);
   const port = Number(process.env.PORT ?? 3100);
   const host = process.env.HOST ?? "127.0.0.1";

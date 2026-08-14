@@ -37,6 +37,9 @@ services:
       # unless the additional opt-out below is set by its operator.
       PAYEASE_DEPLOYMENT_MODE: "controlled-preview"
       REQUIRE_TELEGRAM_AUTH: ${REQUIRE_TELEGRAM_AUTH:-false}
+      # Required whenever Telegram authentication is enabled. This is the
+      # exact Mini App HTTPS origin, not a Telegram URL or wildcard domain.
+      PAYEASE_APPLICANT_ALLOWED_ORIGINS: ${PAYEASE_APPLICANT_ALLOWED_ORIGINS:-}
       PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW: ${PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW:-false}
       TELEGRAM_BOTS_JSON: ${TELEGRAM_BOTS_JSON:-}
       # A base64-encoded 32-byte AES key. It stays in the VPS-local env file;

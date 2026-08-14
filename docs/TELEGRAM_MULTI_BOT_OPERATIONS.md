@@ -28,7 +28,10 @@ Bot 签名、且在有效期内的 Mini App `initData`。用户记录以 Telegra
 ```text
 REQUIRE_TELEGRAM_AUTH=true
 PAYEASE_DEPLOYMENT_MODE=production
+PAYEASE_APPLICANT_ALLOWED_ORIGINS=https://payease-user.khmerx.org
 ```
+
+`PAYEASE_APPLICANT_ALLOWED_ORIGINS` 是逗号分隔的精确 HTTPS Origin 白名单。它必须填写 Mini App 实际部署域名（例如上例），不能填写 `t.me` 带路径 URL、通配符域名或 HTTP 地址。启用 Telegram 认证时，缺失该值会使 API 拒绝启动；所有 Cookie 写操作均会拒绝非白名单 Origin。
 
 生产环境不允许以 `controlled-preview` 方式绕过认证。受控预览也默认要求 Telegram
 认证；只有同时设置 `PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW=true` 且

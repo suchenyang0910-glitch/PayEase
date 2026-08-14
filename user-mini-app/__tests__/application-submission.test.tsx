@@ -113,6 +113,47 @@ describe("applicant submission", () => {
     ]);
   });
 
+  it("clears personal and support drafts after a successful applicant sign out", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "fresh-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ applications: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "ចាកចេញ" });
+    fireEvent.click(screen.getByRole("button", { name: /ចាប់ផ្តើមដាក់ពាក្យ/ }));
+    fireEvent.change(screen.getByLabelText("ឈ្មោះពេញ"), {
+      target: { value: "Previous Applicant" },
+    });
+    fireEvent.change(screen.getByLabelText("លេខទូរស័ព្ទ"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(screen.getByLabelText("ក្រុមហ៊ុន"), {
+      target: { value: "Pilot Factory" },
+    });
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "ចាកចេញ" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    fireEvent.click(screen.getByRole("button", { name: /ចាប់ផ្តើមដាក់ពាក្យ/ }));
+    expect(screen.getByLabelText("ឈ្មោះពេញ")).toHaveValue("");
+    expect(screen.getByLabelText("លេខទូរស័ព្ទ")).toHaveValue("");
+    expect(screen.getByLabelText("ក្រុមហ៊ុន")).toHaveValue("");
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+  });
+
   it("tells an applicant to reopen Telegram when replayed initData cannot restore a session", async () => {
     Object.defineProperty(window, "Telegram", {
       configurable: true,

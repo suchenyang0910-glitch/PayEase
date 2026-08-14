@@ -476,8 +476,21 @@ export function App(): JSX.Element {
     });
   }
 
+  function clearApplicantSensitiveDraft() {
+    // These values may be visible to the next person who opens the same
+    // Telegram WebView. They are never persisted client-side, but React state
+    // must still be cleared when the identity session ends or changes.
+    setName("");
+    setPhone("");
+    setEmployer("");
+    setConsent(false);
+    setServiceCaseMessage("");
+    setServiceCaseNotice("");
+  }
+
   async function recoverApplicantSession() {
     setApplicantSession(false);
+    clearApplicantSensitiveDraft();
     // Do not keep a link from an earlier recovery lookup: a Bot may have been
     // disabled between requests, and only the latest directory is trustworthy.
     setRecoveryEntryPoints([]);
@@ -908,6 +921,7 @@ export function App(): JSX.Element {
   }
 
   function startNewApplication() {
+    clearApplicantSensitiveDraft();
     setSummary(undefined);
     setApprovedAmountMinor(undefined);
     setApplicationNo("");
@@ -925,6 +939,7 @@ export function App(): JSX.Element {
         { method: "POST", credentials: "include" },
       );
       if (!response.ok) throw new Error("LOGOUT_FAILED");
+      clearApplicantSensitiveDraft();
       setApplicantSession(false);
       setApplicationHistory([]);
       setSummary(undefined);

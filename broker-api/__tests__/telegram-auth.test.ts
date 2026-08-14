@@ -4,6 +4,7 @@ import {
   configuredTelegramBots,
   isTelegramBotEnabled,
   requireEnabledTelegramBot,
+  requireTelegramRecoveryTopology,
   verifyTelegramMiniAppInitData,
 } from "../src/telegram-auth.js";
 
@@ -138,6 +139,24 @@ describe("Telegram multi-bot Mini App verification", () => {
         ]),
       ),
     ).toHaveLength(1);
+  });
+
+  it("requires two configured Bots for production recovery while allowing one to be disabled", () => {
+    expect(() =>
+      requireTelegramRecoveryTopology(
+        JSON.stringify([
+          { botId: "100000001", botToken: "j".repeat(24), enabled: true },
+        ]),
+      ),
+    ).toThrow("at least two distinct");
+    expect(
+      requireTelegramRecoveryTopology(
+        JSON.stringify([
+          { botId: "100000002", botToken: "k".repeat(24), enabled: true },
+          { botId: "100000003", botToken: "l".repeat(24), enabled: false },
+        ]),
+      ),
+    ).toHaveLength(2);
   });
 
   it("treats a disabled bot as unavailable without disabling a healthy fallback bot", () => {

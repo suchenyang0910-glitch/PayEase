@@ -38,7 +38,7 @@ import {
 import {
   configuredTelegramBots,
   isTelegramBotEnabled,
-  requireEnabledTelegramBot,
+  requireTelegramRecoveryTopology,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
 import {
@@ -3634,7 +3634,7 @@ if (process.env.NODE_ENV !== "test") {
   // impossible. Per-request configuration is still used so a compromised Bot
   // can be disabled without a restart.
   if (requiresTelegramAuthentication()) {
-    requireEnabledTelegramBot();
+    requireTelegramRecoveryTopology();
     requireConfiguredApplicantOrigins();
   }
   await runDatabaseMigrations(pool);

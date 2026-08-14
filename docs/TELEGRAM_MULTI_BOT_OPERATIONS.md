@@ -13,8 +13,9 @@ Bot 签名、且在有效期内的 Mini App `initData`。用户记录以 Telegra
 
 ## 2. 多 Bot 配置
 
-在 API 服务的受控部署环境配置 `TELEGRAM_BOTS_JSON`。至少保留两个已启用 Bot，
-并为每个 Bot 设置同一个 PayEase Mini App URL。
+在 API 服务的受控部署环境配置 `TELEGRAM_BOTS_JSON`。生产启动要求至少配置两个不同
+Bot，且至少一个处于 `enabled: true`；事故期间可停用其中一个，同时保留健康入口。每个
+Bot 都应设置同一个 PayEase Mini App URL。
 
 ```json
 [

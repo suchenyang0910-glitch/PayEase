@@ -72,6 +72,24 @@ export function requireEnabledTelegramBot(
 }
 
 /**
+ * Production availability requires an independently configured recovery Bot.
+ * At least one Bot must be enabled to accept a new login, while a second
+ * configured Bot may be disabled during an incident and later rotated or
+ * restored without rebuilding the applicant identity store.
+ */
+export function requireTelegramRecoveryTopology(
+  source = process.env.TELEGRAM_BOTS_JSON,
+): TelegramBotConfig[] {
+  const bots = requireEnabledTelegramBot(source);
+  if (bots.length < 2) {
+    throw new Error(
+      "TELEGRAM_BOTS_JSON must contain at least two distinct Telegram bots for recovery",
+    );
+  }
+  return bots;
+}
+
+/**
  * A bot can be disabled during an incident without deleting its configuration.
  * Callers must check this for an existing session as well as at login time:
  * otherwise a compromised bot could retain access through sessions minted just

@@ -253,9 +253,12 @@ integration("public applicant access", () => {
       employer_name_encrypted: Buffer;
       personal_data_consent_version: string;
       personal_data_key_version: string;
+      phone_consent_version: string;
+      phone_consented_at: Date;
     }>(
       `SELECT u.full_name_encrypted, u.phone_encrypted, u.employer_name_encrypted,
               u.personal_data_consent_version, u.personal_data_key_version
+              , u.phone_consent_version, u.phone_consented_at
          FROM users u
          JOIN applications p ON p.user_id = u.id
         WHERE p.application_no = $1`,
@@ -278,6 +281,8 @@ integration("public applicant access", () => {
     ).toEqual(profile);
     expect(row.personal_data_consent_version).toBe("PAYEASE-PERSONAL-DATA-v1");
     expect(row.personal_data_key_version).toBe("v1");
+    expect(row.phone_consent_version).toBe("PAYEASE-PERSONAL-DATA-v1");
+    expect(row.phone_consented_at).toBeInstanceOf(Date);
   });
 
   it("restores the same user's applications after authenticating through a second trusted bot", async () => {

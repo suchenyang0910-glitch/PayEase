@@ -957,12 +957,15 @@ app.post("/v1/local/applications", async (request, reply) => {
       `INSERT INTO users (
          telegram_user_ref, preferred_language, full_name_encrypted,
          phone_encrypted, employer_name_encrypted, personal_data_consent_version,
-         personal_data_consented_at, personal_data_key_version
+         personal_data_consented_at, personal_data_key_version,
+         phone_consent_version, phone_consented_at
        )
        VALUES (
          $1, $2, $3::bytea, $4::bytea, $5::bytea, $6,
          CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END,
-         CASE WHEN $3::bytea IS NULL THEN NULL ELSE $7 END
+         CASE WHEN $3::bytea IS NULL THEN NULL ELSE $7 END,
+         CASE WHEN $4::bytea IS NULL THEN NULL ELSE $6 END,
+         CASE WHEN $4::bytea IS NULL THEN NULL ELSE now() END
        )
        ON CONFLICT (telegram_user_ref) DO UPDATE SET
          preferred_language = EXCLUDED.preferred_language,
@@ -972,6 +975,8 @@ app.post("/v1/local/applications", async (request, reply) => {
          personal_data_consent_version = COALESCE(EXCLUDED.personal_data_consent_version, users.personal_data_consent_version),
          personal_data_consented_at = COALESCE(EXCLUDED.personal_data_consented_at, users.personal_data_consented_at),
          personal_data_key_version = COALESCE(EXCLUDED.personal_data_key_version, users.personal_data_key_version),
+         phone_consent_version = COALESCE(EXCLUDED.phone_consent_version, users.phone_consent_version),
+         phone_consented_at = COALESCE(EXCLUDED.phone_consented_at, users.phone_consented_at),
          updated_at = now()
        RETURNING id`,
       [

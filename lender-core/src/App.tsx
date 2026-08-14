@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { finalReviewPayload, type ReviewDecision } from "./review-payload";
 
 type Identity = {
   loginName: string;
@@ -90,6 +91,8 @@ export function App(): JSX.Element {
   const [checking, setChecking] = useState(true);
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_APPROVAL");
+  const [reviewDecision, setReviewDecision] =
+    useState<ReviewDecision>("APPROVED");
   const [approvedAmountMinor, setApprovedAmountMinor] = useState("5000");
   const [serviceFeeMinor, setServiceFeeMinor] = useState("0");
   const [totalRepayableMinor, setTotalRepayableMinor] = useState("5000");
@@ -108,24 +111,29 @@ export function App(): JSX.Element {
   if (!identity) return <SignIn complete={setIdentity} />;
   const actions: Action[] = [
     {
-      label: "Approve / return initial review",
+      label: "Record initial review decision",
       route: "lender-initial-review",
-      body: () => ({ decision: "APPROVED", reasonCode }),
+      body: () => ({ decision: reviewDecision, reasonCode }),
       roles: ["LENDER_CREDIT_OFFICER"],
     },
     {
-      label: "Approve / return final review",
+      label: "Record final review decision",
       route: "lender-final-review",
-      body: () => ({
-        decision: "APPROVED",
-        reasonCode,
-        approvedAmountMinor,
-        serviceFeeMinor,
-        totalRepayableMinor,
-        installmentCount: Number(installmentCount),
-        firstDueDate,
-      }),
+      body: () =>
+        finalReviewPayload(reviewDecision, reasonCode, {
+          approvedAmountMinor,
+          serviceFeeMinor,
+          totalRepayableMinor,
+          installmentCount: Number(installmentCount),
+          firstDueDate,
+        }),
       roles: ["LENDER_CREDIT_REVIEWER"],
+    },
+    {
+      label: "Confirm reapplication condition resolved",
+      route: "reapplication-condition-resolved",
+      body: () => ({ reasonCode }),
+      roles: ["LENDER_CREDIT_OFFICER"],
     },
     {
       label: "Confirm contract",
@@ -251,7 +259,25 @@ export function App(): JSX.Element {
               required
             />
           </label>
-          {identity.roles.includes("LENDER_CREDIT_REVIEWER") ? (
+          {identity.roles.some((role) =>
+            ["LENDER_CREDIT_OFFICER", "LENDER_CREDIT_REVIEWER"].includes(role),
+          ) ? (
+            <label>
+              Credit review decision
+              <select
+                value={reviewDecision}
+                onChange={(event) =>
+                  setReviewDecision(event.target.value as ReviewDecision)
+                }
+              >
+                <option value="APPROVED">Approve</option>
+                <option value="REJECTED">Reject</option>
+                <option value="RETURNED">Return for correction</option>
+              </select>
+            </label>
+          ) : null}
+          {identity.roles.includes("LENDER_CREDIT_REVIEWER") &&
+          reviewDecision === "APPROVED" ? (
             <>
               <label>
                 Approved amount (USD cents; 1000–50000)

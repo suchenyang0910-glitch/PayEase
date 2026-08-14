@@ -119,6 +119,36 @@ describe("applicant submission", () => {
           status: 500,
           headers: { "content-type": "application/json" },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-STATUS-ERROR",
+              status: "BROKER_REVIEW",
+              requestedAmountMinor: "5000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: null,
+              rejectionConditionResolved: false,
+              supplementRequested: false,
+            },
+            terms: null,
+            repayment: {
+              periodCount: 0,
+              paidPeriods: 0,
+              unpaidPeriods: 0,
+              overduePeriods: 0,
+              totalDueMinor: "0",
+              totalPaidMinor: "0",
+              outstandingMinor: "0",
+              overdueOutstandingMinor: "0",
+              nextInstallment: null,
+              installments: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -154,6 +184,13 @@ describe("applicant submission", () => {
     expect(
       screen.getByRole("button", { name: /view application status/i }),
     ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: /view application status/i }),
+    );
+    expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
+    expect(
+      screen.queryByText("We could not refresh the application status."),
+    ).toBeNull();
   });
 
   it("renders the approved terms and repayment dashboard returned for the applicant", async () => {

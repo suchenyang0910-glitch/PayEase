@@ -399,6 +399,7 @@ export function App(): JSX.Element {
   async function checkStatus(targetApplicationNo = applicationNo) {
     if (!targetApplicationNo) return;
     setLoading(true);
+    setError("");
     try {
       const response = await fetch(
         `/api/v1/local/public/applications/${encodeURIComponent(targetApplicationNo)}`,

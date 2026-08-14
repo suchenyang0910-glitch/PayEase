@@ -118,7 +118,9 @@ jobs:
         run: pnpm typecheck
 
       - name: CI-03 Unit tests (Vitest) — 状态机/金额/幂等/加密/审计 为必测(后续 S1 起)
-        run: pnpm test
+        run: |
+          pnpm test
+          pnpm --filter @payease/broker-api run test:integration
 
       - name: CI-04 SAST placeholder (Semgrep/CodeQL) — S0.2 起落地
         run: |

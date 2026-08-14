@@ -147,25 +147,10 @@ function Login({
       if (!response.ok) return setError(BROKER_COPY[language].loginFailed);
       const me = await request("/v1/local/auth/me");
       if (!me.ok) return setError(BROKER_COPY[language].sessionFailed);
-      let identity = (await me.json()) as Identity;
-      if (identity.preferredLanguage !== language) {
-        try {
-          const preference = await request(
-            "/v1/local/auth/me/preferred-language",
-            {
-              method: "PATCH",
-              body: JSON.stringify({ preferredLanguage: language }),
-            },
-          );
-          if (preference.ok) {
-            identity = { ...identity, preferredLanguage: language };
-          }
-        } catch {
-          // Language persistence is a user preference, not an authentication
-          // prerequisite. Keep the authenticated session usable on a retry.
-        }
-      }
-      onLogin(identity);
+      // The account's saved language wins at sign-in. The login screen's
+      // selector remains useful for a first-time operator and error copy, but
+      // must never overwrite a returning operator's stored preference.
+      onLogin((await me.json()) as Identity);
     } catch {
       setError(BROKER_COPY[language].sessionFailed);
     }

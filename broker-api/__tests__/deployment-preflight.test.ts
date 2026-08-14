@@ -13,6 +13,7 @@ const validRecoveryBots = JSON.stringify([
     enabled: true,
   },
 ]);
+const validPiiKey = Buffer.alloc(32, 4).toString("base64");
 
 describe("Telegram deployment preflight", () => {
   it("reports safe Bot identifiers for a valid recovery topology", () => {
@@ -20,6 +21,7 @@ describe("Telegram deployment preflight", () => {
       telegramAuthenticationPreflight({
         PAYEASE_DEPLOYMENT_MODE: "production",
         TELEGRAM_BOTS_JSON: validRecoveryBots,
+        PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
       }),
     ).toEqual({
       ready: true,
@@ -27,6 +29,9 @@ describe("Telegram deployment preflight", () => {
       controlledPreview: false,
       configuredBotIds: ["123456789", "987654321"],
       enabledBotCount: 2,
+      piiEncryptionRequired: true,
+      piiEncryptionReady: true,
+      piiActiveKeyVersion: "v1",
     });
   });
 
@@ -40,6 +45,7 @@ describe("Telegram deployment preflight", () => {
           enabled: true,
         },
       ]),
+      PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
     });
     expect(result.ready).toBe(false);
     expect(result.error).toContain("at least two distinct Telegram bots");
@@ -60,6 +66,19 @@ describe("Telegram deployment preflight", () => {
       controlledPreview: true,
       configuredBotIds: [],
       enabledBotCount: 0,
+      piiEncryptionRequired: false,
+      piiEncryptionReady: true,
     });
+  });
+
+  it("fails before an authenticated deployment when the active PII key is absent", () => {
+    const result = telegramAuthenticationPreflight({
+      PAYEASE_DEPLOYMENT_MODE: "production",
+      TELEGRAM_BOTS_JSON: validRecoveryBots,
+    });
+    expect(result.ready).toBe(false);
+    expect(result.piiEncryptionRequired).toBe(true);
+    expect(result.piiEncryptionReady).toBe(false);
+    expect(result.error).toContain("PAYEASE_PII_ENCRYPTION_KEY is required");
   });
 });

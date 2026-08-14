@@ -9,8 +9,14 @@ export type PersonalProfile = {
   employerName: string;
 };
 
+export type PersonalDataEncryptionEnvironment = Readonly<{
+  PAYEASE_PII_ENCRYPTION_KEY?: string;
+  PAYEASE_PII_ENCRYPTION_KEY_VERSION?: string;
+  PAYEASE_PII_ENCRYPTION_KEYS_JSON?: string;
+}>;
+
 export function personalDataKeyVersion(
-  source = process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION,
+  source: string | undefined = process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION,
 ): string {
   const version = source?.trim() || defaultKeyVersion;
   if (!/^[a-zA-Z0-9_-]{1,32}$/.test(version)) {
@@ -19,8 +25,11 @@ export function personalDataKeyVersion(
   return version;
 }
 
-function configuredKey(version: string): string | undefined {
-  const keyring = process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON;
+function configuredKey(
+  version: string,
+  environment: PersonalDataEncryptionEnvironment = process.env,
+): string | undefined {
+  const keyring = environment.PAYEASE_PII_ENCRYPTION_KEYS_JSON;
   if (keyring) {
     let parsed: unknown;
     try {
@@ -40,13 +49,17 @@ function configuredKey(version: string): string | undefined {
     }
     return (parsed as Record<string, string>)[version];
   }
-  return version === personalDataKeyVersion()
-    ? process.env.PAYEASE_PII_ENCRYPTION_KEY
+  return version ===
+    personalDataKeyVersion(environment.PAYEASE_PII_ENCRYPTION_KEY_VERSION)
+    ? environment.PAYEASE_PII_ENCRYPTION_KEY
     : undefined;
 }
 
-function encryptionKey(version: string): Buffer {
-  const source = configuredKey(version);
+function encryptionKey(
+  version: string,
+  environment: PersonalDataEncryptionEnvironment = process.env,
+): Buffer {
+  const source = configuredKey(version, environment);
   if (!source) {
     throw new Error(
       "PAYEASE_PII_ENCRYPTION_KEY is required before storing personal data.",
@@ -59,6 +72,20 @@ function encryptionKey(version: string): Buffer {
     );
   }
   return key;
+}
+
+/**
+ * Validates only the active PII encryption configuration. It intentionally
+ * returns metadata rather than a key, so it is safe for deployment logs.
+ */
+export function personalDataEncryptionPreflight(
+  environment: PersonalDataEncryptionEnvironment = process.env,
+): { activeKeyVersion: string } {
+  const activeKeyVersion = personalDataKeyVersion(
+    environment.PAYEASE_PII_ENCRYPTION_KEY_VERSION,
+  );
+  encryptionKey(activeKeyVersion, environment);
+  return { activeKeyVersion };
 }
 
 // The database stores only this self-describing ciphertext.  It deliberately

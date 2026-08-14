@@ -72,10 +72,22 @@ Redirect URI 就视为已接入。
 
 在这些验收完成前，Mini App 是唯一受支持的生产认证路径。
 
-## 5. 发布前认证配置预检
+## 5. 发布前认证与个人资料加密预检
 
 每次替换 API 容器前，必须先构建候选镜像并运行预检。预检只输出 Bot ID、启用数量和
-`ready` 状态，**不会**输出 Token；非零退出码表示不得替换当前运行中的 API 容器。
+PII 活跃密钥版本与 `ready` 状态，**不会**输出 Token 或加密密钥；非零退出码表示不得替换
+当前运行中的 API 容器。
+
+当 Telegram 认证开启时，预检同时要求：
+
+- 至少两个不同的已配置 Bot（其中至少一个启用）；
+- `PAYEASE_PII_ENCRYPTION_KEY`，或当前
+  `PAYEASE_PII_ENCRYPTION_KEY_VERSION` 在 `PAYEASE_PII_ENCRYPTION_KEYS_JSON`
+  中对应的有效 Base64 32-byte AES-256-GCM 密钥。
+
+唯一例外是显式的、无认证的受控预览环境（同时设置
+`REQUIRE_TELEGRAM_AUTH=false` 和 `PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW=true`）；它不得收集
+或保留申请人真实个人资料。
 
 ```bash
 cd /opt/payease-preview/releases/<commit>/infra/preview

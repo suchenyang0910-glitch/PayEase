@@ -7,12 +7,16 @@ import {
   isControlledPreview,
   requiresTelegramAuthentication,
 } from "./telegram-auth-policy.js";
+import { personalDataEncryptionPreflight } from "./personal-profile.js";
 
 type AuthenticationEnvironment = Readonly<{
   PAYEASE_DEPLOYMENT_MODE?: string;
   PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW?: string;
   REQUIRE_TELEGRAM_AUTH?: string;
   TELEGRAM_BOTS_JSON?: string;
+  PAYEASE_PII_ENCRYPTION_KEY?: string;
+  PAYEASE_PII_ENCRYPTION_KEY_VERSION?: string;
+  PAYEASE_PII_ENCRYPTION_KEYS_JSON?: string;
 }>;
 
 export type TelegramAuthenticationPreflight = Readonly<{
@@ -21,6 +25,9 @@ export type TelegramAuthenticationPreflight = Readonly<{
   controlledPreview: boolean;
   configuredBotIds: string[];
   enabledBotCount: number;
+  piiEncryptionRequired: boolean;
+  piiEncryptionReady: boolean;
+  piiActiveKeyVersion?: string;
   error?: string;
 }>;
 
@@ -41,6 +48,25 @@ export function telegramAuthenticationPreflight(
 ): TelegramAuthenticationPreflight {
   const authenticationRequired = requiresTelegramAuthentication(environment);
   const controlledPreview = isControlledPreview(environment);
+  // An explicit unauthenticated controlled preview has no applicant data
+  // collection path. Every authenticated deployment must prove its active PII
+  // key before the container is replaced.
+  const piiEncryptionRequired = authenticationRequired;
+  let piiEncryptionReady = !piiEncryptionRequired;
+  let piiActiveKeyVersion: string | undefined;
+  let piiError: string | undefined;
+  if (piiEncryptionRequired) {
+    try {
+      piiActiveKeyVersion =
+        personalDataEncryptionPreflight(environment).activeKeyVersion;
+      piiEncryptionReady = true;
+    } catch (error) {
+      piiError =
+        error instanceof Error
+          ? error.message
+          : "PII encryption configuration is invalid";
+    }
+  }
   let bots: TelegramBotConfig[];
   try {
     bots = configuredTelegramBots(environment.TELEGRAM_BOTS_JSON);
@@ -51,6 +77,9 @@ export function telegramAuthenticationPreflight(
       controlledPreview,
       configuredBotIds: [],
       enabledBotCount: 0,
+      piiEncryptionRequired,
+      piiEncryptionReady,
+      piiActiveKeyVersion,
       error:
         error instanceof Error ? error.message : "Invalid Bot configuration",
     };
@@ -62,15 +91,22 @@ export function telegramAuthenticationPreflight(
       authenticationRequired,
       controlledPreview,
       ...summary,
+      piiEncryptionRequired,
+      piiEncryptionReady,
+      piiActiveKeyVersion,
     };
   }
   try {
     requireTelegramRecoveryTopology(environment.TELEGRAM_BOTS_JSON);
     return {
-      ready: true,
+      ready: piiEncryptionReady,
       authenticationRequired,
       controlledPreview,
       ...summary,
+      piiEncryptionRequired,
+      piiEncryptionReady,
+      piiActiveKeyVersion,
+      ...(piiError ? { error: piiError } : {}),
     };
   } catch (error) {
     return {
@@ -78,6 +114,9 @@ export function telegramAuthenticationPreflight(
       authenticationRequired,
       controlledPreview,
       ...summary,
+      piiEncryptionRequired,
+      piiEncryptionReady,
+      piiActiveKeyVersion,
       error:
         error instanceof Error
           ? error.message

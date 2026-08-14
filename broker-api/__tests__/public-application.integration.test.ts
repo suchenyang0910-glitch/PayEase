@@ -466,6 +466,17 @@ integration("public applicant access", () => {
     };
     process.env.REQUIRE_TELEGRAM_AUTH = "true";
     try {
+      process.env.TELEGRAM_BOTS_JSON = "[]";
+      const missingBotConfig = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions",
+        payload: { initData: "x".repeat(32) },
+      });
+      expect(missingBotConfig.statusCode).toBe(503);
+      expect(missingBotConfig.json()).toEqual({
+        code: "TELEGRAM_AUTH_NOT_CONFIGURED",
+      });
+
       // A deployment configuration error may be logged for operators, but its
       // parser detail must never reach a public client response.
       process.env.TELEGRAM_BOTS_JSON = "{not-valid-json";

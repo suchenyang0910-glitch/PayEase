@@ -994,7 +994,12 @@ app.post("/v1/local/applications", async (request, reply) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const applicantAccessToken = randomBytes(32).toString("base64url");
+    // The opaque per-application cookie is useful only for the controlled
+    // preview, which deliberately has no Telegram container. Production
+    // access must remain bound to the short-lived, revocable Telegram session.
+    const applicantAccessToken = requiresTelegramAuthentication()
+      ? undefined
+      : randomBytes(32).toString("base64url");
     const user = await client.query<{ id: string }>(
       `INSERT INTO users (
          telegram_user_ref, preferred_language, full_name_encrypted,
@@ -1074,7 +1079,7 @@ app.post("/v1/local/applications", async (request, reply) => {
         user.rows[0]!.id,
         amountMinor.toString(),
         input.tenorDays,
-        eventHash([applicantAccessToken]),
+        applicantAccessToken ? eventHash([applicantAccessToken]) : null,
       ],
     );
     const application = created.rows[0]!;
@@ -1097,10 +1102,12 @@ app.post("/v1/local/applications", async (request, reply) => {
       },
     );
     await client.query("COMMIT");
-    reply.header(
-      "Set-Cookie",
-      `payease_application=${applicantAccessToken}; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/local/public/applications/; Max-Age=2592000`,
-    );
+    if (applicantAccessToken) {
+      reply.header(
+        "Set-Cookie",
+        `payease_application=${applicantAccessToken}; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/local/public/applications/; Max-Age=2592000`,
+      );
+    }
     return reply.code(201).send({
       applicationNo: application.application_no,
       status: application.status,
@@ -1123,7 +1130,10 @@ app.get(
     const authenticatedUser = await authenticatedApplicant(
       request.headers.cookie,
     );
-    const hasApplicationAccessToken = Boolean(token && token.length >= 32);
+    const opaqueApplicationTokenAllowed = !requiresTelegramAuthentication();
+    const hasApplicationAccessToken = Boolean(
+      opaqueApplicationTokenAllowed && token && token.length >= 32,
+    );
     if (!hasApplicationAccessToken && !authenticatedUser) {
       return reply.code(401).send({ code: "USER_APPLICATION_ACCESS_DENIED" });
     }
@@ -1143,7 +1153,7 @@ app.get(
        FROM applications
        WHERE application_no = $1
          AND (
-           applicant_access_token_hash = $2
+           ($4::boolean AND applicant_access_token_hash = $2)
            OR EXISTS (
              SELECT 1 FROM users
              WHERE users.id = applications.user_id
@@ -1154,6 +1164,7 @@ app.get(
         params.applicationNo,
         eventHash([hasApplicationAccessToken ? token! : ""]),
         authenticatedUser?.telegramUserRef ?? "",
+        opaqueApplicationTokenAllowed,
       ],
     );
     if (!result.rowCount) {

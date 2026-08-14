@@ -486,6 +486,24 @@ integration("public applicant access", () => {
       expect(created.statusCode).toBe(201);
       const applicationNo = (created.json() as { applicationNo: string })
         .applicationNo;
+      // Production authentication must not leave a long-lived opaque
+      // application cookie that could outlive a disabled Bot session.
+      expect(created.headers["set-cookie"]).toBeUndefined();
+      const legacyOpaqueToken = "legacy-preview-token-must-not-authorize";
+      await database.query(
+        `UPDATE applications SET applicant_access_token_hash = $1
+          WHERE application_no = $2`,
+        [
+          createHash("sha256").update(legacyOpaqueToken).digest("hex"),
+          applicationNo,
+        ],
+      );
+      const legacyOpaqueAccess = await brokerApi.app.inject({
+        method: "GET",
+        url: `/v1/local/public/applications/${applicationNo}`,
+        headers: { cookie: `payease_application=${legacyOpaqueToken}` },
+      });
+      expect(legacyOpaqueAccess.statusCode).toBe(401);
       const createdUser = await database.query<{ telegram_user_ref: string }>(
         `SELECT users.telegram_user_ref
            FROM applications JOIN users ON users.id = applications.user_id

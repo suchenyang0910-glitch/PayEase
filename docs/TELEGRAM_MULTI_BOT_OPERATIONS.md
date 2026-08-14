@@ -71,3 +71,19 @@ Redirect URI 就视为已接入。
 - CSP、Cookie、CSRF 以及端到端失败/撤销测试。
 
 在这些验收完成前，Mini App 是唯一受支持的生产认证路径。
+
+## 5. 发布前认证配置预检
+
+每次替换 API 容器前，必须先构建候选镜像并运行预检。预检只输出 Bot ID、启用数量和
+`ready` 状态，**不会**输出 Token；非零退出码表示不得替换当前运行中的 API 容器。
+
+```bash
+cd /opt/payease-preview/releases/<commit>/infra/preview
+docker compose -p payease-preview --env-file /etc/payease-preview/broker-api.env build broker-api
+docker compose -p payease-preview --env-file /etc/payease-preview/broker-api.env \
+  run --rm --no-deps broker-api node broker-api/dist/deployment-preflight.js
+
+# 仅在输出 ready:true 后执行：
+docker compose -p payease-preview --env-file /etc/payease-preview/broker-api.env \
+  up -d --no-deps broker-api
+```

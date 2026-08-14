@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0019__lender_complaint_officer_role.sql",
+      filename: "V0020__default_rbac_khmer_display_names.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -152,6 +152,22 @@ integration("public applicant access", () => {
     );
     expect(complaintRole.rows).toEqual([
       { code: "LENDER_COMPLAINT_OFFICER", domain: "LENDER" },
+    ]);
+    const defaultKhmerNames = await database.query<{
+      code: string;
+      display_name_km: string;
+    }>(
+      `SELECT code, display_name_km FROM roles
+        WHERE code IN ('OPS_ADMIN', 'BROKER_OFFICER', 'LENDER_COMPLAINT_OFFICER')
+        ORDER BY code`,
+    );
+    expect(defaultKhmerNames.rows).toEqual([
+      { code: "BROKER_OFFICER", display_name_km: "មន្ត្រីត្រួតពិនិត្យឯកសារ" },
+      {
+        code: "LENDER_COMPLAINT_OFFICER",
+        display_name_km: "មន្ត្រីដោះស្រាយបណ្តឹង",
+      },
+      { code: "OPS_ADMIN", display_name_km: "អ្នកគ្រប់គ្រងវេទិកា" },
     ]);
   });
 

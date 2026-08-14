@@ -715,11 +715,11 @@ app.post("/v1/local/auth/bootstrap", async (request, reply) => {
     }
     const department = await client.query<{ id: string }>(
       `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
-       VALUES ('OPS', 'OPS_ADMIN', '平台运营', 'Platform operations', 'Platform operations') RETURNING id`,
+       VALUES ('OPS', 'OPS_ADMIN', '平台运营', 'Platform operations', 'ប្រតិបត្តិការវេទិកា') RETURNING id`,
     );
     const role = await client.query<{ id: string }>(
       `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
-       VALUES ('OPS', 'OPS_ADMIN', '平台管理员', 'Platform administrator', 'Platform administrator') RETURNING id`,
+       VALUES ('OPS', 'OPS_ADMIN', '平台管理员', 'Platform administrator', 'អ្នកគ្រប់គ្រងវេទិកា') RETURNING id`,
     );
     await client.query(
       "INSERT INTO permissions (code, description) VALUES ('ADMIN_RBAC_MANAGE', 'Manage departments, roles and accounts')",
@@ -742,54 +742,90 @@ app.post("/v1/local/auth/bootstrap", async (request, reply) => {
       "INSERT INTO admin_account_roles (account_id, role_id) VALUES ($1, $2)",
       [account.rows[0]!.id, role.rows[0]!.id],
     );
-    for (const [domain, code, zh, en] of [
-      ["BROKER", "BROKER_OFFICER", "助贷审核员", "Broker officer"],
+    for (const [domain, code, zh, en, km] of [
+      [
+        "BROKER",
+        "BROKER_OFFICER",
+        "助贷审核员",
+        "Broker officer",
+        "មន្ត្រីត្រួតពិនិត្យឯកសារ",
+      ],
       [
         "LENDER",
         "LENDER_CREDIT_OFFICER",
         "持牌初审员",
         "Lender initial reviewer",
+        "មន្ត្រីពិនិត្យឥណទានដំបូង",
       ],
       [
         "LENDER",
         "LENDER_CREDIT_REVIEWER",
         "持牌复审员",
         "Lender final reviewer",
+        "មន្ត្រីពិនិត្យឥណទានចុងក្រោយ",
       ],
-      ["LENDER", "LENDER_CONTRACT_OFFICER", "合同专员", "Contract officer"],
-      ["LENDER", "LENDER_DISBURSEMENT_MAKER", "放款经办", "Disbursement maker"],
+      [
+        "LENDER",
+        "LENDER_CONTRACT_OFFICER",
+        "合同专员",
+        "Contract officer",
+        "មន្ត្រីកិច្ចសន្យា",
+      ],
+      [
+        "LENDER",
+        "LENDER_DISBURSEMENT_MAKER",
+        "放款经办",
+        "Disbursement maker",
+        "មន្ត្រីបញ្ចេញប្រាក់",
+      ],
       [
         "LENDER",
         "LENDER_DISBURSEMENT_CHECKER",
         "放款复核",
         "Disbursement checker",
+        "មន្ត្រីត្រួតពិនិត្យការបញ្ចេញប្រាក់",
       ],
-      ["LENDER", "LENDER_REPAYMENT_MAKER", "还款核销经办", "Repayment maker"],
+      [
+        "LENDER",
+        "LENDER_REPAYMENT_MAKER",
+        "还款核销经办",
+        "Repayment maker",
+        "មន្ត្រីកត់ត្រាការសងប្រាក់",
+      ],
       [
         "LENDER",
         "LENDER_REPAYMENT_CHECKER",
         "还款核销复核",
         "Repayment checker",
+        "មន្ត្រីត្រួតពិនិត្យការសងប្រាក់",
       ],
       [
         "LENDER",
         "LENDER_COMPLAINT_OFFICER",
         "投诉处理专员",
         "Lender complaint officer",
+        "មន្ត្រីដោះស្រាយបណ្តឹង",
       ],
-      ["EMPLOYER", "EMPLOYER_HR", "企业 HR 核验员", "Employer HR verifier"],
+      [
+        "EMPLOYER",
+        "EMPLOYER_HR",
+        "企业 HR 核验员",
+        "Employer HR verifier",
+        "មន្ត្រីផ្ទៀងផ្ទាត់ធនធានមនុស្ស",
+      ],
       [
         "EMPLOYER",
         "EMPLOYER_FINANCE",
         "企业财务核验员",
         "Employer finance verifier",
+        "មន្ត្រីផ្ទៀងផ្ទាត់ហិរញ្ញវត្ថុ",
       ],
     ] as const) {
       await client.query(
         `INSERT INTO roles (domain, code, display_name_zh, display_name_en, display_name_km)
-         VALUES ($1, $2, $3, $4, $4)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (code) DO NOTHING`,
-        [domain, code, zh, en],
+        [domain, code, zh, en, km],
       );
     }
     await addAuditEvent(

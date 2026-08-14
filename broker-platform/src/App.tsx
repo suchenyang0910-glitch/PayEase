@@ -223,52 +223,62 @@ export function App(): JSX.Element {
   const adminPost = async (path: string, body: object) => {
     setAdminInProgress(true);
     setNotice("");
-    const result = await brokerAdminActionResult(
-      () =>
-        request(path, {
-          method: "POST",
-          body: JSON.stringify(body),
-        }),
-      copy,
-    );
-    setNotice(result.notice);
-    if (result.ok) await refreshDirectory().catch(() => undefined);
-    setAdminInProgress(false);
+    try {
+      const result = await brokerAdminActionResult(
+        () =>
+          request(path, {
+            method: "POST",
+            body: JSON.stringify(body),
+          }),
+        copy,
+      );
+      setNotice(result.notice);
+      if (result.ok) await refreshDirectory().catch(() => undefined);
+    } finally {
+      // Do not leave privileged directory forms disabled if an unexpected
+      // client-side exception occurs after the request has completed.
+      setAdminInProgress(false);
+    }
   };
   const review = async (decision: "APPROVED" | "RETURNED") => {
     setReviewInProgress(true);
     setNotice("");
-    const result = await brokerReviewNotice(
-      () =>
-        request(
-          `/v1/local/applications/${encodeURIComponent(applicationNo)}/broker-review`,
-          { method: "POST", body: JSON.stringify({ decision, reasonCode }) },
-        ),
-      copy,
-    );
-    setNotice(result);
-    setReviewInProgress(false);
+    try {
+      const result = await brokerReviewNotice(
+        () =>
+          request(
+            `/v1/local/applications/${encodeURIComponent(applicationNo)}/broker-review`,
+            { method: "POST", body: JSON.stringify({ decision, reasonCode }) },
+          ),
+        copy,
+      );
+      setNotice(result);
+    } finally {
+      setReviewInProgress(false);
+    }
   };
   const loadPersonalProfile = async () => {
     setPersonalProfile(undefined);
     setNotice("");
     setProfileLoading(true);
-    const result = await brokerProfileResult(
-      () =>
-        request(
-          `/v1/local/applications/${encodeURIComponent(applicationNo)}/personal-profile`,
-        ),
-      copy,
-    );
-    if (isPersonalProfileResponse(result.payload)) {
-      setPersonalProfile(result.payload);
-    } else if (result.payload) {
-      setNotice(`${copy.profileUnavailable}: ${copy.profileRequestFailed}`);
+    try {
+      const result = await brokerProfileResult(
+        () =>
+          request(
+            `/v1/local/applications/${encodeURIComponent(applicationNo)}/personal-profile`,
+          ),
+        copy,
+      );
+      if (isPersonalProfileResponse(result.payload)) {
+        setPersonalProfile(result.payload);
+      } else if (result.payload) {
+        setNotice(`${copy.profileUnavailable}: ${copy.profileRequestFailed}`);
+        return;
+      }
+      setNotice(result.notice);
+    } finally {
       setProfileLoading(false);
-      return;
     }
-    setNotice(result.notice);
-    setProfileLoading(false);
   };
   if (checking) return <main style={shell}>{copy.checkingSession}</main>;
   if (!identity) return <Login onLogin={setIdentity} />;

@@ -232,16 +232,21 @@ export function App(): JSX.Element {
   const run = async (action: Action) => {
     setRunningAction(action.route);
     setNotice("");
-    const result = await lenderActionNotice(
-      () =>
-        api(
-          `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
-          { method: "POST", body: JSON.stringify(action.body()) },
-        ),
-      copy,
-    );
-    setNotice(result);
-    setRunningAction(undefined);
+    try {
+      const result = await lenderActionNotice(
+        () =>
+          api(
+            `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
+            { method: "POST", body: JSON.stringify(action.body()) },
+          ),
+        copy,
+      );
+      setNotice(result);
+    } finally {
+      // A client-side error after the request must not permanently lock the
+      // manual approval console's controls.
+      setRunningAction(undefined);
+    }
   };
   const logout = async () => {
     await api("/v1/local/auth/logout", { method: "POST" });

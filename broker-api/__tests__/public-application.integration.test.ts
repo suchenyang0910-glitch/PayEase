@@ -188,7 +188,19 @@ integration("public applicant access", () => {
     });
     expect(valid.statusCode).toBe(200);
     expect(valid.headers["set-cookie"]).toContain("HttpOnly");
+    expect(valid.headers["set-cookie"]).toContain("Max-Age=1800");
     const sessionCookie = String(valid.headers["set-cookie"]).split(";")[0]!;
+    const storedSession = await database.query<{ expires_soon: boolean }>(
+      `SELECT expires_at <= now() + interval '30 minutes 5 seconds' AS expires_soon
+         FROM admin_sessions
+        WHERE token_hash = $1`,
+      [
+        createHash("sha256")
+          .update(sessionCookie.slice("payease_session=".length))
+          .digest("hex"),
+      ],
+    );
+    expect(storedSession.rows).toEqual([{ expires_soon: true }]);
 
     const languagePreference = await brokerApi.app.inject({
       method: "PATCH",

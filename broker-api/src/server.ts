@@ -678,7 +678,7 @@ app.post("/v1/local/auth/login", async (request, reply) => {
     }
     const token = randomBytes(32).toString("base64url");
     await client.query(
-      "INSERT INTO admin_sessions (token_hash, account_id, expires_at) VALUES ($1, $2, now() + interval '8 hours')",
+      "INSERT INTO admin_sessions (token_hash, account_id, expires_at) VALUES ($1, $2, now() + interval '30 minutes')",
       [eventHash([token]), row.id],
     );
     await addAuthenticationAuditEvent(
@@ -691,7 +691,7 @@ app.post("/v1/local/auth/login", async (request, reply) => {
     await client.query("COMMIT");
     reply.header(
       "Set-Cookie",
-      `payease_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/`,
+      `payease_session=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=1800`,
     );
     return {
       loginName: input.loginName,

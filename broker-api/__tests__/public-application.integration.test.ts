@@ -229,6 +229,15 @@ integration("public applicant access", () => {
         ";",
       )[0]!;
 
+      const languagePreference = await brokerApi.app.inject({
+        method: "PUT",
+        url: "/v1/local/public/profile/preferred-language",
+        headers: { cookie: secondCookie },
+        payload: { preferredLanguage: "zh-CN" },
+      });
+      expect(languagePreference.statusCode).toBe(200);
+      expect(languagePreference.json()).toEqual({ preferredLanguage: "zh-CN" });
+
       const list = await brokerApi.app.inject({
         method: "GET",
         url: "/v1/local/public/applications",
@@ -236,6 +245,7 @@ integration("public applicant access", () => {
       });
       expect(list.statusCode).toBe(200);
       expect(list.json()).toMatchObject({
+        preferredLanguage: "zh-CN",
         applications: [
           {
             applicationNo,

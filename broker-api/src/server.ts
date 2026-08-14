@@ -143,6 +143,9 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicTelegramSession =
     request.method === "POST" &&
     request.url === "/v1/local/public/telegram-sessions";
+  const isPublicApplicantLanguagePreference =
+    request.method === "PUT" &&
+    request.url === "/v1/local/public/profile/preferred-language";
   const isPublicUserApplicationView =
     request.url === "/v1/local/public/applications" ||
     request.url.startsWith("/v1/local/public/applications/");
@@ -151,6 +154,7 @@ app.addHook("onRequest", async (request, reply) => {
     request.url.startsWith("/v1/local/auth/") ||
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
+    isPublicApplicantLanguagePreference ||
     isPublicUserApplicationView
   )
     return;
@@ -1008,6 +1012,10 @@ app.get("/v1/local/public/applications", async (request, reply) => {
   if (!authenticatedUser) {
     return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
   }
+  const user = await pool.query<{ preferred_language: "km" | "en" | "zh-CN" }>(
+    `SELECT preferred_language FROM users WHERE telegram_user_ref = $1`,
+    [authenticatedUser.telegramUserRef],
+  );
   const applications = await pool.query<{
     application_no: string;
     status: string;
@@ -1029,6 +1037,7 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     [authenticatedUser.telegramUserRef],
   );
   return {
+    preferredLanguage: user.rows[0]?.preferred_language,
     applications: applications.rows.map((application) => ({
       applicationNo: application.application_no,
       status: application.status,
@@ -1040,6 +1049,31 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     })),
   };
 });
+
+app.put(
+  "/v1/local/public/profile/preferred-language",
+  async (request, reply) => {
+    const authenticatedUser = await authenticatedApplicant(
+      request.headers.cookie,
+    );
+    if (!authenticatedUser) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const input = z
+      .object({ preferredLanguage: z.enum(["km", "en", "zh-CN"]) })
+      .parse(request.body);
+    const updated = await pool.query(
+      `UPDATE users
+        SET preferred_language = $1, updated_at = now()
+      WHERE telegram_user_ref = $2`,
+      [input.preferredLanguage, authenticatedUser.telegramUserRef],
+    );
+    if (!updated.rowCount) {
+      return reply.code(404).send({ code: "TELEGRAM_USER_NOT_FOUND" });
+    }
+    return { preferredLanguage: input.preferredLanguage };
+  },
+);
 
 app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
   const params = z

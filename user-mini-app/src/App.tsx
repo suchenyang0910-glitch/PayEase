@@ -43,6 +43,7 @@ type UserSummary = {
 };
 
 type ApplicationList = {
+  preferredLanguage?: LanguageCode;
   applications: Array<{
     applicationNo: string;
   }>;
@@ -235,6 +236,7 @@ export function App(): JSX.Element {
       });
       if (!applications.ok) return;
       const payload = (await applications.json()) as ApplicationList;
+      if (payload.preferredLanguage) setLanguage(payload.preferredLanguage);
       const latest = payload.applications[0];
       if (!latest) return;
       setApplicationNo(latest.applicationNo);
@@ -330,6 +332,20 @@ export function App(): JSX.Element {
     }
   }
 
+  function changeLanguage(nextLanguage: LanguageCode) {
+    setLanguage(nextLanguage);
+    if (!telegramInitData()) return;
+    void fetch("/api/v1/local/public/profile/preferred-language", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ preferredLanguage: nextLanguage }),
+    }).catch(() => {
+      // The selected language stays active for this view. The server will only
+      // persist it after a verified Telegram session is available.
+    });
+  }
+
   const currentStep =
     stage === "welcome" || stage === "details"
       ? 0
@@ -349,7 +365,7 @@ export function App(): JSX.Element {
             aria-label="Language"
             value={language}
             onChange={(event) =>
-              setLanguage(event.target.value as LanguageCode)
+              changeLanguage(event.target.value as LanguageCode)
             }
           >
             <option value="km">ខ្មែរ</option>

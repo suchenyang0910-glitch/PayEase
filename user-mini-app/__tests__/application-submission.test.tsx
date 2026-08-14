@@ -464,6 +464,80 @@ describe("applicant submission", () => {
     expect(screen.queryByText("Estimated monthly payment")).toBeNull();
   });
 
+  it("requires a second applicant action before withdrawing a pre-contract application", async () => {
+    window.history.replaceState(null, "", "/?application=APP-WITHDRAW-001");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-WITHDRAW-001",
+              status: "BROKER_REVIEW",
+              requestedAmountMinor: "5000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: null,
+              rejectionConditionResolved: false,
+              supplementRequested: false,
+            },
+            terms: null,
+            repayment: {
+              periodCount: 0,
+              paidPeriods: 0,
+              unpaidPeriods: 0,
+              overduePeriods: 0,
+              totalDueMinor: "0",
+              totalPaidMinor: "0",
+              outstandingMinor: "0",
+              overdueOutstandingMinor: "0",
+              nextInstallment: null,
+              installments: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            applicationNo: "APP-WITHDRAW-001",
+            status: "CLOSED",
+            withdrawn: true,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Withdraw application" }),
+    ).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Withdraw application" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Confirm withdrawal" }),
+    ).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    expect(await screen.findByText("Application withdrawn")).toBeVisible();
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/v1/local/public/applications/APP-WITHDRAW-001/withdraw",
+      { method: "POST", credentials: "include" },
+    ]);
+  });
+
   it("records an applicant's explicit confirmation of approved terms", async () => {
     window.history.replaceState(null, "", "/?application=APP-CONTRACT-001");
     const fetchMock = vi

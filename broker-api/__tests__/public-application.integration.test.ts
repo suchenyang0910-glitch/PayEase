@@ -112,6 +112,7 @@ integration("public applicant access", () => {
       "V0014__application_status_transition_integrity.sql",
       "V0015__manual_action_idempotency.sql",
       "V0016__telegram_session_idle_timeout.sql",
+      "V0017__allow_precontract_applicant_withdrawal.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -1097,6 +1098,66 @@ integration("public applicant access", () => {
     }
   });
 
+  it("lets the owning applicant withdraw exactly once before contract confirmation", async () => {
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "integration-withdrawal-user",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "25000", currency: "USD" },
+        tenorDays: 30,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    const sessionToken = "integration-withdrawal-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, '444444444', now() + interval '15 minutes')`,
+      [
+        createHash("sha256").update(sessionToken).digest("hex"),
+        "integration-withdrawal-user",
+      ],
+    );
+    const applicantCookie = `payease_applicant_session=${sessionToken}`;
+
+    const missingSession = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/withdraw`,
+    });
+    expect(missingSession.statusCode).toBe(401);
+
+    const withdrawn = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/withdraw`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(withdrawn.statusCode).toBe(200);
+    expect(withdrawn.json()).toEqual({
+      applicationNo,
+      status: "CLOSED",
+      withdrawn: true,
+    });
+
+    const repeatedWithdrawal = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/withdraw`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(repeatedWithdrawal.statusCode).toBe(200);
+    const withdrawalAuditCount = await database.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM audit_events
+        WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)
+          AND event_type = 'USER_APPLICATION_WITHDRAWN'`,
+      [applicationNo],
+    );
+    expect(Number(withdrawalAuditCount.rows[0]?.count)).toBe(1);
+  });
+
   it("records the full manual pilot lifecycle with distinct approval accounts", async () => {
     const created = await brokerApi.app.inject({
       method: "POST",
@@ -1234,6 +1295,16 @@ integration("public applicant access", () => {
     expect(repeatedUserContractConfirmation.json()).toEqual({
       applicationNo,
       status: "USER_CONTRACT_CONFIRMED",
+    });
+    const signedApplicationWithdrawal = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/withdraw`,
+      headers: { cookie: telegramApplicantCookie },
+    });
+    expect(signedApplicationWithdrawal.statusCode).toBe(409);
+    expect(signedApplicationWithdrawal.json()).toEqual({
+      code: "WITHDRAWAL_REQUIRES_LENDER_CASE",
+      currentStatus: "USER_CONTRACT_CONFIRMED",
     });
     const userConfirmationAuditCount = await database.query<{ count: string }>(
       `SELECT count(*)::text AS count

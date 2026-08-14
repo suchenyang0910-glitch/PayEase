@@ -2017,6 +2017,99 @@ app.post(
 );
 
 app.post(
+  "/v1/local/public/applications/:applicationNo/withdraw",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const withdrawableStatuses = new Set([
+      "BROKER_REVIEW",
+      "EMPLOYER_VERIFICATION",
+      "EMPLOYER_FINANCE_VERIFICATION",
+      "LENDER_INITIAL_REVIEW",
+      "LENDER_FINAL_REVIEW",
+      "CONTRACT_PENDING",
+    ]);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const owned = await client.query<ApplicationRow>(
+        `SELECT applications.id, applications.status, applications.review_round
+           FROM applications
+           JOIN users ON users.id = applications.user_id
+          WHERE applications.application_no = $1
+            AND users.telegram_user_ref = $2
+          FOR UPDATE`,
+        [params.applicationNo, applicant.telegramUserRef],
+      );
+      const application = owned.rows[0];
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status === "CLOSED") {
+        const priorWithdrawal = await client.query(
+          `SELECT 1 FROM audit_events
+            WHERE entity_type = 'APPLICATION'
+              AND entity_id = $1
+              AND event_type = 'USER_APPLICATION_WITHDRAWN'
+            LIMIT 1`,
+          [application.id],
+        );
+        await client.query("ROLLBACK");
+        if (priorWithdrawal.rowCount) {
+          return {
+            applicationNo: params.applicationNo,
+            status: "CLOSED",
+            withdrawn: true,
+          };
+        }
+        return reply.code(409).send({
+          code: "WITHDRAWAL_NOT_AVAILABLE",
+          currentStatus: application.status,
+        });
+      }
+      if (!withdrawableStatuses.has(application.status)) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "WITHDRAWAL_REQUIRES_LENDER_CASE",
+          currentStatus: application.status,
+        });
+      }
+      await updateStatus(
+        client,
+        application,
+        "CLOSED",
+        applicant.telegramUserRef,
+        "USER_APPLICATION_WITHDRAWN",
+      );
+      await addAuditEvent(
+        client,
+        application.id,
+        "USER_APPLICATION_WITHDRAWN",
+        applicant.telegramUserRef,
+        { applicationNo: params.applicationNo },
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        status: "CLOSED",
+        withdrawn: true,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
   "/v1/local/public/applications/:applicationNo/contract-confirmation",
   async (request, reply) => {
     const applicant = await authenticatedApplicant(request.headers.cookie);

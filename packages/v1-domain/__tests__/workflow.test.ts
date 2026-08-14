@@ -241,6 +241,33 @@ describe("V1 controlled-pilot workflow", () => {
     );
   });
 
+  it("allows an applicant to withdraw before contractual confirmation", () => {
+    let item = application();
+    item = transitionApplication(
+      item,
+      "SUBMITTED",
+      "tg-1001",
+      "2026-08-12T07:00:00.000Z",
+    );
+    item = transitionApplication(
+      item,
+      "BROKER_REVIEW",
+      "broker-1",
+      "2026-08-12T07:01:00.000Z",
+    );
+    item = transitionApplication(
+      item,
+      "CLOSED",
+      "tg-1001",
+      "2026-08-12T07:02:00.000Z",
+      "USER_APPLICATION_WITHDRAWN",
+    );
+    expect(item.status).toBe("CLOSED");
+    expect(item.auditEvents.at(-1)?.reasonCode).toBe(
+      "USER_APPLICATION_WITHDRAWN",
+    );
+  });
+
   it("opens a new review round after supplementary information is requested", () => {
     let item = application();
     item = transitionApplication(

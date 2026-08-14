@@ -9,7 +9,10 @@ import {
   prependApplicationHistory,
   type ApplicationHistoryEntry,
 } from "./application-history.ts";
-import { applicantResult } from "./application-result.ts";
+import {
+  applicantResult,
+  canWithdrawApplicantApplication,
+} from "./application-result.ts";
 import { applicantSessionRecoveryMessage } from "./applicant-session-message.ts";
 import { shouldKeepApplicantSessionAlive } from "./applicant-session-keepalive.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
@@ -260,6 +263,8 @@ export function App(): JSX.Element {
     ApplicationListEntry[]
   >([]);
   const [applicantSession, setApplicantSession] = useState(false);
+  const [withdrawalConfirmationRequested, setWithdrawalConfirmationRequested] =
+    useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -488,6 +493,7 @@ export function App(): JSX.Element {
       );
       setApplicationNo(targetApplicationNo);
       setSummary(payload);
+      setWithdrawalConfirmationRequested(false);
       setStage("offer");
     } catch {
       setError(
@@ -542,6 +548,61 @@ export function App(): JSX.Element {
     }
   }
 
+  async function withdrawApplication() {
+    if (!applicationNo) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/withdraw`,
+        { method: "POST", credentials: "include" },
+      );
+      if (response.status === 401 || response.status === 403) {
+        setError(applicantSessionRecoveryMessage(language));
+        return;
+      }
+      const payload = (await response.json()) as {
+        applicationNo?: string;
+        status?: string;
+        withdrawn?: boolean;
+      };
+      if (
+        !response.ok ||
+        payload.applicationNo !== applicationNo ||
+        payload.status !== "CLOSED" ||
+        payload.withdrawn !== true
+      ) {
+        throw new Error("WITHDRAWAL_FAILED");
+      }
+      setSummary((current) =>
+        current
+          ? {
+              ...current,
+              application: { ...current.application, status: "CLOSED" },
+            }
+          : current,
+      );
+      setApplicationHistory((current) =>
+        current.map((item) =>
+          item.applicationNo === applicationNo
+            ? { ...item, status: "CLOSED" }
+            : item,
+        ),
+      );
+      setWithdrawalConfirmationRequested(false);
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not withdraw this application. Please contact the licensed lender if it has progressed to contract processing."
+          : language === "km"
+            ? "មិនអាចដកពាក្យសុំនេះបានទេ។ សូមទាក់ទងស្ថាប័នមានអាជ្ញាប័ណ្ណ ប្រសិនបើពាក្យសុំបានចូលដំណាក់កាលកិច្ចសន្យា។"
+            : "暂时无法撤回该申请；如已进入合同处理，请联系持牌机构。",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function changeLanguage(nextLanguage: LanguageCode) {
     languageChangedByApplicant.current = true;
     setLanguage(nextLanguage);
@@ -582,6 +643,9 @@ export function App(): JSX.Element {
       : stage === "submitted"
         ? 1
         : 3;
+  const canWithdraw = Boolean(
+    summary && canWithdrawApplicantApplication(summary.application.status),
+  );
   return (
     <main className="shell" lang={language}>
       <header className="topbar">
@@ -769,21 +833,27 @@ export function App(): JSX.Element {
         <section className="result-card">
           <div className="review-icon">⌛</div>
           <h2>
-            {result === "approved"
-              ? t.offer
-              : result.startsWith("rejected")
-                ? language === "en"
-                  ? "Application not approved"
-                  : language === "zh-CN"
-                    ? "申请未获批准"
-                    : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
-                : result === "supplement-requested"
+            {result === "withdrawn"
+              ? language === "en"
+                ? "Application withdrawn"
+                : language === "zh-CN"
+                  ? "申请已撤回"
+                  : "ពាក្យសុំត្រូវបានដកវិញ"
+              : result === "approved"
+                ? t.offer
+                : result.startsWith("rejected")
                   ? language === "en"
-                    ? "Additional information needed"
+                    ? "Application not approved"
                     : language === "zh-CN"
-                      ? "需要补充资料"
-                      : "ត្រូវការព័ត៌មានបន្ថែម"
-                  : t.reviewing}
+                      ? "申请未获批准"
+                      : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
+                  : result === "supplement-requested"
+                    ? language === "en"
+                      ? "Additional information needed"
+                      : language === "zh-CN"
+                        ? "需要补充资料"
+                        : "ត្រូវការព័ត៌មានបន្ថែម"
+                    : t.reviewing}
           </h2>
           {error ? (
             <p className="error" role="alert">
@@ -791,37 +861,94 @@ export function App(): JSX.Element {
             </p>
           ) : null}
           <p>
-            {result === "approved"
+            {result === "withdrawn"
               ? language === "en"
-                ? "The licensed lender has returned your approved limit."
-                : language === "km"
-                  ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
-                  : "持牌机构已返回你的审核额度。"
-              : result === "rejected-resolved"
+                ? "This application is closed and will not continue to review or contract processing."
+                : language === "zh-CN"
+                  ? "该申请已关闭，不会继续进入审核或合同处理。"
+                  : "ពាក្យសុំនេះត្រូវបានបិទ ហើយនឹងមិនបន្តទៅការពិនិត្យ ឬដំណើរការកិច្ចសន្យាទេ។"
+              : result === "approved"
                 ? language === "en"
-                  ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
-                  : language === "zh-CN"
-                    ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
-                    : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
-                : result === "rejected-pending"
+                  ? "The licensed lender has returned your approved limit."
+                  : language === "km"
+                    ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
+                    : "持牌机构已返回你的审核额度。"
+                : result === "rejected-resolved"
                   ? language === "en"
-                    ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
+                    ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
                     : language === "zh-CN"
-                      ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
-                      : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
-                  : result === "supplement-requested"
+                      ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
+                      : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
+                  : result === "rejected-pending"
                     ? language === "en"
-                      ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
+                      ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
                       : language === "zh-CN"
-                        ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
-                        : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
-                    : t.noOffer}
+                        ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
+                        : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
+                    : result === "supplement-requested"
+                      ? language === "en"
+                        ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
+                        : language === "zh-CN"
+                          ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
+                          : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
+                      : t.noOffer}
           </p>
           <div className="application-number">
             <span>{t.status}</span>
             <strong>{applicationNo}</strong>
           </div>
-          {result === "approved" ? (
+          {canWithdraw ? (
+            <section className="next-payment" aria-label="Withdraw application">
+              <strong>
+                {language === "en"
+                  ? "Need to stop this application?"
+                  : language === "zh-CN"
+                    ? "需要撤回申请吗？"
+                    : "ត្រូវការដកពាក្យសុំនេះវិញឬ?"}
+              </strong>
+              <small>
+                {language === "en"
+                  ? "You can withdraw before you confirm the loan contract."
+                  : language === "zh-CN"
+                    ? "在确认贷款合同前，你可以撤回申请。"
+                    : "អ្នកអាចដកពាក្យសុំវិញ មុនពេលអ្នកបញ្ជាក់កិច្ចសន្យាប្រាក់កម្ចី។"}
+              </small>
+              {withdrawalConfirmationRequested ? (
+                <button
+                  className="primary"
+                  disabled={loading}
+                  onClick={() => void withdrawApplication()}
+                >
+                  {language === "en"
+                    ? "Confirm withdrawal"
+                    : language === "zh-CN"
+                      ? "确认撤回"
+                      : "បញ្ជាក់ការដកវិញ"}
+                </button>
+              ) : (
+                <button
+                  className="back-link"
+                  disabled={loading}
+                  onClick={() => setWithdrawalConfirmationRequested(true)}
+                >
+                  {language === "en"
+                    ? "Withdraw application"
+                    : language === "zh-CN"
+                      ? "撤回申请"
+                      : "ដកពាក្យសុំវិញ"}
+                </button>
+              )}
+            </section>
+          ) : null}
+          {result === "withdrawn" ? (
+            <p className="response-note">
+              {language === "en"
+                ? "No further action is required for this withdrawn application."
+                : language === "zh-CN"
+                  ? "该已撤回申请无需进一步操作。"
+                  : "មិនត្រូវការសកម្មភាពបន្ថែមសម្រាប់ពាក្យសុំដែលបានដកវិញនេះទេ។"}
+            </p>
+          ) : result === "approved" ? (
             <p className="response-note">
               {language === "en"
                 ? "Approved limit: "

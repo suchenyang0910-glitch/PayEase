@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { applicantResult } from "../src/application-result.ts";
+import {
+  applicantResult,
+  canWithdrawApplicantApplication,
+} from "../src/application-result.ts";
 
 describe("applicant result display state", () => {
   it("shows a lender offer only when an approved amount exists", () => {
@@ -66,5 +69,22 @@ describe("applicant result display state", () => {
         supplementRequested: true,
       }),
     ).toBe("rejected-pending");
+  });
+
+  it("separates eligible withdrawal from signed or funded application states", () => {
+    expect(canWithdrawApplicantApplication("BROKER_REVIEW")).toBe(true);
+    expect(canWithdrawApplicantApplication("CONTRACT_PENDING")).toBe(true);
+    expect(canWithdrawApplicantApplication("USER_CONTRACT_CONFIRMED")).toBe(
+      false,
+    );
+    expect(canWithdrawApplicantApplication("REPAYMENT_ACTIVE")).toBe(false);
+    expect(
+      applicantResult({
+        status: "CLOSED",
+        approvedAmountMinor: null,
+        rejectionConditionResolved: false,
+        supplementRequested: false,
+      }),
+    ).toBe("withdrawn");
   });
 });

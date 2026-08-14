@@ -17,6 +17,7 @@ import {
   type LenderApplicationSummary,
 } from "./lender-application-summary.ts";
 import { lenderServiceFeeSummaryLabel } from "./lender-summary-label.ts";
+import { lenderServiceCaseTypeLabel } from "./lender-service-case-label.ts";
 import { formatHuman } from "@payease/shared-money";
 
 type Identity = {
@@ -757,7 +758,11 @@ export function App(): JSX.Element {
                     {copy.viewComplaint}: {serviceCase.caseNo}
                   </button>{" "}
                   <small>
-                    {serviceCase.caseType} · {serviceCase.applicationNo}
+                    {lenderServiceCaseTypeLabel(
+                      serviceCase.caseType,
+                      identity.preferredLanguage,
+                    )}{" "}
+                    · {serviceCase.applicationNo}
                   </small>
                 </li>
               ))}

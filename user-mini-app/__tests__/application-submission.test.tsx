@@ -347,6 +347,80 @@ describe("applicant submission", () => {
     ]);
   });
 
+  it("updates the URL when an applicant opens an older application from history", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "fresh-init-data" } },
+    });
+    const entry = (applicationNo: string, status: string) => ({
+      applicationNo,
+      status,
+      requestedAmountMinor: "5000",
+      currency: "USD",
+      tenorDays: 30,
+      approvedAmountMinor: null,
+      rejectionConditionResolved: false,
+      rejectionNoticeCode: null,
+      supplementRequested: false,
+    });
+    const summary = (applicationNo: string, status: string) =>
+      new Response(
+        JSON.stringify({
+          application: entry(applicationNo, status),
+          terms: null,
+          repayment: {
+            periodCount: 0,
+            paidPeriods: 0,
+            unpaidPeriods: 0,
+            overduePeriods: 0,
+            totalDueMinor: "0",
+            totalPaidMinor: "0",
+            outstandingMinor: "0",
+            overdueOutstandingMinor: "0",
+            nextInstallment: null,
+            installments: [],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            preferredLanguage: "en",
+            applications: [
+              {
+                ...entry("APP-HISTORY-NEW", "BROKER_REVIEW"),
+                createdAt: "2026-08-15T00:00:00.000Z",
+              },
+              {
+                ...entry("APP-HISTORY-OLD", "CLOSED"),
+                createdAt: "2026-08-14T00:00:00.000Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(summary("APP-HISTORY-NEW", "BROKER_REVIEW"))
+      .mockResolvedValueOnce(summary("APP-HISTORY-OLD", "CLOSED"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const oldEntry = await screen.findByText("APP-HISTORY-OLD");
+    fireEvent.click(oldEntry.closest("button")!);
+
+    expect(await screen.findByText("Application withdrawn")).toBeVisible();
+    expect(window.location.search).toBe("?application=APP-HISTORY-OLD");
+    expect(fetchMock.mock.calls[3]).toEqual([
+      "/api/v1/local/public/applications/APP-HISTORY-OLD",
+      { credentials: "include" },
+    ]);
+  });
+
   it("lets an applicant refresh the displayed decision without reopening Telegram", async () => {
     window.history.replaceState(null, "", "/?application=APP-REFRESH-001");
     const summaryResponse = () =>

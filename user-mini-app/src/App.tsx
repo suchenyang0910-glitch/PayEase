@@ -730,6 +730,14 @@ export function App(): JSX.Element {
       setApprovedAmountMinor(
         payload.application.approvedAmountMinor ?? undefined,
       );
+      // Keep the selected historical application addressable after a refresh
+      // or Telegram WebView reopen. Only change the URL after the server has
+      // authorised and returned the requested record.
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}?application=${encodeURIComponent(targetApplicationNo)}`,
+      );
       setApplicationNo(targetApplicationNo);
       setSummary(payload);
       setWithdrawalConfirmationRequested(false);

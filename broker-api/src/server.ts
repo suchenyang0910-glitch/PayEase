@@ -36,6 +36,8 @@ import {
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
 import { requiresTelegramAuthentication } from "./telegram-auth-policy.js";
+import { encryptPersonalProfile } from "./personal-profile.js";
+import { runDatabaseMigrations } from "./database-migrations.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -914,16 +916,51 @@ app.post("/v1/local/applications", async (request, reply) => {
     });
   }
 
+  let encryptedPersonalProfile:
+    { fullName: Buffer; phone: Buffer; employerName: Buffer } | undefined;
+  if (input.personalProfile) {
+    try {
+      encryptedPersonalProfile = encryptPersonalProfile(input.personalProfile);
+    } catch (error) {
+      request.log.error(
+        { err: error },
+        "personal profile encryption unavailable",
+      );
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+  }
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const applicantAccessToken = randomBytes(32).toString("base64url");
     const user = await client.query<{ id: string }>(
-      `INSERT INTO users (telegram_user_ref, preferred_language)
-       VALUES ($1, $2)
-       ON CONFLICT (telegram_user_ref) DO UPDATE SET preferred_language = EXCLUDED.preferred_language, updated_at = now()
+      `INSERT INTO users (
+         telegram_user_ref, preferred_language, full_name_encrypted,
+         phone_encrypted, employer_name_encrypted, personal_data_consent_version,
+         personal_data_consented_at, personal_data_key_version
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $3 IS NULL THEN NULL ELSE now() END, CASE WHEN $3 IS NULL THEN NULL ELSE 'v1' END)
+       ON CONFLICT (telegram_user_ref) DO UPDATE SET
+         preferred_language = EXCLUDED.preferred_language,
+         full_name_encrypted = COALESCE(EXCLUDED.full_name_encrypted, users.full_name_encrypted),
+         phone_encrypted = COALESCE(EXCLUDED.phone_encrypted, users.phone_encrypted),
+         employer_name_encrypted = COALESCE(EXCLUDED.employer_name_encrypted, users.employer_name_encrypted),
+         personal_data_consent_version = COALESCE(EXCLUDED.personal_data_consent_version, users.personal_data_consent_version),
+         personal_data_consented_at = COALESCE(EXCLUDED.personal_data_consented_at, users.personal_data_consented_at),
+         personal_data_key_version = COALESCE(EXCLUDED.personal_data_key_version, users.personal_data_key_version),
+         updated_at = now()
        RETURNING id`,
-      [telegramUserRef, input.preferredLanguage],
+      [
+        telegramUserRef,
+        input.preferredLanguage,
+        encryptedPersonalProfile?.fullName,
+        encryptedPersonalProfile?.phone,
+        encryptedPersonalProfile?.employerName,
+        "PAYEASE-PERSONAL-DATA-v1",
+      ],
     );
     const existing = await client.query<{
       application_no: string;
@@ -2252,6 +2289,7 @@ const close = async (): Promise<void> => {
 };
 
 if (process.env.NODE_ENV !== "test") {
+  await runDatabaseMigrations(pool);
   const port = Number(process.env.PORT ?? 3100);
   const host = process.env.HOST ?? "127.0.0.1";
   app.listen({ host, port }).catch(async (error) => {

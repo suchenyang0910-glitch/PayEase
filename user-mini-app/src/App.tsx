@@ -336,6 +336,11 @@ export function App(): JSX.Element {
             currency: "USD",
           },
           tenorDays: term,
+          personalProfile: {
+            fullName: name.trim(),
+            phone: phone.trim(),
+            employerName: employer.trim(),
+          },
         }),
       });
       const payload = (await response.json()) as {

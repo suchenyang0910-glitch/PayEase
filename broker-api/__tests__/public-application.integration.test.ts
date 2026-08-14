@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createHash, createHmac } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { decryptPersonalProfile } from "../src/personal-profile.js";
 
 // Never infer a destructive test target from a developer's generic
 // DATABASE_URL. CI supplies this explicit, disposable PostgreSQL service.
@@ -103,6 +104,7 @@ integration("public applicant access", () => {
       "V0007__repayment_installment_dual_control.sql",
       "V0008__telegram_multi_bot_auth_sessions.sql",
       "V0009__protect_paid_repayment_installments.sql",
+      "V0010__encrypted_personal_profiles.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -110,6 +112,9 @@ integration("public applicant access", () => {
     }
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
+    process.env.PAYEASE_PII_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString(
+      "base64",
+    );
     brokerApi = await import("../src/server.js");
   });
 
@@ -220,6 +225,59 @@ integration("public applicant access", () => {
       headers: { cookie: otherCookie },
     });
     expect(otherUserView.statusCode).toBe(404);
+  });
+
+  it("stores submitted personal profile values as separate ciphertext", async () => {
+    const profile = {
+      fullName: "Integration Applicant",
+      phone: "+85512345678",
+      employerName: "Pilot Factory",
+    };
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "integration-user-private-profile",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+        personalProfile: profile,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    const stored = await database.query<{
+      full_name_encrypted: Buffer;
+      phone_encrypted: Buffer;
+      employer_name_encrypted: Buffer;
+      personal_data_consent_version: string;
+      personal_data_key_version: string;
+    }>(
+      `SELECT u.full_name_encrypted, u.phone_encrypted, u.employer_name_encrypted,
+              u.personal_data_consent_version, u.personal_data_key_version
+         FROM users u
+         JOIN applications p ON p.user_id = u.id
+        WHERE p.application_no = $1`,
+      [applicationNo],
+    );
+    const row = stored.rows[0]!;
+    expect(row.full_name_encrypted.toString("utf8")).not.toContain(
+      profile.fullName,
+    );
+    expect(row.phone_encrypted.toString("utf8")).not.toContain(profile.phone);
+    expect(row.employer_name_encrypted.toString("utf8")).not.toContain(
+      profile.employerName,
+    );
+    expect(
+      decryptPersonalProfile({
+        fullName: row.full_name_encrypted,
+        phone: row.phone_encrypted,
+        employerName: row.employer_name_encrypted,
+      }),
+    ).toEqual(profile);
+    expect(row.personal_data_consent_version).toBe("PAYEASE-PERSONAL-DATA-v1");
+    expect(row.personal_data_key_version).toBe("v1");
   });
 
   it("restores the same user's applications after authenticating through a second trusted bot", async () => {

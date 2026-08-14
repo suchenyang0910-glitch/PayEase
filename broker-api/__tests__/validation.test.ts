@@ -27,6 +27,27 @@ describe("controlled-pilot application validation", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("accepts complete personal details but rejects a malformed phone number", () => {
+    const valid = {
+      telegramUserRef: "local-user-private-profile",
+      preferredLanguage: "en",
+      requestedAmount: { amountMinor: "10000", currency: "USD" },
+      tenorDays: 30,
+      personalProfile: {
+        fullName: "Test Applicant",
+        phone: "+85512345678",
+        employerName: "Pilot Factory",
+      },
+    };
+    expect(createApplicationSchema.safeParse(valid).success).toBe(true);
+    expect(
+      createApplicationSchema.safeParse({
+        ...valid,
+        personalProfile: { ...valid.personalProfile, phone: "not-a-phone" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires distinct maker and checker roles for disbursement control", () => {
     expect(
       disbursementDualControlSchema.safeParse({

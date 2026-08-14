@@ -12,6 +12,16 @@ export const createApplicationSchema = z.object({
     currency: z.literal("USD"),
   }),
   tenorDays: z.number().int().min(7).max(180),
+  personalProfile: z
+    .object({
+      fullName: z.string().trim().min(1).max(120),
+      phone: z
+        .string()
+        .trim()
+        .regex(/^\+?[0-9][0-9 ()-]{5,31}$/),
+      employerName: z.string().trim().min(1).max(160),
+    })
+    .optional(),
 });
 
 export const telegramSessionSchema = z.object({

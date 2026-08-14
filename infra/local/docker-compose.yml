@@ -9,7 +9,6 @@ services:
       - "127.0.0.1:54329:5432"
     volumes:
       - broker_pgdata:/var/lib/postgresql/data
-      - ../../broker-platform/db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payease_local -d payease_broker_local"]
       interval: 5s

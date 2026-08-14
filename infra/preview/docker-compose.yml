@@ -10,7 +10,6 @@ services:
       POSTGRES_PASSWORD: ${PAYEASE_PREVIEW_POSTGRES_PASSWORD:?Set a VPS-local preview password}
     volumes:
       - payease-preview-postgres:/var/lib/postgresql/data
-      - ../../broker-platform/db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payease_preview -d payease_preview"]
       interval: 5s
@@ -38,6 +37,9 @@ services:
       PAYEASE_DEPLOYMENT_MODE: "controlled-preview"
       REQUIRE_TELEGRAM_AUTH: ${REQUIRE_TELEGRAM_AUTH:-false}
       TELEGRAM_BOTS_JSON: ${TELEGRAM_BOTS_JSON:-}
+      # A base64-encoded 32-byte AES key. It stays in the VPS-local env file;
+      # applications with personal details fail closed when it is absent.
+      PAYEASE_PII_ENCRYPTION_KEY: ${PAYEASE_PII_ENCRYPTION_KEY:-}
     ports:
       - "127.0.0.1:3100:3100"
 

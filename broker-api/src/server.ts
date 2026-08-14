@@ -1117,6 +1117,9 @@ app.post("/v1/local/applications", async (request, reply) => {
         personalDataConsentVersion: input.personalProfile
           ? "PAYEASE-PERSONAL-DATA-v1"
           : undefined,
+        personalDataConsentLanguage: input.personalProfile
+          ? input.preferredLanguage
+          : undefined,
       },
     );
     await client.query("COMMIT");

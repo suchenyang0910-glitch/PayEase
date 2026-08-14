@@ -347,6 +347,7 @@ integration("public applicant access", () => {
       tenorDays: 30,
       personalDataAndPhoneConsent: true,
       personalDataConsentVersion: "PAYEASE-PERSONAL-DATA-v1",
+      personalDataConsentLanguage: "en",
     };
     expect(submittedAudit.rows[0]!.payload_hash).toBe(
       createHash("sha256")

@@ -88,6 +88,28 @@ type TelegramEntryPoints = {
   entrypoints: unknown;
 };
 
+function trustedTelegramEntryPoint(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  const supportedHost = url.hostname === "t.me" || url.hostname === "www.t.me";
+  if (
+    url.protocol !== "https:" ||
+    !supportedHost ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    !/^\/[A-Za-z0-9_]{5,}(?:\/[A-Za-z0-9_]{1,64})?$/.test(url.pathname)
+  ) {
+    return undefined;
+  }
+  return url.toString();
+}
+
 function recoveryEntryPointLabel(
   language: LanguageCode,
   index: number,
@@ -534,13 +556,13 @@ export function App(): JSX.Element {
       );
       const payload = (await response.json()) as TelegramEntryPoints;
       if (!response.ok || !Array.isArray(payload.entrypoints)) return;
-      setRecoveryEntryPoints(
-        [...new Set(payload.entrypoints)].filter(
-          (entryPoint): entryPoint is string =>
-            typeof entryPoint === "string" &&
-            /^https:\/\/(?:www\.)?t\.me\//.test(entryPoint),
+      setRecoveryEntryPoints([
+        ...new Set(
+          payload.entrypoints
+            .map(trustedTelegramEntryPoint)
+            .filter((entryPoint): entryPoint is string => !!entryPoint),
         ),
-      );
+      ]);
     } catch {
       // Recovery text remains actionable even if the optional public directory
       // is temporarily unavailable.

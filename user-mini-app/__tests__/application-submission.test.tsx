@@ -228,6 +228,47 @@ describe("applicant submission", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("only displays validated Telegram recovery entry points", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "replayed-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: "UNAUTHENTICATED" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            entrypoints: [
+              "https://t.me/payease_recovery?startapp=apply",
+              "https://t.me.evil.example/payease_recovery",
+              "https://t.me/payease_recovery#redirect",
+              "javascript:alert('not-a-telegram-link')",
+              "https://evil.example/payease_recovery",
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole("alert");
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "https://t.me/payease_recovery?startapp=apply",
+    );
+  });
+
   it("does not show an unusable recovery link when the recovery directory is unavailable", async () => {
     Object.defineProperty(window, "Telegram", {
       configurable: true,

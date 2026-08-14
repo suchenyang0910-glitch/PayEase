@@ -16,6 +16,49 @@ type Identity = {
   preferredLanguage: "zh-CN" | "en" | "km";
   roles: string[];
 };
+type ReferredServiceCase = Readonly<{
+  caseNo: string;
+  applicationNo: string;
+  caseType: "SERVICE_QUERY" | "COMPLAINT";
+  applicantLanguage: LenderLanguage;
+  referredToLenderAt: string;
+}>;
+type ServiceCaseDetail = Readonly<
+  ReferredServiceCase & {
+    status: "OPEN" | "ACKNOWLEDGED" | "REFERRED_TO_LENDER" | "RESOLVED";
+    message: string;
+  }
+>;
+
+function isReferredServiceCaseQueue(
+  payload: unknown,
+): payload is { cases: ReferredServiceCase[] } {
+  if (!payload || typeof payload !== "object") return false;
+  const cases = (payload as { cases?: unknown }).cases;
+  return (
+    Array.isArray(cases) &&
+    cases.every(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as { caseNo?: unknown }).caseNo === "string" &&
+        typeof (entry as { applicationNo?: unknown }).applicationNo ===
+          "string",
+    )
+  );
+}
+
+function isServiceCaseDetail(payload: unknown): payload is ServiceCaseDetail {
+  return (
+    Boolean(payload) &&
+    typeof payload === "object" &&
+    typeof (payload as { caseNo?: unknown }).caseNo === "string" &&
+    typeof (payload as { applicationNo?: unknown }).applicationNo ===
+      "string" &&
+    typeof (payload as { message?: unknown }).message === "string" &&
+    typeof (payload as { status?: unknown }).status === "string"
+  );
+}
 const shell = {
   maxWidth: 960,
   margin: "0 auto",
@@ -164,6 +207,16 @@ export function App(): JSX.Element {
   const [pendingIdempotencyKeys, setPendingIdempotencyKeys] = useState<
     Record<string, string>
   >({});
+  const [referredServiceCases, setReferredServiceCases] = useState<
+    ReferredServiceCase[]
+  >([]);
+  const [selectedServiceCase, setSelectedServiceCase] =
+    useState<ServiceCaseDetail>();
+  const [serviceCaseReasonCode, setServiceCaseReasonCode] = useState(
+    "LENDER_RESPONSE_RECORDED",
+  );
+  const [serviceCaseBusy, setServiceCaseBusy] = useState(false);
+  const [serviceCaseNotice, setServiceCaseNotice] = useState("");
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (r) => {
@@ -315,6 +368,87 @@ export function App(): JSX.Element {
       setIdentity((current) =>
         current ? { ...current, preferredLanguage } : current,
       );
+  };
+  const hasLenderRole = identity.roles.some((role) =>
+    role.startsWith("LENDER_"),
+  );
+  const loadReferredServiceCases = async () => {
+    setServiceCaseBusy(true);
+    setServiceCaseNotice("");
+    try {
+      const response = await api("/v1/local/service-cases/referred-to-lender");
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (!response.ok || !isReferredServiceCaseQueue(payload)) {
+        setServiceCaseNotice(copy.complaintLoadFailed);
+        return;
+      }
+      setReferredServiceCases(payload.cases);
+    } finally {
+      setServiceCaseBusy(false);
+    }
+  };
+  const viewServiceCase = async (caseNo: string) => {
+    setServiceCaseBusy(true);
+    setServiceCaseNotice("");
+    try {
+      const response = await api(
+        `/v1/local/service-cases/${encodeURIComponent(caseNo)}`,
+      );
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (!response.ok || !isServiceCaseDetail(payload)) {
+        setServiceCaseNotice(copy.complaintLoadFailed);
+        return;
+      }
+      setSelectedServiceCase(payload);
+    } finally {
+      setServiceCaseBusy(false);
+    }
+  };
+  const resolveServiceCase = async () => {
+    if (!selectedServiceCase) return;
+    setServiceCaseBusy(true);
+    setServiceCaseNotice("");
+    try {
+      const response = await api(
+        `/v1/local/service-cases/${encodeURIComponent(selectedServiceCase.caseNo)}/lender-resolution`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reasonCode: serviceCaseReasonCode }),
+        },
+      );
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (
+        !response.ok ||
+        !payload ||
+        typeof payload !== "object" ||
+        (payload as { status?: unknown }).status !== "RESOLVED"
+      ) {
+        setServiceCaseNotice(copy.complaintResolveFailed);
+        return;
+      }
+      setSelectedServiceCase((current) =>
+        current ? { ...current, status: "RESOLVED" } : current,
+      );
+      setServiceCaseNotice(`${copy.recorded}: ${selectedServiceCase.caseNo}`);
+      await loadReferredServiceCases();
+    } finally {
+      setServiceCaseBusy(false);
+    }
   };
   return (
     <main style={shell}>
@@ -475,6 +609,77 @@ export function App(): JSX.Element {
           </pre>
         ) : null}
       </section>
+      {hasLenderRole ? (
+        <section style={card} aria-label={copy.complaintResolution}>
+          <h2>{copy.complaintResolution}</h2>
+          <p>{copy.complaintResolutionDescription}</p>
+          <button
+            disabled={serviceCaseBusy}
+            onClick={() => void loadReferredServiceCases()}
+          >
+            {serviceCaseBusy ? "…" : copy.refreshComplaintQueue}
+          </button>
+          {referredServiceCases.length === 0 ? (
+            <p>{copy.noReferredComplaints}</p>
+          ) : (
+            <ul>
+              {referredServiceCases.map((serviceCase) => (
+                <li key={serviceCase.caseNo} style={{ marginTop: 10 }}>
+                  <button
+                    disabled={serviceCaseBusy}
+                    onClick={() => void viewServiceCase(serviceCase.caseNo)}
+                  >
+                    {copy.viewComplaint}: {serviceCase.caseNo}
+                  </button>{" "}
+                  <small>
+                    {serviceCase.caseType} · {serviceCase.applicationNo}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          )}
+          {selectedServiceCase ? (
+            <section style={{ ...card, marginTop: 16, background: "#f8fafc" }}>
+              <h3>{selectedServiceCase.caseNo}</h3>
+              <p>
+                <strong>{copy.complaintContentAudited}</strong>
+              </p>
+              <p style={{ whiteSpace: "pre-wrap" }}>
+                {selectedServiceCase.message}
+              </p>
+              {selectedServiceCase.status === "RESOLVED" ? (
+                <p role="status">{copy.recorded}</p>
+              ) : (
+                <>
+                  <label>
+                    {copy.finalResolutionReasonCode}
+                    <input
+                      value={serviceCaseReasonCode}
+                      onChange={(event) =>
+                        setServiceCaseReasonCode(
+                          event.target.value.toUpperCase(),
+                        )
+                      }
+                      pattern="[A-Z0-9_]{3,64}"
+                      required
+                    />
+                  </label>
+                  <button
+                    disabled={
+                      serviceCaseBusy ||
+                      !/^[A-Z0-9_]{3,64}$/.test(serviceCaseReasonCode)
+                    }
+                    onClick={() => void resolveServiceCase()}
+                  >
+                    {serviceCaseBusy ? "…" : copy.resolveComplaint}
+                  </button>
+                </>
+              )}
+            </section>
+          ) : null}
+          {serviceCaseNotice ? <p role="status">{serviceCaseNotice}</p> : null}
+        </section>
+      ) : null}
     </main>
   );
 }

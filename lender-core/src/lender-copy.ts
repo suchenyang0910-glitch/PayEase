@@ -43,11 +43,80 @@ export type LenderCopy = Readonly<{
   blocked: string;
   actionFailed: string;
   invalidFinalReviewTerms: string;
+  complaintResolution: string;
+  complaintResolutionDescription: string;
+  refreshComplaintQueue: string;
+  noReferredComplaints: string;
+  viewComplaint: string;
+  finalResolutionReasonCode: string;
+  resolveComplaint: string;
+  complaintContentAudited: string;
+  complaintLoadFailed: string;
+  complaintResolveFailed: string;
   actions: Readonly<Record<LenderActionKey, string>>;
 }>;
 
+type ComplaintCopy = Pick<
+  LenderCopy,
+  | "complaintResolution"
+  | "complaintResolutionDescription"
+  | "refreshComplaintQueue"
+  | "noReferredComplaints"
+  | "viewComplaint"
+  | "finalResolutionReasonCode"
+  | "resolveComplaint"
+  | "complaintContentAudited"
+  | "complaintLoadFailed"
+  | "complaintResolveFailed"
+>;
+
+const COMPLAINT_COPY: Readonly<Record<LenderLanguage, ComplaintCopy>> = {
+  en: {
+    complaintResolution: "Customer complaints referred by the broker",
+    complaintResolutionDescription:
+      "Read the encrypted case only when needed. The licensed lender owns the final complaint decision and its recorded reason.",
+    refreshComplaintQueue: "Refresh referred cases",
+    noReferredComplaints: "No complaints are currently referred to the lender.",
+    viewComplaint: "View case details",
+    finalResolutionReasonCode: "Final resolution reason code",
+    resolveComplaint: "Record final resolution",
+    complaintContentAudited: "Case content (access is audited)",
+    complaintLoadFailed: "Complaint details are currently unavailable.",
+    complaintResolveFailed:
+      "The complaint could not be resolved. No final decision was recorded.",
+  },
+  "zh-CN": {
+    complaintResolution: "助贷转交的客户投诉",
+    complaintResolutionDescription:
+      "仅在处理需要时查看加密工单。最终投诉决定及原因由持牌机构负责并留痕。",
+    refreshComplaintQueue: "刷新已转交工单",
+    noReferredComplaints: "当前没有转交给持牌机构的投诉。",
+    viewComplaint: "查看工单详情",
+    finalResolutionReasonCode: "最终处理原因代码",
+    resolveComplaint: "记录最终处理结果",
+    complaintContentAudited: "工单内容（访问已留痕）",
+    complaintLoadFailed: "暂时无法读取投诉详情。",
+    complaintResolveFailed: "暂时无法完成投诉处理，未记录最终决定。",
+  },
+  km: {
+    complaintResolution: "បណ្តឹងអតិថិជនដែលបានបញ្ជូនដោយក្រុមសេវាកម្ម",
+    complaintResolutionDescription:
+      "សូមមើលខ្លឹមសារដែលបានអ៊ិនគ្រីបតែនៅពេលចាំបាច់។ ស្ថាប័នមានអាជ្ញាប័ណ្ណទទួលខុសត្រូវចំពោះសេចក្តីសម្រេចចុងក្រោយ និងហេតុផលដែលបានកត់ត្រា។",
+    refreshComplaintQueue: "ផ្ទុកបណ្តឹងដែលបានបញ្ជូនឡើងវិញ",
+    noReferredComplaints: "បច្ចុប្បន្នមិនមានបណ្តឹងដែលបានបញ្ជូនទៅស្ថាប័នទេ។",
+    viewComplaint: "មើលព័ត៌មានលម្អិតសំណើ",
+    finalResolutionReasonCode: "កូដមូលហេតុនៃការដោះស្រាយចុងក្រោយ",
+    resolveComplaint: "កត់ត្រាការដោះស្រាយចុងក្រោយ",
+    complaintContentAudited: "ខ្លឹមសារសំណើ (ការចូលប្រើត្រូវបានកត់ត្រា)",
+    complaintLoadFailed: "មិនអាចអានព័ត៌មានលម្អិតនៃបណ្តឹងបានទេ។",
+    complaintResolveFailed:
+      "មិនអាចដោះស្រាយបណ្តឹងបានទេ ហើយមិនមានកំណត់ត្រាសេចក្តីសម្រេចចុងក្រោយទេ។",
+  },
+};
+
 export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   en: {
+    ...COMPLAINT_COPY.en,
     title: "PayEase lender console",
     checking: "Checking secure session…",
     signInDescription: "Sign in to use controlled lender operations.",
@@ -94,6 +163,7 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     },
   },
   "zh-CN": {
+    ...COMPLAINT_COPY["zh-CN"],
     title: "PayEase 持牌机构后台",
     checking: "正在验证安全会话…",
     signInDescription: "登录后使用受控的持牌机构操作。",
@@ -185,5 +255,6 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
       repaymentMaker: "កត់ត្រាការអនុម័តអ្នករៀបចំកត់ត្រាសង",
       repaymentChecker: "បញ្ជាក់ការកត់ត្រាសង (គណនីផ្សេង)",
     },
+    ...COMPLAINT_COPY.km,
   },
 };

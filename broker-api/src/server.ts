@@ -2277,6 +2277,34 @@ app.get("/v1/local/service-cases/open", async (request, reply) => {
   };
 });
 
+app.get(
+  "/v1/local/service-cases/referred-to-lender",
+  async (request, reply) => {
+    if (!requireLenderRole(request, reply)) return;
+    const cases = await pool.query<{
+      case_no: string;
+      application_no: string;
+      case_type: "SERVICE_QUERY" | "COMPLAINT";
+      applicant_language: "km" | "en" | "zh-CN";
+      referred_to_lender_at: string;
+    }>(
+      `SELECT c.case_no, a.application_no, c.case_type, c.applicant_language, c.referred_to_lender_at
+         FROM applicant_service_cases c JOIN applications a ON a.id = c.application_id
+        WHERE c.status = 'REFERRED_TO_LENDER'
+        ORDER BY c.referred_to_lender_at ASC`,
+    );
+    return {
+      cases: cases.rows.map((serviceCase) => ({
+        caseNo: serviceCase.case_no,
+        applicationNo: serviceCase.application_no,
+        caseType: serviceCase.case_type,
+        applicantLanguage: serviceCase.applicant_language,
+        referredToLenderAt: serviceCase.referred_to_lender_at,
+      })),
+    };
+  },
+);
+
 app.get("/v1/local/service-cases/:caseNo", async (request, reply) => {
   if (!requireServiceCaseReadRole(request, reply)) return;
   const params = z.object({ caseNo: z.string().min(1) }).parse(request.params);

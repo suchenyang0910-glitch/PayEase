@@ -29,6 +29,13 @@ describe("lender console translations", () => {
       expect(copy.sessionExpired).not.toHaveLength(0);
       expect(copy.actionFailed).not.toHaveLength(0);
       expect(copy.manualApproval).not.toHaveLength(0);
+      expect(copy.complaintResolution).not.toHaveLength(0);
+      expect(copy.complaintResolutionDescription).not.toHaveLength(0);
+      expect(copy.refreshComplaintQueue).not.toHaveLength(0);
+      expect(copy.noReferredComplaints).not.toHaveLength(0);
+      expect(copy.viewComplaint).not.toHaveLength(0);
+      expect(copy.finalResolutionReasonCode).not.toHaveLength(0);
+      expect(copy.resolveComplaint).not.toHaveLength(0);
       for (const key of actionKeys)
         expect(copy.actions[key]).not.toHaveLength(0);
     }

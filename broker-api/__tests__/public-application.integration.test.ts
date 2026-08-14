@@ -1682,6 +1682,15 @@ integration("public applicant access", () => {
     expect(referred.json()).toEqual({ caseNo, status: "REFERRED_TO_LENDER" });
 
     const lenderCookie = await lenderCreditOfficerCookie(database);
+    const lenderQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/service-cases/referred-to-lender",
+      headers: { cookie: lenderCookie },
+    });
+    expect(lenderQueue.statusCode).toBe(200);
+    expect(lenderQueue.json()).toMatchObject({
+      cases: [{ caseNo, applicationNo, caseType: "COMPLAINT" }],
+    });
     const lenderDetail = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/service-cases/${caseNo}`,

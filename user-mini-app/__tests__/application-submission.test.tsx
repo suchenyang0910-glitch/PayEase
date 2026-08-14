@@ -216,6 +216,85 @@ describe("applicant submission", () => {
     ).toBeNull();
   });
 
+  it("opens the existing application when a second submission is blocked", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: "REAPPLICATION_ACTIVE_APPLICATION_EXISTS",
+            applicationNo: "APP-EXISTING-001",
+            currentStatus: "BROKER_REVIEW",
+          }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            application: {
+              applicationNo: "APP-EXISTING-001",
+              status: "BROKER_REVIEW",
+              requestedAmountMinor: "5000",
+              currency: "USD",
+              tenorDays: 30,
+              approvedAmountMinor: null,
+              rejectionConditionResolved: false,
+              supplementRequested: false,
+            },
+            terms: null,
+            repayment: {
+              periodCount: 0,
+              paidPeriods: 0,
+              unpaidPeriods: 0,
+              overduePeriods: 0,
+              totalDueMinor: "0",
+              totalPaidMinor: "0",
+              outstandingMinor: "0",
+              overdueOutstandingMinor: "0",
+              nextInstallment: null,
+              installments: [],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Test Applicant" },
+    });
+    fireEvent.change(screen.getByLabelText("Mobile number"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(screen.getByLabelText("Employer"), {
+      target: { value: "Pilot Factory" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /personal-data authorization and privacy notice/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /submit for broker review/i }),
+    );
+
+    expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
+    expect(screen.getByText("APP-EXISTING-001")).toBeVisible();
+    expect(
+      screen.queryByText(
+        "We could not submit this application. Please try again.",
+      ),
+    ).toBeNull();
+    expect(window.location.search).toBe("?application=APP-EXISTING-001");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("renders the approved terms and repayment dashboard returned for the applicant", async () => {
     window.history.replaceState(null, "", "/?application=APP-LOAN-001");
     const fetchMock = vi.fn().mockResolvedValue(

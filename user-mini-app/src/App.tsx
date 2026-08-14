@@ -369,6 +369,25 @@ export function App(): JSX.Element {
         applicationNo?: string;
         code?: string;
       };
+      if (
+        response.status === 409 &&
+        payload.applicationNo &&
+        [
+          "REAPPLICATION_ACTIVE_APPLICATION_EXISTS",
+          "REAPPLICATION_REJECTION_CONDITION_UNRESOLVED",
+        ].includes(payload.code ?? "")
+      ) {
+        // The API deliberately prevents a second active application. Its
+        // response identifies the existing record, so take the applicant to
+        // that record rather than showing a misleading generic failure.
+        window.history.replaceState(
+          null,
+          "",
+          `?application=${encodeURIComponent(payload.applicationNo)}`,
+        );
+        await checkStatus(payload.applicationNo);
+        return;
+      }
       if (!response.ok || !payload.applicationNo)
         throw new Error(payload.code ?? "SUBMISSION_FAILED");
       setApplicationNo(payload.applicationNo);

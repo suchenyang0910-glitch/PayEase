@@ -188,11 +188,30 @@ integration("public applicant access", () => {
     });
     expect(valid.statusCode).toBe(200);
     expect(valid.headers["set-cookie"]).toContain("HttpOnly");
+    const sessionCookie = String(valid.headers["set-cookie"]).split(";")[0]!;
+
+    const languagePreference = await brokerApi.app.inject({
+      method: "PUT",
+      url: "/v1/local/auth/me/preferred-language",
+      headers: { cookie: sessionCookie },
+      payload: { preferredLanguage: "zh-CN" },
+    });
+    expect(languagePreference.statusCode).toBe(200);
+    expect(languagePreference.json()).toEqual({ preferredLanguage: "zh-CN" });
+    const persistedIdentity = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: sessionCookie },
+    });
+    expect(persistedIdentity.json()).toMatchObject({
+      loginName: "login-boundary-test",
+      preferredLanguage: "zh-CN",
+    });
 
     const logout = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/auth/logout",
-      headers: { cookie: String(valid.headers["set-cookie"]).split(";")[0]! },
+      headers: { cookie: sessionCookie },
     });
     expect(logout.statusCode).toBe(204);
     expect(logout.headers["set-cookie"]).toContain("Max-Age=0");

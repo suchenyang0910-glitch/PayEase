@@ -54,7 +54,22 @@ function SignIn({
       if (!login.ok) return setError(copy.loginFailed);
       const me = await api("/v1/local/auth/me");
       if (!me.ok) return setError(copy.sessionFailed);
-      complete((await me.json()) as Identity);
+      let identity = (await me.json()) as Identity;
+      if (identity.preferredLanguage !== language) {
+        try {
+          const preference = await api("/v1/local/auth/me/preferred-language", {
+            method: "PUT",
+            body: JSON.stringify({ preferredLanguage: language }),
+          });
+          if (preference.ok) {
+            identity = { ...identity, preferredLanguage: language };
+          }
+        } catch {
+          // A preference update must not turn a completed authentication into
+          // a perceived sign-in failure.
+        }
+      }
+      complete(identity);
     } catch {
       setError(copy.sessionFailed);
     }

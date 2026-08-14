@@ -975,6 +975,11 @@ integration("public applicant access", () => {
       botToken: "987654321:integration-bot-token-bravo-123456",
       entryUrl: "https://t.me/payease_recovery?startapp=apply",
     };
+    const botC = {
+      botId: "564738291",
+      botToken: "564738291:integration-bot-token-charlie-123456",
+      entryUrl: "https://t.me/payease_contingency?startapp=apply",
+    };
     process.env.REQUIRE_TELEGRAM_AUTH = "true";
     try {
       process.env.TELEGRAM_BOTS_JSON = "[]";
@@ -1214,11 +1219,21 @@ integration("public applicant access", () => {
       });
 
       // Disabling a compromised Bot invalidates sessions that it issued.  The
-      // fallback Bot remains able to access the same Telegram-ID-owned record.
+      // two remaining Bots keep the production recovery topology intact and
+      // can access the same Telegram-ID-owned record.
       process.env.TELEGRAM_BOTS_JSON = JSON.stringify([
         { ...botA, enabled: false },
         { ...botB, enabled: true },
+        { ...botC, enabled: true },
       ]);
+      const incidentRecoveryEntryPoints = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/telegram-entrypoints",
+      });
+      expect(incidentRecoveryEntryPoints.statusCode).toBe(200);
+      expect(incidentRecoveryEntryPoints.json()).toEqual({
+        entrypoints: [botB.entryUrl, botC.entryUrl],
+      });
       const disabledBotSession = await brokerApi.app.inject({
         method: "GET",
         url: "/v1/local/public/applications",

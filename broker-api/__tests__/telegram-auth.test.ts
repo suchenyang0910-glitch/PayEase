@@ -24,12 +24,12 @@ function signedInitData(botToken: string): string {
 }
 
 describe("Telegram multi-bot Mini App verification", () => {
-  it("accepts initData from any enabled trusted bot and normalizes the user", () => {
+  it("accepts initData from either enabled trusted bot and normalizes the user", () => {
     const firstToken = "a".repeat(24);
     const secondToken = "b".repeat(24);
     const bots = configuredTelegramBots(
       JSON.stringify([
-        { botId: "111111111", botToken: firstToken, enabled: false },
+        { botId: "111111111", botToken: firstToken, enabled: true },
         { botId: "222222222", botToken: secondToken, enabled: true },
       ]),
     );
@@ -45,11 +45,21 @@ describe("Telegram multi-bot Mini App verification", () => {
     });
     expect(
       verifyTelegramMiniAppInitData(
+        signedInitData(secondToken),
+        bots,
+        2000000001,
+      ),
+    ).toMatchObject({ telegramUserRef: "telegram-123456789" });
+    expect(
+      verifyTelegramMiniAppInitData(
         signedInitData(firstToken),
         bots,
         2000000001,
       ),
-    ).toBeUndefined();
+    ).toMatchObject({
+      telegramUserRef: "telegram-123456789",
+      authenticatedBotId: "111111111",
+    });
   });
 
   it("rejects stale or altered initData", () => {
@@ -67,5 +77,27 @@ describe("Telegram multi-bot Mini App verification", () => {
         2000000001,
       ),
     ).toBeUndefined();
+    expect(
+      verifyTelegramMiniAppInitData(signedInitData(token), bots, 1999999900),
+    ).toBeUndefined();
+    expect(
+      verifyTelegramMiniAppInitData(
+        "auth_date=2000000000&user=%7B%7D&hash=bad",
+        bots,
+        2000000001,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("fails closed when bot configuration is malformed or duplicates a bot identity", () => {
+    expect(() => configuredTelegramBots("not-json")).toThrow();
+    expect(() =>
+      configuredTelegramBots(
+        JSON.stringify([
+          { botId: "555555555", botToken: "d".repeat(24) },
+          { botId: "555555555", botToken: "e".repeat(24) },
+        ]),
+      ),
+    ).toThrow("unique");
   });
 });

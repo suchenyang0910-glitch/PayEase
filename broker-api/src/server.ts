@@ -26,6 +26,12 @@ import {
 } from "./validation.js";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import {
+  buildRepaymentSchedule,
+  formatApplicantLoanSummary,
+  summarizeRepaymentSchedule,
+  type RepaymentScheduleItem,
+} from "./repayment.js";
+import {
   configuredTelegramBots,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
@@ -330,27 +336,78 @@ async function createRepaymentSchedule(
     [applicationId],
   );
   if (existing.rowCount) return;
-  const total = BigInt(term.total_repayable_minor);
-  const count = BigInt(term.installment_count);
-  const base = total / count;
-  const remainder = total % count;
-  const firstDue = new Date(`${term.first_due_date}T00:00:00.000Z`);
-  for (let index = 1; index <= term.installment_count; index += 1) {
-    const due = new Date(firstDue);
-    due.setUTCDate(due.getUTCDate() + (index - 1) * 30);
-    const amountDue =
-      base + (index === term.installment_count ? remainder : 0n);
+  for (const installment of buildRepaymentSchedule(
+    term.total_repayable_minor,
+    term.installment_count,
+    term.first_due_date,
+  )) {
     await client.query(
       `INSERT INTO repayment_installments (application_id, installment_no, due_date, amount_due_minor)
        VALUES ($1, $2, $3, $4)`,
       [
         applicationId,
-        index,
-        due.toISOString().slice(0, 10),
-        amountDue.toString(),
+        installment.installmentNo,
+        installment.dueDate,
+        installment.amountDueMinor,
       ],
     );
   }
+}
+
+async function loadLoanDetails(applicationId: string): Promise<{
+  terms: null | {
+    approvedAmountMinor: string;
+    serviceFeeMinor: string;
+    totalRepayableMinor: string;
+    installmentCount: number;
+    firstDueDate: string;
+  };
+  repayment: ReturnType<typeof summarizeRepaymentSchedule>;
+}> {
+  const terms = await pool.query<{
+    approved_amount_minor: string;
+    service_fee_minor: string;
+    total_repayable_minor: string;
+    installment_count: number;
+    first_due_date: string;
+  }>(
+    `SELECT approved_amount_minor::text, service_fee_minor::text,
+            total_repayable_minor::text, installment_count, first_due_date::text
+       FROM loan_terms WHERE application_id = $1`,
+    [applicationId],
+  );
+  const installments = await pool.query<{
+    installment_no: number;
+    due_date: string;
+    amount_due_minor: string;
+    amount_paid_minor: string;
+    status: "PENDING" | "PAID";
+  }>(
+    `SELECT installment_no, due_date::text, amount_due_minor::text,
+            amount_paid_minor::text, status
+       FROM repayment_installments WHERE application_id = $1 ORDER BY installment_no ASC`,
+    [applicationId],
+  );
+  const schedule: RepaymentScheduleItem[] = installments.rows.map((item) => ({
+    installmentNo: item.installment_no,
+    dueDate: item.due_date,
+    amountDueMinor: item.amount_due_minor,
+    amountPaidMinor: item.amount_paid_minor,
+    status: item.status,
+  }));
+  const term = terms.rows[0];
+  return {
+    terms: term
+      ? {
+          approvedAmountMinor: term.approved_amount_minor,
+          serviceFeeMinor: term.service_fee_minor,
+          totalRepayableMinor: term.total_repayable_minor,
+          installmentCount: term.installment_count,
+          firstDueDate: term.first_due_date,
+        }
+      : null,
+    repayment: summarizeRepaymentSchedule(schedule),
+  };
 }
 
 app.get("/health", async () => {
@@ -906,7 +963,20 @@ app.get(
     if (!result.rowCount) {
       return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
     }
-    return result.rows[0];
+    const application = result.rows[0]!;
+    const loanDetails = await loadLoanDetails(application.id);
+    return formatApplicantLoanSummary(
+      {
+        applicationNo: application.application_no,
+        status: application.status,
+        requestedAmountMinor: application.requested_amount_minor,
+        currency: application.currency,
+        tenorDays: application.tenor_days,
+        approvedAmountMinor: application.approved_amount_minor,
+      },
+      loanDetails.terms,
+      loanDetails.repayment,
+    );
   },
 );
 
@@ -915,50 +985,16 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
     .object({ applicationNo: z.string().min(1) })
     .parse(request.params);
   const result = await pool.query(
-    `SELECT application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, created_at
+    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, created_at
      FROM applications WHERE application_no = $1`,
     [params.applicationNo],
   );
   if (result.rowCount === 0)
     return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
   const application = result.rows[0]!;
-  const terms = await pool.query<{
-    approved_amount_minor: string;
-    service_fee_minor: string;
-    total_repayable_minor: string;
-    installment_count: number;
-    first_due_date: string;
-  }>(
-    `SELECT approved_amount_minor::text, service_fee_minor::text,
-            total_repayable_minor::text, installment_count, first_due_date::text
-       FROM loan_terms WHERE application_id = $1`,
-    [application.id],
-  );
-  const installments = await pool.query<{
-    installment_no: number;
-    due_date: string;
-    amount_due_minor: string;
-    amount_paid_minor: string;
-    status: "PENDING" | "PAID";
-  }>(
-    `SELECT installment_no, due_date::text, amount_due_minor::text,
-            amount_paid_minor::text, status
-       FROM repayment_installments WHERE application_id = $1 ORDER BY installment_no ASC`,
-    [application.id],
-  );
-  const schedule = installments.rows;
-  const paidPeriods = schedule.filter((item) => item.status === "PAID").length;
-  const totalDueMinor = schedule.reduce(
-    (total, item) => total + BigInt(item.amount_due_minor),
-    0n,
-  );
-  const totalPaidMinor = schedule.reduce(
-    (total, item) => total + BigInt(item.amount_paid_minor),
-    0n,
-  );
-  const nextInstallment = schedule.find((item) => item.status === "PENDING");
-  return {
-    application: {
+  const loanDetails = await loadLoanDetails(application.id);
+  return formatApplicantLoanSummary(
+    {
       applicationNo: application.application_no,
       status: application.status,
       requestedAmountMinor: application.requested_amount_minor,
@@ -966,38 +1002,9 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
     },
-    terms: terms.rows[0]
-      ? {
-          approvedAmountMinor: terms.rows[0].approved_amount_minor,
-          serviceFeeMinor: terms.rows[0].service_fee_minor,
-          totalRepayableMinor: terms.rows[0].total_repayable_minor,
-          installmentCount: terms.rows[0].installment_count,
-          firstDueDate: terms.rows[0].first_due_date,
-        }
-      : null,
-    repayment: {
-      periodCount: schedule.length,
-      paidPeriods,
-      unpaidPeriods: schedule.length - paidPeriods,
-      totalDueMinor: totalDueMinor.toString(),
-      totalPaidMinor: totalPaidMinor.toString(),
-      outstandingMinor: (totalDueMinor - totalPaidMinor).toString(),
-      nextInstallment: nextInstallment
-        ? {
-            installmentNo: nextInstallment.installment_no,
-            dueDate: nextInstallment.due_date,
-            amountDueMinor: nextInstallment.amount_due_minor,
-          }
-        : null,
-      installments: schedule.map((item) => ({
-        installmentNo: item.installment_no,
-        dueDate: item.due_date,
-        amountDueMinor: item.amount_due_minor,
-        amountPaidMinor: item.amount_paid_minor,
-        status: item.status,
-      })),
-    },
-  };
+    loanDetails.terms,
+    loanDetails.repayment,
+  );
 });
 
 app.post(

@@ -14,9 +14,9 @@ Bot 签名、且在有效期内的 Mini App `initData`。用户记录以 Telegra
 ## 2. 多 Bot 配置
 
 在 API 服务的受控部署环境配置 `TELEGRAM_BOTS_JSON`。生产启动要求至少配置两个不同
-Bot，且至少一个处于 `enabled: true`；**每个已启用 Bot 必须有合法的公开 `entryUrl`**，否则
-预检和 API 启动都会失败。事故期间可停用其中一个，同时保留健康入口。每个 Bot 都应设置
-同一个 PayEase Mini App URL。
+Bot，且**至少两个 Bot 必须同时处于 `enabled: true`**；**每个已启用 Bot 必须有合法的公开 `entryUrl`**，否则
+预检和 API 启动都会失败。事故期间必须先补齐替换 Bot，才可停用其中一个；每个 Bot 都应
+设置同一个 PayEase Mini App URL。
 
 ```json
 [
@@ -58,16 +58,19 @@ Bot 时，登录接口返回服务不可用，而不能回退到客户端提供�
 ## 3. Bot 故障或疑似泄露时的操作
 
 1. 在 Telegram BotFather 中停止受影响 Bot 的入口或轮换 Token；不要在聊天工具中传播新 Token。
-2. 将该 Bot 在 `TELEGRAM_BOTS_JSON` 中改为 `enabled: false`，保留至少一个健康备用 Bot。
-3. 通过受控发布更新 API 配置。API 会在每个用户请求重新检查 Bot allowlist：被停用 Bot
+2. **先创建并验证替换 Bot**：为其配置同一 PayEase Mini App URL、公开 `entryUrl`，并以测试
+   Telegram 账号完成登录验证。将它作为 `enabled: true` 加入 `TELEGRAM_BOTS_JSON`。
+3. 再将受影响 Bot 在 `TELEGRAM_BOTS_JSON` 中改为 `enabled: false`；发布后的配置必须始终保留
+   **至少两个健康且启用的 Bot**。禁止以只剩一个启用 Bot 的配置重启生产 API。
+4. 通过受控发布更新 API 配置。API 会在每个用户请求重新检查 Bot allowlist：被停用 Bot
    签发的既有会话立即不可用；用户必须从健康 Bot 获取新的 `initData` 并重新登录。
    如果健康 Bot 配置了 `entryUrl`，失效页面会显示该入口；停用 Bot 的入口不会显示。
-4. 以一个测试 Telegram 账号验证：
+5. 以一个测试 Telegram 账号验证：
    - 受影响 Bot 的旧会话访问用户 API 返回 `401`；
    - 备用 Bot 可登录；
    - 同一 Telegram user ID 仍能看到原有申请和账单；
    - 旧 `initData` 重放返回 `409`。
-5. 记录安全事件、影响范围、处置时间、Bot ID（不记录 Token）和验证结果；按安全基线启动密钥泄露处置。
+6. 记录安全事件、影响范围、处置时间、Bot ID（不记录 Token）和验证结果；按安全基线启动密钥泄露处置。
 
 不要删除用户记录来处理 Bot 事故。Bot 是认证入口，不是用户资料的主键。
 
@@ -96,7 +99,7 @@ PII 活跃密钥版本与 `ready` 状态，**不会**输出 Token 或加密密�
 
 当 Telegram 认证开启时，预检同时要求：
 
-- 至少两个不同的已配置 Bot，且每个已启用 Bot 都有合法的公开 `entryUrl`；
+- 至少两个不同且同时启用的 Bot，且每个已启用 Bot 都有合法的公开 `entryUrl`；
 - `PAYEASE_PII_ENCRYPTION_KEY`，或当前
   `PAYEASE_PII_ENCRYPTION_KEY_VERSION` 在 `PAYEASE_PII_ENCRYPTION_KEYS_JSON`
   中对应的有效 Base64 32-byte AES-256-GCM 密钥。

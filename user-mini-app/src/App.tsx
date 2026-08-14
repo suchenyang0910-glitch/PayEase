@@ -399,6 +399,9 @@ export function App(): JSX.Element {
 
   async function recoverApplicantSession() {
     setApplicantSession(false);
+    // Do not keep a link from an earlier recovery lookup: a Bot may have been
+    // disabled between requests, and only the latest directory is trustworthy.
+    setRecoveryEntryPoints([]);
     setError(applicantSessionRecoveryMessage(language));
     try {
       const response = await applicantRequest(

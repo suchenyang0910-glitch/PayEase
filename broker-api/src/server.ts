@@ -1548,9 +1548,16 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
 // This remains readable without an applicant session so a person whose Bot
 // was disabled can still navigate to another enabled PayEase Bot. It exposes
 // only configured public t.me entry URLs, never a Bot ID or token.
-app.get("/v1/local/public/telegram-entrypoints", async () => ({
-  entrypoints: enabledTelegramBotEntryUrls(),
-}));
+app.get("/v1/local/public/telegram-entrypoints", async (_request, reply) => {
+  const entrypoints = enabledTelegramBotEntryUrls();
+  // Do not present a false-success recovery response when operations has
+  // disabled every Bot. The client can then show its generic Telegram support
+  // instruction rather than an empty list that looks like a valid fallback.
+  if (entrypoints.length === 0) {
+    return reply.code(503).send({ code: "TELEGRAM_RECOVERY_UNAVAILABLE" });
+  }
+  return { entrypoints };
+});
 
 app.post(
   "/v1/local/public/telegram-sessions/logout",

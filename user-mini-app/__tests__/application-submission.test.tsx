@@ -147,6 +147,32 @@ describe("applicant submission", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("does not show an unusable recovery link when the recovery directory is unavailable", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "replayed-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ code: "TELEGRAM_RECOVERY_UNAVAILABLE" }),
+          {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Telegram");
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("renews an authenticated applicant session only after continued interaction", async () => {
     const startedAt = 1_700_000_000_000;
     const now = vi.spyOn(Date, "now").mockReturnValue(startedAt);

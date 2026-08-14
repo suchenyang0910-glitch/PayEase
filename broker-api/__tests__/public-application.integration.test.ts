@@ -921,6 +921,14 @@ integration("public applicant access", () => {
       expect(missingBotConfig.json()).toEqual({
         code: "TELEGRAM_AUTH_NOT_CONFIGURED",
       });
+      const unavailableRecoveryEntryPoints = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/telegram-entrypoints",
+      });
+      expect(unavailableRecoveryEntryPoints.statusCode).toBe(503);
+      expect(unavailableRecoveryEntryPoints.json()).toEqual({
+        code: "TELEGRAM_RECOVERY_UNAVAILABLE",
+      });
 
       // A deployment configuration error may be logged for operators, but its
       // parser detail must never reach a public client response.

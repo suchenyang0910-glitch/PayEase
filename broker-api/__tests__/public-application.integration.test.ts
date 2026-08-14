@@ -320,6 +320,32 @@ integration("public applicant access", () => {
     });
   });
 
+  it("rejects cross-domain role assignments while creating a back-office account", async () => {
+    const opsCookie = await adminCookieForRole(database, "OPS_ADMIN", "OPS");
+    // The fixtures create a real LENDER role and a separate BROKER department.
+    // An operations administrator must never combine them in one account.
+    await adminCookieForRole(database, "LENDER_CREDIT_OFFICER", "LENDER");
+    await adminCookieForRole(database, "BROKER_OFFICER", "BROKER");
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/accounts",
+      headers: { cookie: opsCookie },
+      payload: {
+        loginName: "cross-domain-role-test",
+        password: "cross-domain-password-123",
+        departmentCode: "TEST_BROKER",
+        roleCodes: ["LENDER_CREDIT_OFFICER"],
+        preferredLanguage: "en",
+      },
+    });
+    expect(created.statusCode).toBe(422);
+    expect(created.json()).toEqual({ code: "ROLE_DOMAIN_MISMATCH" });
+    const account = await database.query(
+      "SELECT 1 FROM admin_accounts WHERE login_name = 'cross-domain-role-test'",
+    );
+    expect(account.rowCount).toBe(0);
+  });
+
   it("returns full loan and repayment details only to the application's opaque cookie", async () => {
     const created = await brokerApi.app.inject({
       method: "POST",

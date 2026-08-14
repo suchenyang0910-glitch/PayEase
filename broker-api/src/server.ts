@@ -874,17 +874,24 @@ app.post("/v1/local/admin/accounts", async (request, reply) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const department = await client.query<{ id: string }>(
-      "SELECT id FROM departments WHERE code = $1",
+    const department = await client.query<{ id: string; domain: string }>(
+      "SELECT id, domain FROM departments WHERE code = $1",
       [input.departmentCode],
     );
-    const roles = await client.query<{ id: string; code: string }>(
-      "SELECT id, code FROM roles WHERE code = ANY($1::text[])",
-      [input.roleCodes],
-    );
+    const roles = await client.query<{
+      id: string;
+      code: string;
+      domain: string;
+    }>("SELECT id, code, domain FROM roles WHERE code = ANY($1::text[])", [
+      input.roleCodes,
+    ]);
     if (!department.rows[0] || roles.rowCount !== input.roleCodes.length) {
       await client.query("ROLLBACK");
       return reply.code(422).send({ code: "UNKNOWN_DEPARTMENT_OR_ROLE" });
+    }
+    if (roles.rows.some((role) => role.domain !== department.rows[0]!.domain)) {
+      await client.query("ROLLBACK");
+      return reply.code(422).send({ code: "ROLE_DOMAIN_MISMATCH" });
     }
     const account = await client.query<{ id: string }>(
       `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)

@@ -766,10 +766,19 @@ async function loadLoanDetails(applicationId: string): Promise<{
   };
 }
 
-app.get("/health", async () => {
-  await pool.query("SELECT 1");
-  return { status: "ok", service: "broker-api", storage: "postgresql" };
+app.get("/health/live", async () => {
+  return { status: "live", service: "broker-api" };
 });
+
+async function readinessPayload() {
+  await pool.query("SELECT 1");
+  return { status: "ready", service: "broker-api", storage: "postgresql" };
+}
+
+// Keep the original health endpoint as a readiness probe for existing Caddy,
+// Docker, or external monitors; new deployments should use the explicit path.
+app.get("/health", readinessPayload);
+app.get("/health/ready", readinessPayload);
 
 app.post("/v1/local/auth/bootstrap", async (request, reply) => {
   const input = bootstrapAdminSchema.parse(request.body);

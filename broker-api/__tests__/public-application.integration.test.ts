@@ -126,6 +126,29 @@ integration("public applicant access", () => {
     await database?.end();
   });
 
+  it("exposes separate liveness and PostgreSQL readiness probes with trace IDs", async () => {
+    const traceId = "18ec8ed8-0dcd-4f24-b1bc-5e9d31d0467f";
+    const live = await brokerApi.app.inject({
+      method: "GET",
+      url: "/health/live",
+      headers: { "x-trace-id": traceId },
+    });
+    expect(live.statusCode).toBe(200);
+    expect(live.headers["x-trace-id"]).toBe(traceId);
+    expect(live.json()).toEqual({ status: "live", service: "broker-api" });
+
+    const ready = await brokerApi.app.inject({
+      method: "GET",
+      url: "/health/ready",
+    });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json()).toEqual({
+      status: "ready",
+      service: "broker-api",
+      storage: "postgresql",
+    });
+  });
+
   it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
     process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
     const bootstrap = await brokerApi.app.inject({

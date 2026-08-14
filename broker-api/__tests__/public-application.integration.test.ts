@@ -649,6 +649,35 @@ integration("public applicant access", () => {
       },
       "CONTRACT_PENDING",
     );
+    const unauthenticatedConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/contract-confirmation`,
+    });
+    expect(unauthenticatedConfirmation.statusCode).toBe(401);
+    expect(unauthenticatedConfirmation.json()).toEqual({
+      code: "TELEGRAM_AUTH_REQUIRED",
+    });
+    const otherApplicantSessionToken = "integration-lifecycle-other-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, 'integration-bot', now() + interval '30 minutes')`,
+      [
+        createHash("sha256").update(otherApplicantSessionToken).digest("hex"),
+        "integration-lifecycle-other-user",
+      ],
+    );
+    const otherApplicantConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/contract-confirmation`,
+      headers: {
+        cookie: `payease_applicant_session=${otherApplicantSessionToken}`,
+      },
+    });
+    expect(otherApplicantConfirmation.statusCode).toBe(404);
+    expect(otherApplicantConfirmation.json()).toEqual({
+      code: "APPLICATION_NOT_FOUND",
+    });
     const userContractConfirmation = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/public/applications/${applicationNo}/contract-confirmation`,

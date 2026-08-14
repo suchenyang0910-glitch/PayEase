@@ -2022,6 +2022,12 @@ integration("public applicant access", () => {
     expect(JSON.stringify(applicantList.json())).not.toContain(
       "payment information",
     );
+    expect(JSON.stringify(applicantList.json())).not.toContain(
+      "lender_resolution_reason_code",
+    );
+    expect(JSON.stringify(applicantList.json())).not.toContain(
+      "message_encrypted",
+    );
 
     const employerDetail = await brokerApi.app.inject({
       method: "GET",
@@ -2139,6 +2145,13 @@ integration("public applicant access", () => {
     expect(finalApplicantList.json()).toMatchObject({
       cases: [{ caseNo, status: "RESOLVED" }],
     });
+    const finalApplicantPayload = JSON.stringify(finalApplicantList.json());
+    expect(finalApplicantPayload).not.toContain("payment information");
+    expect(finalApplicantPayload).not.toContain("LENDER_RESPONSE_RECORDED");
+    expect(finalApplicantPayload).not.toContain(
+      "lender_resolution_reason_code",
+    );
+    expect(finalApplicantPayload).not.toContain("message_encrypted");
     expect(application.rows[0]?.id).toBeDefined();
   });
 });

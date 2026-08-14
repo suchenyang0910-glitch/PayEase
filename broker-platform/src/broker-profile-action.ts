@@ -3,6 +3,7 @@ import type { BrokerCopy } from "./broker-copy";
 export type BrokerProfileResult = Readonly<{
   payload?: unknown;
   notice: string;
+  sessionExpired: boolean;
 }>;
 
 /**
@@ -23,12 +24,18 @@ export async function brokerProfileResult(
     if (!response.ok) {
       return {
         notice: `${copy.profileUnavailable} (${response.status}): ${JSON.stringify(payload)}`,
+        sessionExpired: response.status === 401,
       };
     }
-    return { payload, notice: copy.profileAccessRecorded };
+    return {
+      payload,
+      notice: copy.profileAccessRecorded,
+      sessionExpired: false,
+    };
   } catch {
     return {
       notice: `${copy.profileUnavailable}: ${copy.profileRequestFailed}`,
+      sessionExpired: false,
     };
   }
 }

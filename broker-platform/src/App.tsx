@@ -69,13 +69,15 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 
 function Login({
   onLogin,
+  initialError = "",
 }: {
   onLogin: (identity: Identity) => void;
+  initialError?: string;
 }): JSX.Element {
   const [language, setLanguage] = useState<Language>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
@@ -162,6 +164,7 @@ export function App(): JSX.Element {
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("DOCUMENTS_COMPLETE");
   const [notice, setNotice] = useState("");
+  const [signInError, setSignInError] = useState("");
   const [adminInProgress, setAdminInProgress] = useState(false);
   const [reviewInProgress, setReviewInProgress] = useState(false);
   const [personalProfile, setPersonalProfile] =
@@ -203,6 +206,11 @@ export function App(): JSX.Element {
       .finally(() => setChecking(false));
   }, []);
   const copy = BROKER_COPY[identity?.preferredLanguage ?? "en"];
+  const expireSession = () => {
+    setPersonalProfile(undefined);
+    setIdentity(undefined);
+    setSignInError(copy.sessionExpired);
+  };
   const logout = async () => {
     await request("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
@@ -217,6 +225,7 @@ export function App(): JSX.Element {
       setIdentity((current) =>
         current ? { ...current, preferredLanguage } : current,
       );
+    else if (response.status === 401) expireSession();
   };
   const refreshDirectory = async () => {
     const [d, r, a] = await Promise.all([
@@ -247,6 +256,10 @@ export function App(): JSX.Element {
           }),
         copy,
       );
+      if (result.sessionExpired) {
+        expireSession();
+        return;
+      }
       setNotice(result.notice);
       if (result.ok) await refreshDirectory().catch(() => undefined);
     } finally {
@@ -293,7 +306,11 @@ export function App(): JSX.Element {
           ),
         copy,
       );
-      setNotice(result);
+      if (result.sessionExpired) {
+        expireSession();
+        return;
+      }
+      setNotice(result.notice);
     } finally {
       setReviewInProgress(false);
     }
@@ -310,6 +327,10 @@ export function App(): JSX.Element {
           ),
         copy,
       );
+      if (result.sessionExpired) {
+        expireSession();
+        return;
+      }
       if (isPersonalProfileResponse(result.payload)) {
         setPersonalProfile(result.payload);
       } else if (result.payload) {
@@ -322,7 +343,8 @@ export function App(): JSX.Element {
     }
   };
   if (checking) return <main style={shell}>{copy.checkingSession}</main>;
-  if (!identity) return <Login onLogin={setIdentity} />;
+  if (!identity)
+    return <Login onLogin={setIdentity} initialError={signInError} />;
   const isBroker = identity.roles.includes("BROKER_OFFICER");
   const isAdmin = identity.roles.includes("OPS_ADMIN");
   return (

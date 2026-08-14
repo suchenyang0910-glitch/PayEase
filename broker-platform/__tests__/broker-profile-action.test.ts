@@ -18,6 +18,7 @@ describe("broker authorised profile read", () => {
     ).resolves.toEqual({
       notice:
         "Profile unavailable: The profile could not be retrieved. No profile data is displayed.",
+      sessionExpired: false,
     });
   });
 
@@ -30,6 +31,19 @@ describe("broker authorised profile read", () => {
       ),
     ).resolves.toEqual({
       notice: 'Profile unavailable (403): {"code":"FORBIDDEN"}',
+      sessionExpired: false,
+    });
+  });
+
+  it("identifies a revoked or expired session without exposing profile data", async () => {
+    await expect(
+      brokerProfileResult(
+        async () => new Response(null, { status: 401 }),
+        copy,
+      ),
+    ).resolves.toEqual({
+      notice: "Profile unavailable (401): {}",
+      sessionExpired: true,
     });
   });
 });

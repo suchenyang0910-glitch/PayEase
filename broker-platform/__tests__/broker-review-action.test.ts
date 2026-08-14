@@ -15,9 +15,11 @@ describe("broker review action", () => {
         async () => Promise.reject(new Error("offline")),
         copy,
       ),
-    ).resolves.toBe(
-      "Action blocked: The review request could not be sent. No review decision was recorded.",
-    );
+    ).resolves.toEqual({
+      notice:
+        "Action blocked: The review request could not be sent. No review decision was recorded.",
+      sessionExpired: false,
+    });
   });
 
   it("keeps a server-side rejection visible to the broker", async () => {
@@ -29,8 +31,18 @@ describe("broker review action", () => {
           }),
         copy,
       ),
-    ).resolves.toBe(
-      'Action blocked (409): {"code":"INVALID_APPLICATION_STATE"}',
-    );
+    ).resolves.toEqual({
+      notice: 'Action blocked (409): {"code":"INVALID_APPLICATION_STATE"}',
+      sessionExpired: false,
+    });
+  });
+
+  it("identifies a revoked or expired session", async () => {
+    await expect(
+      brokerReviewNotice(async () => new Response(null, { status: 401 }), copy),
+    ).resolves.toEqual({
+      notice: "Action blocked (401): {}",
+      sessionExpired: true,
+    });
   });
 });

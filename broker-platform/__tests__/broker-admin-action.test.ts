@@ -19,6 +19,7 @@ describe("broker directory administration action", () => {
       ok: false,
       notice:
         "Action blocked: The directory request could not be sent. No directory change was recorded.",
+      sessionExpired: false,
     });
   });
 
@@ -34,6 +35,20 @@ describe("broker directory administration action", () => {
     ).resolves.toEqual({
       ok: false,
       notice: 'Action blocked (409): {"code":"ACCOUNT_ALREADY_EXISTS"}',
+      sessionExpired: false,
+    });
+  });
+
+  it("identifies a revoked or expired session", async () => {
+    await expect(
+      brokerAdminActionResult(
+        async () => new Response(null, { status: 401 }),
+        copy,
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      notice: "Action blocked (401): {}",
+      sessionExpired: true,
     });
   });
 });

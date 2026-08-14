@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 type Migration = { filename: string; sql: string; checksum: string };
 
@@ -34,8 +34,8 @@ async function availableMigrations(): Promise<Migration[]> {
   );
 }
 
-async function canAdoptLegacyBaseline(pool: Pool): Promise<boolean> {
-  const result = await pool.query<{
+async function canAdoptLegacyBaseline(client: PoolClient): Promise<boolean> {
+  const result = await client.query<{
     applications: string | null;
     sessions: string | null;
     installments: string | null;
@@ -83,7 +83,7 @@ export async function runDatabaseMigrations(pool: Pool): Promise<void> {
       applied.rows.map((migration) => [migration.filename, migration.checksum]),
     );
 
-    if (appliedByName.size === 0 && (await canAdoptLegacyBaseline(pool))) {
+    if (appliedByName.size === 0 && (await canAdoptLegacyBaseline(client))) {
       for (const migration of migrations) {
         if (migration.filename > legacyBaselineFinal) break;
         await client.query(

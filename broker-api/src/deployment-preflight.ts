@@ -125,11 +125,29 @@ export function telegramAuthenticationPreflight(
   }
 }
 
+/**
+ * Produces the only preflight payload allowed in deployment logs. Keep the
+ * input environment out of this function's return shape: it contains Bot
+ * tokens and PII encryption keys.
+ */
+function serializePreflightResult(
+  result: TelegramAuthenticationPreflight,
+): string {
+  return JSON.stringify(result);
+}
+
+export function serializeDeploymentPreflight(
+  environment: AuthenticationEnvironment = process.env,
+): string {
+  return serializePreflightResult(telegramAuthenticationPreflight(environment));
+}
+
 function printPreflightAndSetExitCode() {
   const result = telegramAuthenticationPreflight();
   // Never serialize TELEGRAM_BOTS_JSON or a Bot token. Bot IDs are suitable
-  // operational identifiers for an approved deployment log.
-  console.log(JSON.stringify(result));
+  // operational identifiers for an approved deployment log. The serializer
+  // is separately tested against both Bot and PII secret values.
+  console.log(serializePreflightResult(result));
   if (!result.ready) process.exitCode = 1;
 }
 

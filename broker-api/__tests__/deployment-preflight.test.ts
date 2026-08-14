@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { telegramAuthenticationPreflight } from "../src/deployment-preflight.js";
+import {
+  serializeDeploymentPreflight,
+  telegramAuthenticationPreflight,
+} from "../src/deployment-preflight.js";
 
 const validRecoveryBots = JSON.stringify([
   {
@@ -80,5 +83,22 @@ describe("Telegram deployment preflight", () => {
     expect(result.piiEncryptionRequired).toBe(true);
     expect(result.piiEncryptionReady).toBe(false);
     expect(result.error).toContain("PAYEASE_PII_ENCRYPTION_KEY is required");
+  });
+
+  it("serializes only operational metadata and never deployment secrets", () => {
+    const output = serializeDeploymentPreflight({
+      PAYEASE_DEPLOYMENT_MODE: "production",
+      TELEGRAM_BOTS_JSON: validRecoveryBots,
+      PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+    });
+
+    expect(JSON.parse(output)).toMatchObject({
+      ready: true,
+      configuredBotIds: ["123456789", "987654321"],
+      piiActiveKeyVersion: "v1",
+    });
+    expect(output).not.toContain("preflight-token-one-not-real-00001");
+    expect(output).not.toContain("preflight-token-two-not-real-00002");
+    expect(output).not.toContain(validPiiKey);
   });
 });

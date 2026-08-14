@@ -821,6 +821,28 @@ integration("public applicant access", () => {
       );
       expect(replayGuard.rows[0]?.retained).toBe(true);
 
+      await database.query(
+        `UPDATE telegram_auth_sessions
+            SET last_seen_at = now() - interval '4 minutes'
+          WHERE token_hash = $1`,
+        [createHash("sha256").update(firstCookie.split("=")[1]!).digest("hex")],
+      );
+      const activeApplicantKeepalive = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions/keepalive",
+        headers: { cookie: firstCookie },
+      });
+      expect(activeApplicantKeepalive.statusCode).toBe(204);
+      const refreshedApplicantSession = await database.query<{
+        refreshed: boolean;
+      }>(
+        `SELECT last_seen_at > now() - interval '5 seconds' AS refreshed
+           FROM telegram_auth_sessions
+          WHERE token_hash = $1`,
+        [createHash("sha256").update(firstCookie.split("=")[1]!).digest("hex")],
+      );
+      expect(refreshedApplicantSession.rows[0]?.refreshed).toBe(true);
+
       const missingProfile = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",

@@ -11,6 +11,7 @@ import {
 } from "./application-history.ts";
 import { applicantResult } from "./application-result.ts";
 import { applicantSessionRecoveryMessage } from "./applicant-session-message.ts";
+import { shouldKeepApplicantSessionAlive } from "./applicant-session-keepalive.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
 import "./app.css";
 
@@ -244,6 +245,7 @@ function telegramInitData(): string | undefined {
 export function App(): JSX.Element {
   const [language, setLanguage] = useState<LanguageCode>("km");
   const languageChangedByApplicant = useRef(false);
+  const lastApplicantKeepaliveAt = useRef(0);
   const [stage, setStage] = useState<Stage>("welcome");
   const [amount, setAmount] = useState(50);
   const [term, setTerm] = useState(30);
@@ -327,6 +329,49 @@ export function App(): JSX.Element {
       // Keep the selected language for this view. A later authenticated session
       // will retry the preference update without storing a credential client-side.
     });
+  }, [applicantSession, language]);
+
+  useEffect(() => {
+    if (!applicantSession) {
+      lastApplicantKeepaliveAt.current = 0;
+      return;
+    }
+    if (!lastApplicantKeepaliveAt.current)
+      lastApplicantKeepaliveAt.current = Date.now();
+    const recordApplicantActivity = () => {
+      const now = Date.now();
+      if (
+        !shouldKeepApplicantSessionAlive(lastApplicantKeepaliveAt.current, now)
+      )
+        return;
+      lastApplicantKeepaliveAt.current = now;
+      void fetch("/api/v1/local/public/telegram-sessions/keepalive", {
+        method: "POST",
+        credentials: "include",
+      })
+        .then((response) => {
+          if (!response.ok) {
+            setApplicantSession(false);
+            setError(applicantSessionRecoveryMessage(language));
+          }
+        })
+        .catch(() => {
+          setApplicantSession(false);
+          setError(applicantSessionRecoveryMessage(language));
+        });
+    };
+    window.addEventListener("pointerdown", recordApplicantActivity, {
+      passive: true,
+    });
+    window.addEventListener("keydown", recordApplicantActivity);
+    window.addEventListener("touchstart", recordApplicantActivity, {
+      passive: true,
+    });
+    return () => {
+      window.removeEventListener("pointerdown", recordApplicantActivity);
+      window.removeEventListener("keydown", recordApplicantActivity);
+      window.removeEventListener("touchstart", recordApplicantActivity);
+    };
   }, [applicantSession, language]);
 
   async function submit() {

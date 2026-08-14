@@ -12,6 +12,7 @@ describe("applicant submission", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     Reflect.deleteProperty(window, "Telegram");
     window.history.replaceState(null, "", "/");
   });
@@ -122,6 +123,80 @@ describe("applicant submission", () => {
     render(<App />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Telegram");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("renews an authenticated applicant session only after continued interaction", async () => {
+    const startedAt = 1_700_000_000_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "fresh-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ preferredLanguage: "en", applications: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ preferredLanguage: "zh-CN" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    now.mockReturnValue(startedAt + 4 * 60 * 1000 - 1);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "zh-CN" },
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+
+    fireEvent.keyDown(window, { key: "a" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    now.mockReturnValue(startedAt + 4 * 60 * 1000);
+    fireEvent.keyDown(window, { key: "a" });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls[3]).toEqual([
+      "/api/v1/local/public/telegram-sessions/keepalive",
+      { method: "POST", credentials: "include" },
+    ]);
+  });
+
+  it("does not send a keepalive before the activity interval", async () => {
+    const startedAt = 1_700_000_000_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "fresh-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ preferredLanguage: "en", applications: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    now.mockReturnValue(startedAt + 4 * 60 * 1000 - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(window, { key: "a" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

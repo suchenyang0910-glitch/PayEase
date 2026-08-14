@@ -187,7 +187,8 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicTelegramSession =
     request.method === "POST" &&
     (request.url === "/v1/local/public/telegram-sessions" ||
-      request.url === "/v1/local/public/telegram-sessions/logout");
+      request.url === "/v1/local/public/telegram-sessions/logout" ||
+      request.url === "/v1/local/public/telegram-sessions/keepalive");
   const isPublicApplicantLanguagePreference =
     request.method === "PUT" &&
     request.url === "/v1/local/public/profile/preferred-language";
@@ -1325,6 +1326,20 @@ app.post(
       "payease_applicant_session=; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=0",
     ]);
     return { loggedOut: true };
+  },
+);
+
+// This endpoint deliberately has no timer-driven caller. The Mini App uses it
+// only after a real pointer, keyboard, or touch interaction so active form
+// completion is not interrupted by the short idle-session timeout.
+app.post(
+  "/v1/local/public/telegram-sessions/keepalive",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_SESSION_REQUIRED" });
+    }
+    return reply.code(204).send();
   },
 );
 

@@ -290,12 +290,19 @@ function requireServiceCaseReadRole(
   const roles = request.adminIdentity?.roles ?? [];
   if (
     !roles.includes("BROKER_OFFICER") &&
-    !roles.some((role) => role.startsWith("LENDER_"))
+    !roles.includes("LENDER_COMPLAINT_OFFICER")
   ) {
     reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
     return false;
   }
   return true;
+}
+
+function requireLenderComplaintOfficer(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  return requireRole(request, reply, "LENDER_COMPLAINT_OFFICER");
 }
 
 app.addHook("onSend", async (_request, reply) => {
@@ -762,6 +769,12 @@ app.post("/v1/local/auth/bootstrap", async (request, reply) => {
         "LENDER_REPAYMENT_CHECKER",
         "还款核销复核",
         "Repayment checker",
+      ],
+      [
+        "LENDER",
+        "LENDER_COMPLAINT_OFFICER",
+        "投诉处理专员",
+        "Lender complaint officer",
       ],
       ["EMPLOYER", "EMPLOYER_HR", "企业 HR 核验员", "Employer HR verifier"],
       [
@@ -2280,7 +2293,7 @@ app.get("/v1/local/service-cases/open", async (request, reply) => {
 app.get(
   "/v1/local/service-cases/referred-to-lender",
   async (request, reply) => {
-    if (!requireLenderRole(request, reply)) return;
+    if (!requireLenderComplaintOfficer(request, reply)) return;
     const cases = await pool.query<{
       case_no: string;
       application_no: string;
@@ -2419,7 +2432,7 @@ app.post(
 app.post(
   "/v1/local/service-cases/:caseNo/lender-resolution",
   async (request, reply) => {
-    if (!requireLenderRole(request, reply)) return;
+    if (!requireLenderComplaintOfficer(request, reply)) return;
     const params = z
       .object({ caseNo: z.string().min(1) })
       .parse(request.params);

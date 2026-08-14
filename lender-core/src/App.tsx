@@ -369,8 +369,8 @@ export function App(): JSX.Element {
         current ? { ...current, preferredLanguage } : current,
       );
   };
-  const hasLenderRole = identity.roles.some((role) =>
-    role.startsWith("LENDER_"),
+  const hasLenderComplaintRole = identity.roles.includes(
+    "LENDER_COMPLAINT_OFFICER",
   );
   const loadReferredServiceCases = async () => {
     setServiceCaseBusy(true);
@@ -609,7 +609,7 @@ export function App(): JSX.Element {
           </pre>
         ) : null}
       </section>
-      {hasLenderRole ? (
+      {hasLenderComplaintRole ? (
         <section style={card} aria-label={copy.complaintResolution}>
           <h2>{copy.complaintResolution}</h2>
           <p>{copy.complaintResolutionDescription}</p>

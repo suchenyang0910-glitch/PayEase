@@ -84,6 +84,10 @@ async function lenderCreditOfficerCookie(database: Pool): Promise<string> {
   return adminCookieForRole(database, "LENDER_CREDIT_OFFICER", "LENDER");
 }
 
+async function lenderComplaintOfficerCookie(database: Pool): Promise<string> {
+  return adminCookieForRole(database, "LENDER_COMPLAINT_OFFICER", "LENDER");
+}
+
 integration("public applicant access", () => {
   let database: Pool;
   let brokerApi: BrokerApi;
@@ -117,6 +121,7 @@ integration("public applicant access", () => {
       "V0016__telegram_session_idle_timeout.sql",
       "V0017__allow_precontract_applicant_withdrawal.sql",
       "V0018__applicant_service_cases.sql",
+      "V0019__lender_complaint_officer_role.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -1681,7 +1686,20 @@ integration("public applicant access", () => {
     expect(referred.statusCode).toBe(200);
     expect(referred.json()).toEqual({ caseNo, status: "REFERRED_TO_LENDER" });
 
-    const lenderCookie = await lenderCreditOfficerCookie(database);
+    const creditOfficerCookie = await lenderCreditOfficerCookie(database);
+    const unauthorizedLenderQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/service-cases/referred-to-lender",
+      headers: { cookie: creditOfficerCookie },
+    });
+    expect(unauthorizedLenderQueue.statusCode).toBe(403);
+    const unauthorizedLenderDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/service-cases/${caseNo}`,
+      headers: { cookie: creditOfficerCookie },
+    });
+    expect(unauthorizedLenderDetail.statusCode).toBe(403);
+    const lenderCookie = await lenderComplaintOfficerCookie(database);
     const lenderQueue = await brokerApi.app.inject({
       method: "GET",
       url: "/v1/local/service-cases/referred-to-lender",
@@ -1702,6 +1720,13 @@ integration("public applicant access", () => {
       message:
         "Please review the payment information shown for my application.",
     });
+    const unauthorizedLenderResolution = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/service-cases/${caseNo}/lender-resolution`,
+      headers: { cookie: creditOfficerCookie },
+      payload: { reasonCode: "NOT_AUTHORIZED" },
+    });
+    expect(unauthorizedLenderResolution.statusCode).toBe(403);
     const resolved = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/service-cases/${caseNo}/lender-resolution`,

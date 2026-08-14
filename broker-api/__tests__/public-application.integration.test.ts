@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0023__encrypted_applicant_supplement_responses.sql",
+      filename: "V0024__telegram_session_user_agent_binding.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -1064,13 +1064,25 @@ integration("public applicant access", () => {
       )[0]!;
       const applicantSessionTtl = await database.query<{
         expires_soon: boolean;
+        user_agent_bound: boolean;
       }>(
-        `SELECT expires_at <= now() + interval '15 minutes 5 seconds' AS expires_soon
+        `SELECT expires_at <= now() + interval '15 minutes 5 seconds' AS expires_soon,
+                client_user_agent_hash IS NOT NULL AS user_agent_bound
            FROM telegram_auth_sessions
           WHERE token_hash = $1`,
         [createHash("sha256").update(firstCookie.split("=")[1]!).digest("hex")],
       );
       expect(applicantSessionTtl.rows[0]?.expires_soon).toBe(true);
+      expect(applicantSessionTtl.rows[0]?.user_agent_bound).toBe(true);
+      const browserContextMismatch = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+        headers: {
+          cookie: firstCookie,
+          "user-agent": "payease-integration-untrusted-browser",
+        },
+      });
+      expect(browserContextMismatch.statusCode).toBe(401);
       const replayGuard = await database.query<{ retained: boolean }>(
         `SELECT expires_at > now() + interval '119 minutes' AS retained
            FROM telegram_initdata_replay_guards

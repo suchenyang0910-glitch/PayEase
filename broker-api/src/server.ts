@@ -156,20 +156,32 @@ function applicantSessionToken(
 
 async function authenticatedApplicant(
   cookieHeader: string | undefined,
+  userAgent: string | string[] | undefined,
 ): Promise<{ telegramUserRef: string } | undefined> {
   const token = applicantSessionToken(cookieHeader);
   if (!token) return undefined;
   const result = await pool.query<{
     telegram_user_ref: string;
     authenticated_bot_id: string;
+    client_user_agent_hash: string | null;
   }>(
-    `SELECT telegram_user_ref, authenticated_bot_id FROM telegram_auth_sessions
+    `SELECT telegram_user_ref, authenticated_bot_id, client_user_agent_hash
+       FROM telegram_auth_sessions
      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
        AND last_seen_at > now() - interval '5 minutes'`,
     [eventHash([token])],
   );
   const identity = result.rows[0];
   if (!identity) return undefined;
+  // Sessions created after V0024 are scoped to the browser context that
+  // initiated Telegram authentication. A NULL value only exists during the
+  // short transition window for sessions minted before that migration.
+  if (
+    identity.client_user_agent_hash !== null &&
+    identity.client_user_agent_hash !==
+      eventHash([typeof userAgent === "string" ? userAgent : ""])
+  )
+    return undefined;
   // Re-evaluate the Bot allowlist for every authenticated request.  This gives
   // incident responders an immediate kill switch for sessions minted by a bot
   // that was disabled after a suspected compromise; users can authenticate
@@ -1524,12 +1536,17 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     }
     await client.query(
       `INSERT INTO telegram_auth_sessions
-        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
-       VALUES ($1, $2, $3, now() + interval '15 minutes')`,
+        (token_hash, telegram_user_ref, authenticated_bot_id, client_user_agent_hash, expires_at)
+       VALUES ($1, $2, $3, $4, now() + interval '15 minutes')`,
       [
         eventHash([sessionToken]),
         identity.telegramUserRef,
         identity.authenticatedBotId,
+        eventHash([
+          typeof request.headers["user-agent"] === "string"
+            ? request.headers["user-agent"]
+            : "",
+        ]),
       ],
     );
     await client.query("COMMIT");
@@ -1587,7 +1604,10 @@ app.post(
 app.post(
   "/v1/local/public/telegram-sessions/keepalive",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_SESSION_REQUIRED" });
     }
@@ -1597,7 +1617,10 @@ app.post(
 
 app.post("/v1/local/applications", async (request, reply) => {
   const input = createApplicationSchema.parse(request.body);
-  const applicant = await authenticatedApplicant(request.headers.cookie);
+  const applicant = await authenticatedApplicant(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
   if (requiresTelegramAuthentication() && !applicant) {
     return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
   }
@@ -1794,6 +1817,7 @@ app.get(
     const token = applicantAccessToken(request.headers.cookie);
     const authenticatedUser = await authenticatedApplicant(
       request.headers.cookie,
+      request.headers["user-agent"],
     );
     const opaqueApplicationTokenAllowed = !requiresTelegramAuthentication();
     const hasApplicationAccessToken = Boolean(
@@ -1867,6 +1891,7 @@ app.get(
 app.get("/v1/local/public/applications", async (request, reply) => {
   const authenticatedUser = await authenticatedApplicant(
     request.headers.cookie,
+    request.headers["user-agent"],
   );
   if (!authenticatedUser) {
     return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
@@ -1929,6 +1954,7 @@ app.put(
   async (request, reply) => {
     const authenticatedUser = await authenticatedApplicant(
       request.headers.cookie,
+      request.headers["user-agent"],
     );
     if (!authenticatedUser) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
@@ -2266,7 +2292,10 @@ app.post(
 app.post(
   "/v1/local/public/applications/:applicationNo/withdraw",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
     }
@@ -2359,7 +2388,10 @@ app.post(
 app.post(
   "/v1/local/public/applications/:applicationNo/supplement-responses",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
     }
@@ -2455,7 +2487,10 @@ app.post(
 app.get(
   "/v1/local/public/applications/:applicationNo/supplement-responses",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
     }
@@ -2577,7 +2612,10 @@ app.get(
 app.post(
   "/v1/local/public/applications/:applicationNo/service-cases",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
     }
@@ -2662,7 +2700,10 @@ app.post(
 app.get(
   "/v1/local/public/applications/:applicationNo/service-cases",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
     }
@@ -2974,7 +3015,10 @@ app.post(
 app.post(
   "/v1/local/public/applications/:applicationNo/contract-confirmation",
   async (request, reply) => {
-    const applicant = await authenticatedApplicant(request.headers.cookie);
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
     }

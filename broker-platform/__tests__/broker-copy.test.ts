@@ -16,6 +16,9 @@ describe("broker console language copy", () => {
       expect(copy.profileRequestFailed.trim()).not.toBe("");
       expect(copy.reviewRequestFailed.trim()).not.toBe("");
       expect(copy.adminRequestFailed.trim()).not.toBe("");
+      expect(copy.accountDirectory.trim()).not.toBe("");
+      expect(copy.disableAccount.trim()).not.toBe("");
+      expect(copy.disableAccountConfirm.trim()).not.toBe("");
       expect(copy.unavailableDescription.trim()).not.toBe("");
     }
   });

@@ -1,6 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BROKER_COPY, LANGUAGE_LABELS } from "./broker-copy";
 import { brokerAdminActionResult } from "./broker-admin-action";
+import {
+  parseDirectoryAccounts,
+  type DirectoryAccount,
+} from "./broker-directory";
 import { brokerProfileResult } from "./broker-profile-action";
 import { brokerReviewNotice } from "./broker-review-action";
 
@@ -165,6 +169,7 @@ export function App(): JSX.Element {
   const [profileLoading, setProfileLoading] = useState(false);
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
+  const [accounts, setAccounts] = useState<DirectoryAccount[]>([]);
   const [department, setDepartment] = useState({
     domain: "BROKER" as Domain,
     code: "",
@@ -213,21 +218,27 @@ export function App(): JSX.Element {
       );
   };
   const refreshDirectory = async () => {
-    const [d, r] = await Promise.all([
+    const [d, r, a] = await Promise.all([
       request("/v1/local/admin/departments"),
       request("/v1/local/admin/roles"),
+      request("/v1/local/admin/accounts"),
     ]);
     if (d.ok) setDepartments((await d.json()) as unknown[]);
     if (r.ok) setRoles((await r.json()) as unknown[]);
+    if (a.ok) setAccounts(parseDirectoryAccounts(await a.json()));
   };
-  const adminPost = async (path: string, body: object) => {
+  const adminRequest = async (
+    path: string,
+    method: "POST" | "PATCH",
+    body: object,
+  ) => {
     setAdminInProgress(true);
     setNotice("");
     try {
       const result = await brokerAdminActionResult(
         () =>
           request(path, {
-            method: "POST",
+            method,
             body: JSON.stringify(body),
           }),
         copy,
@@ -235,10 +246,19 @@ export function App(): JSX.Element {
       setNotice(result.notice);
       if (result.ok) await refreshDirectory().catch(() => undefined);
     } finally {
-      // Do not leave privileged directory forms disabled if an unexpected
-      // client-side exception occurs after the request has completed.
       setAdminInProgress(false);
     }
+  };
+  const adminPost = async (path: string, body: object) => {
+    await adminRequest(path, "POST", body);
+  };
+  const disableAccount = async (loginName: string) => {
+    if (!window.confirm(copy.disableAccountConfirm)) return;
+    await adminRequest(
+      `/v1/local/admin/accounts/${encodeURIComponent(loginName)}/activity`,
+      "PATCH",
+      { isActive: false },
+    );
   };
   const review = async (decision: "APPROVED" | "RETURNED") => {
     setReviewInProgress(true);
@@ -638,6 +658,42 @@ export function App(): JSX.Element {
               {JSON.stringify({ departments, roles }, null, 2)}
             </pre>
           </details>
+          <section style={{ ...card, marginTop: 18 }}>
+            <h3>{copy.accountDirectory}</h3>
+            <p>{accounts.length === 0 ? copy.notRecorded : null}</p>
+            {accounts.map((entry) => (
+              <div
+                key={entry.loginName}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(160px, 1fr) auto auto",
+                  gap: 12,
+                  alignItems: "center",
+                  borderTop: "1px solid #e2e8f0",
+                  padding: "10px 0",
+                }}
+              >
+                <div>
+                  <strong>{entry.loginName}</strong>
+                  <div>
+                    {entry.departmentCode} · {entry.roles.join(", ")}
+                  </div>
+                </div>
+                <span>
+                  {copy.accountStatus}:{" "}
+                  {entry.isActive ? copy.accountActive : copy.accountInactive}
+                </span>
+                {entry.isActive && entry.loginName !== identity.loginName ? (
+                  <button
+                    disabled={adminInProgress}
+                    onClick={() => void disableAccount(entry.loginName)}
+                  >
+                    {copy.disableAccount}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </section>
         </section>
       ) : null}
       {!isBroker && !isAdmin ? (

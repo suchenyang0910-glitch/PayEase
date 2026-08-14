@@ -50,6 +50,12 @@ export type BrokerCopy = Readonly<{
   roleCodes: string;
   defaultLanguage: string;
   directoryData: string;
+  accountDirectory: string;
+  accountStatus: string;
+  accountActive: string;
+  accountInactive: string;
+  disableAccount: string;
+  disableAccountConfirm: string;
   unavailableTitle: string;
   unavailableDescription: string;
 }>;
@@ -109,6 +115,13 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     roleCodes: "Role codes (comma separated)",
     defaultLanguage: "Default language",
     directoryData: "Directory data",
+    accountDirectory: "Account directory",
+    accountStatus: "Status",
+    accountActive: "Active",
+    accountInactive: "Disabled",
+    disableAccount: "Disable account",
+    disableAccountConfirm:
+      "Disable this account and revoke all of its active sessions?",
     unavailableTitle: "Operations unavailable",
     unavailableDescription:
       "Your account has no broker or platform-administration role.",
@@ -164,6 +177,12 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     roleCodes: "角色编码（逗号分隔）",
     defaultLanguage: "默认语言",
     directoryData: "目录数据",
+    accountDirectory: "账号目录",
+    accountStatus: "状态",
+    accountActive: "启用",
+    accountInactive: "已禁用",
+    disableAccount: "禁用账号",
+    disableAccountConfirm: "确认禁用该账号并撤销其所有有效会话吗？",
     unavailableTitle: "运营功能不可用",
     unavailableDescription: "当前账号没有助贷运营或平台目录管理权限。",
   },
@@ -222,6 +241,12 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     roleCodes: "កូដតួនាទី (បំបែកដោយសញ្ញាក្បៀស)",
     defaultLanguage: "ភាសាលំនាំដើម",
     directoryData: "ទិន្នន័យបញ្ជី",
+    accountDirectory: "បញ្ជីគណនី",
+    accountStatus: "ស្ថានភាព",
+    accountActive: "កំពុងប្រើ",
+    accountInactive: "បានបិទ",
+    disableAccount: "បិទគណនី",
+    disableAccountConfirm: "បិទគណនីនេះ និងដកហូតសម័យដែលកំពុងប្រើទាំងអស់ឬ?",
     unavailableTitle: "មុខងារប្រតិបត្តិការមិនអាចប្រើបាន",
     unavailableDescription:
       "គណនីរបស់អ្នកគ្មានតួនាទីប្រតិបត្តិការជំនួយឥណទាន ឬគ្រប់គ្រងបញ្ជីវេទិកា។",

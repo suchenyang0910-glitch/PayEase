@@ -140,6 +140,9 @@ async function requireOpsAdmin(
 app.addHook("onRequest", async (request, reply) => {
   const isPublicUserApplicationSubmission =
     request.method === "POST" && request.url === "/v1/local/applications";
+  const isPublicTelegramSession =
+    request.method === "POST" &&
+    request.url === "/v1/local/public/telegram-sessions";
   const isPublicUserApplicationView =
     request.url === "/v1/local/public/applications" ||
     request.url.startsWith("/v1/local/public/applications/");
@@ -147,6 +150,7 @@ app.addHook("onRequest", async (request, reply) => {
     !request.url.startsWith("/v1/local/") ||
     request.url.startsWith("/v1/local/auth/") ||
     isPublicUserApplicationSubmission ||
+    isPublicTelegramSession ||
     isPublicUserApplicationView
   )
     return;

@@ -36,7 +36,10 @@ import {
   isTelegramBotEnabled,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
-import { requiresTelegramAuthentication } from "./telegram-auth-policy.js";
+import {
+  isControlledPreview,
+  requiresTelegramAuthentication,
+} from "./telegram-auth-policy.js";
 import {
   decryptPersonalProfile,
   encryptPersonalProfile,
@@ -225,7 +228,11 @@ function requireLenderRole(
 }
 
 app.addHook("onSend", async (_request, reply) => {
-  reply.header("X-PayEase-Environment", "controlled-preview");
+  // Do not advertise a misleading preview mode from a production deployment.
+  // The marker exists only as a visible safeguard on intentionally limited UX
+  // review environments.
+  if (isControlledPreview())
+    reply.header("X-PayEase-Environment", "controlled-preview");
   reply.header("Cache-Control", "no-store");
 });
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { requiresTelegramAuthentication } from "../src/telegram-auth-policy.js";
+import {
+  isControlledPreview,
+  requiresTelegramAuthentication,
+} from "../src/telegram-auth-policy.js";
 
 describe("Telegram authentication deployment policy", () => {
   it("fails closed in an ordinary production deployment", () => {
@@ -16,6 +19,16 @@ describe("Telegram authentication deployment policy", () => {
         REQUIRE_TELEGRAM_AUTH: "false",
       }),
     ).toBe(false);
+  });
+
+  it("marks only the explicit preview mode as controlled preview", () => {
+    expect(
+      isControlledPreview({ PAYEASE_DEPLOYMENT_MODE: "controlled-preview" }),
+    ).toBe(true);
+    expect(isControlledPreview({ PAYEASE_DEPLOYMENT_MODE: "production" })).toBe(
+      false,
+    );
+    expect(isControlledPreview({})).toBe(false);
   });
 
   it("enables verification in a preview as soon as it is configured", () => {

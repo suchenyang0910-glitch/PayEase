@@ -15,6 +15,7 @@ describe("broker console language copy", () => {
       expect(copy.profileAccessRecorded.trim()).not.toBe("");
       expect(copy.profileRequestFailed.trim()).not.toBe("");
       expect(copy.reviewRequestFailed.trim()).not.toBe("");
+      expect(copy.adminRequestFailed.trim()).not.toBe("");
       expect(copy.unavailableDescription.trim()).not.toBe("");
     }
   });

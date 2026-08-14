@@ -32,6 +32,7 @@ export type BrokerCopy = Readonly<{
   recorded: string;
   blocked: string;
   reviewRequestFailed: string;
+  adminRequestFailed: string;
   directoryTitle: string;
   directoryDescription: string;
   refreshDirectory: string;
@@ -88,6 +89,8 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     blocked: "Action blocked",
     reviewRequestFailed:
       "The review request could not be sent. No review decision was recorded.",
+    adminRequestFailed:
+      "The directory request could not be sent. No directory change was recorded.",
     directoryTitle: "Platform directory administration",
     directoryDescription:
       "Create departments, roles and accounts. New accounts carry their own default language preference and role set.",
@@ -142,6 +145,7 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     recorded: "已记录",
     blocked: "操作被阻止",
     reviewRequestFailed: "审核请求未能发送，系统未记录任何审核决定。",
+    adminRequestFailed: "目录管理请求未能发送，系统未记录任何目录变更。",
     directoryTitle: "平台组织目录管理",
     directoryDescription:
       "创建部门、角色和账号。新账号拥有独立的默认语言和角色集合。",
@@ -198,6 +202,8 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     blocked: "សកម្មភាពត្រូវបានរារាំង",
     reviewRequestFailed:
       "មិនអាចផ្ញើសំណើពិនិត្យបានទេ។ មិនមានសេចក្តីសម្រេចពិនិត្យត្រូវបានកត់ត្រាទេ។",
+    adminRequestFailed:
+      "មិនអាចផ្ញើសំណើគ្រប់គ្រងបញ្ជីបានទេ។ មិនមានការផ្លាស់ប្តូរបញ្ជីត្រូវបានកត់ត្រាទេ។",
     directoryTitle: "ការគ្រប់គ្រងបញ្ជីអង្គភាពវេទិកា",
     directoryDescription:
       "បង្កើតនាយកដ្ឋាន តួនាទី និងគណនី។ គណនីថ្មីមានភាសាលំនាំដើម និងតួនាទីផ្ទាល់ខ្លួន។",

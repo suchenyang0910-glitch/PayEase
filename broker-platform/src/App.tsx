@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BROKER_COPY, LANGUAGE_LABELS } from "./broker-copy";
+import { brokerAdminActionResult } from "./broker-admin-action";
 import { brokerProfileResult } from "./broker-profile-action";
 import { brokerReviewNotice } from "./broker-review-action";
 
@@ -157,6 +158,7 @@ export function App(): JSX.Element {
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("DOCUMENTS_COMPLETE");
   const [notice, setNotice] = useState("");
+  const [adminInProgress, setAdminInProgress] = useState(false);
   const [reviewInProgress, setReviewInProgress] = useState(false);
   const [personalProfile, setPersonalProfile] =
     useState<PersonalProfileResponse>();
@@ -219,17 +221,19 @@ export function App(): JSX.Element {
     if (r.ok) setRoles((await r.json()) as unknown[]);
   };
   const adminPost = async (path: string, body: object) => {
-    const response = await request(path, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({}));
-    setNotice(
-      response.ok
-        ? `${copy.recorded}: ${JSON.stringify(payload)}`
-        : `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
+    setAdminInProgress(true);
+    setNotice("");
+    const result = await brokerAdminActionResult(
+      () =>
+        request(path, {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+      copy,
     );
-    if (response.ok) await refreshDirectory();
+    setNotice(result.notice);
+    if (result.ok) await refreshDirectory().catch(() => undefined);
+    setAdminInProgress(false);
   };
   const review = async (decision: "APPROVED" | "RETURNED") => {
     setReviewInProgress(true);
@@ -459,7 +463,9 @@ export function App(): JSX.Element {
                   required
                 />
               </label>
-              <button>{copy.createDepartment}</button>
+              <button disabled={adminInProgress}>
+                {adminInProgress ? "…" : copy.createDepartment}
+              </button>
             </form>
             <form
               style={form}
@@ -522,7 +528,9 @@ export function App(): JSX.Element {
                   required
                 />
               </label>
-              <button>{copy.createRole}</button>
+              <button disabled={adminInProgress}>
+                {adminInProgress ? "…" : copy.createRole}
+              </button>
             </form>
             <form
               style={form}
@@ -609,7 +617,9 @@ export function App(): JSX.Element {
                   ))}
                 </select>
               </label>
-              <button>{copy.createAccount}</button>
+              <button disabled={adminInProgress}>
+                {adminInProgress ? "…" : copy.createAccount}
+              </button>
             </form>
           </div>
           <details style={{ marginTop: 18 }}>

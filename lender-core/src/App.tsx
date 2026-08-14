@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { finalReviewPayload, type ReviewDecision } from "./review-payload";
+import { lenderActionNotice } from "./lender-action";
 import {
   LENDER_COPY,
   type LenderActionKey,
@@ -145,6 +146,7 @@ export function App(): JSX.Element {
   const [firstDueDate, setFirstDueDate] = useState("");
   const [evidenceReference, setEvidenceReference] = useState("MANUAL-RECEIPT-");
   const [notice, setNotice] = useState("");
+  const [runningAction, setRunningAction] = useState<string>();
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (r) => {
@@ -228,16 +230,18 @@ export function App(): JSX.Element {
     item.roles.some((role) => identity.roles.includes(role)),
   );
   const run = async (action: Action) => {
-    const response = await api(
-      `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
-      { method: "POST", body: JSON.stringify(action.body()) },
+    setRunningAction(action.route);
+    setNotice("");
+    const result = await lenderActionNotice(
+      () =>
+        api(
+          `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
+          { method: "POST", body: JSON.stringify(action.body()) },
+        ),
+      copy,
     );
-    const payload = await response.json().catch(() => ({}));
-    setNotice(
-      response.ok
-        ? `${copy.recorded}: ${JSON.stringify(payload)}`
-        : `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
-    );
+    setNotice(result);
+    setRunningAction(undefined);
   };
   const logout = async () => {
     await api("/v1/local/auth/logout", { method: "POST" });
@@ -387,10 +391,12 @@ export function App(): JSX.Element {
           {available.map((action) => (
             <button
               key={action.route}
-              disabled={!applicationNo}
-              onClick={() => run(action)}
+              disabled={!applicationNo || Boolean(runningAction)}
+              onClick={() => void run(action)}
             >
-              {copy.actions[action.labelKey]}
+              {runningAction === action.route
+                ? "…"
+                : copy.actions[action.labelKey]}
             </button>
           ))}
         </div>

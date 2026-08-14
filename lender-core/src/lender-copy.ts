@@ -12,7 +12,7 @@ export type LenderActionKey =
   | "repaymentMaker"
   | "repaymentChecker";
 
-type LenderCopy = Readonly<{
+export type LenderCopy = Readonly<{
   title: string;
   signInDescription: string;
   account: string;
@@ -39,6 +39,7 @@ type LenderCopy = Readonly<{
   noRole: string;
   recorded: string;
   blocked: string;
+  actionFailed: string;
   actions: Readonly<Record<LenderActionKey, string>>;
 }>;
 
@@ -71,6 +72,7 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     noRole: "Your account has no lender-operation role.",
     recorded: "Recorded",
     blocked: "Blocked",
+    actionFailed: "The request could not be sent. No operation was recorded.",
     actions: {
       initialReview: "Record initial review decision",
       finalReview: "Record final review decision",
@@ -112,6 +114,7 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     noRole: "当前账号没有持牌机构操作权限。",
     recorded: "已记录",
     blocked: "操作被阻止",
+    actionFailed: "请求未能发送，系统未记录任何操作。",
     actions: {
       initialReview: "记录初审决定",
       finalReview: "记录终审决定",
@@ -154,6 +157,7 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     noRole: "គណនីរបស់អ្នកមិនមានតួនាទីប្រតិបត្តិការស្ថាប័នឥណទានទេ។",
     recorded: "បានកត់ត្រា",
     blocked: "សកម្មភាពត្រូវបានទប់ស្កាត់",
+    actionFailed: "មិនអាចផ្ញើសំណើបានទេ។ មិនមានប្រតិបត្តិការត្រូវបានកត់ត្រាទេ។",
     actions: {
       initialReview: "កត់ត្រាសេចក្តីសម្រេចពិនិត្យដំបូង",
       finalReview: "កត់ត្រាសេចក្តីសម្រេចពិនិត្យចុងក្រោយ",

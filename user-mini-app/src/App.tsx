@@ -135,6 +135,8 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     usd: "USD",
     expected: "预计处理：工作时段 0–1.5 小时响应",
     status: "申请编号",
+    installments: "还款期数",
+    firstDueDate: "首期还款日",
     telegramLogin: "使用 Telegram 继续",
     formIntro:
       "请填写真实且完整的资料。提交后，助贷团队仅在你的授权范围内处理申请。",
@@ -171,6 +173,8 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     usd: "USD",
     expected: "Expected response during business hours: 0–1.5 hours",
     status: "Application number",
+    installments: "Installments",
+    firstDueDate: "First repayment date",
     telegramLogin: "Continue with Telegram",
     formIntro:
       "Please provide complete and accurate details. The broker processes your application only within your authorization.",
@@ -207,6 +211,8 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     usd: "USD",
     expected: "ពេលឆ្លើយតបក្នុងម៉ោងធ្វើការ៖ 0–1.5 ម៉ោង",
     status: "លេខពាក្យ",
+    installments: "ចំនួនវគ្គសង",
+    firstDueDate: "កាលបរិច្ឆេទសងលើកដំបូង",
     telegramLogin: "បន្តជាមួយ Telegram",
     formIntro:
       "សូមបំពេញព័ត៌មានឱ្យពេញលេញ និងត្រឹមត្រូវ។ ក្រុមការងារប្រើព័ត៌មានតាមការអនុញ្ញាតរបស់អ្នកប៉ុណ្ណោះ។",
@@ -802,6 +808,14 @@ export function App(): JSX.Element {
                   <b>
                     {formatUsdMinor(summary.application.requestedAmountMinor)}
                   </b>
+                </div>
+                <div>
+                  <span>{t.installments}</span>
+                  <b>{summary.terms?.installmentCount ?? "—"}</b>
+                </div>
+                <div>
+                  <span>{t.firstDueDate}</span>
+                  <b>{summary.terms?.firstDueDate ?? "—"}</b>
                 </div>
                 <div>
                   <span>

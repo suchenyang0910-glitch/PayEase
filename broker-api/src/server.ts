@@ -942,7 +942,11 @@ app.post("/v1/local/applications", async (request, reply) => {
          phone_encrypted, employer_name_encrypted, personal_data_consent_version,
          personal_data_consented_at, personal_data_key_version
        )
-       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $3 IS NULL THEN NULL ELSE now() END, CASE WHEN $3 IS NULL THEN NULL ELSE 'v1' END)
+       VALUES (
+         $1, $2, $3::bytea, $4::bytea, $5::bytea, $6,
+         CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END,
+         CASE WHEN $3::bytea IS NULL THEN NULL ELSE 'v1' END
+       )
        ON CONFLICT (telegram_user_ref) DO UPDATE SET
          preferred_language = EXCLUDED.preferred_language,
          full_name_encrypted = COALESCE(EXCLUDED.full_name_encrypted, users.full_name_encrypted),

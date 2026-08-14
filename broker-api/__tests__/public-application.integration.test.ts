@@ -105,6 +105,7 @@ integration("public applicant access", () => {
       "V0008__telegram_multi_bot_auth_sessions.sql",
       "V0009__protect_paid_repayment_installments.sql",
       "V0010__encrypted_personal_profiles.sql",
+      "V0011__user_contract_confirmation.sql",
     ]) {
       await database.query(
         await readFile(join(migrationDir, filename), "utf8"),
@@ -578,6 +579,17 @@ integration("public applicant access", () => {
     const applicantCookie = String(created.headers["set-cookie"]).split(
       ";",
     )[0]!;
+    const applicantSessionToken = "integration-lifecycle-telegram-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, 'integration-bot', now() + interval '30 minutes')`,
+      [
+        createHash("sha256").update(applicantSessionToken).digest("hex"),
+        "integration-lifecycle-user",
+      ],
+    );
+    const telegramApplicantCookie = `payease_applicant_session=${applicantSessionToken}`;
     const call = async (
       route: string,
       cookie: string,
@@ -635,6 +647,16 @@ integration("public applicant access", () => {
       },
       "CONTRACT_PENDING",
     );
+    const userContractConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/contract-confirmation`,
+      headers: { cookie: telegramApplicantCookie },
+    });
+    expect(userContractConfirmation.statusCode).toBe(200);
+    expect(userContractConfirmation.json()).toEqual({
+      applicationNo,
+      status: "USER_CONTRACT_CONFIRMED",
+    });
     await call(
       "contract-confirmation",
       await adminCookieForRole(database, "LENDER_CONTRACT_OFFICER", "LENDER"),
@@ -740,6 +762,6 @@ integration("public applicant access", () => {
       "SELECT count(*)::text AS count FROM audit_events WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)",
       [applicationNo],
     );
-    expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(10);
+    expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(11);
   });
 });

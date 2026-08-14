@@ -410,6 +410,46 @@ export function App(): JSX.Element {
     }
   }
 
+  async function confirmDisplayedContract() {
+    if (!applicationNo) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/contract-confirmation`,
+        { method: "POST", credentials: "include" },
+      );
+      const payload = (await response.json()) as {
+        status?: string;
+        code?: string;
+      };
+      if (!response.ok || payload.status !== "USER_CONTRACT_CONFIRMED") {
+        throw new Error(payload.code ?? "CONTRACT_CONFIRMATION_FAILED");
+      }
+      setSummary((current) =>
+        current
+          ? {
+              ...current,
+              application: {
+                ...current.application,
+                status: "USER_CONTRACT_CONFIRMED",
+              },
+            }
+          : current,
+      );
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not record your confirmation. Please try again."
+          : language === "km"
+            ? "មិនអាចកត់ត្រាការបញ្ជាក់របស់អ្នកបានទេ។ សូមព្យាយាមម្ដងទៀត។"
+            : "暂时无法记录你的确认，请稍后重试。",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function changeLanguage(nextLanguage: LanguageCode) {
     setLanguage(nextLanguage);
     if (!telegramInitData()) return;
@@ -783,6 +823,46 @@ export function App(): JSX.Element {
                   </b>
                 </div>
               </div>
+              {summary.application.status === "CONTRACT_PENDING" ? (
+                <section
+                  className="next-payment"
+                  aria-label="Contract confirmation"
+                >
+                  <strong>
+                    {language === "en"
+                      ? "Confirm the displayed loan terms"
+                      : language === "km"
+                        ? "បញ្ជាក់លក្ខខណ្ឌកម្ចីដែលបានបង្ហាញ"
+                        : "确认已展示的贷款条款"}
+                  </strong>
+                  <small>
+                    {language === "en"
+                      ? "This records your Telegram confirmation. Legal electronic-signature validation remains subject to local legal review."
+                      : language === "km"
+                        ? "វាកត់ត្រាការបញ្ជាក់តាម Telegram របស់អ្នក។ សុពលភាពហត្ថលេខាអេឡិចត្រូនិកនៅត្រូវពិនិត្យតាមច្បាប់មូលដ្ឋាន។"
+                        : "此操作记录你的 Telegram 确认；电子签约法律效力仍以当地法务审查为准。"}
+                  </small>
+                  <button
+                    className="primary"
+                    disabled={loading}
+                    onClick={() => void confirmDisplayedContract()}
+                  >
+                    {language === "en"
+                      ? "Confirm terms"
+                      : language === "km"
+                        ? "បញ្ជាក់លក្ខខណ្ឌ"
+                        : "确认条款"}
+                  </button>
+                </section>
+              ) : summary.application.status === "USER_CONTRACT_CONFIRMED" ? (
+                <p className="response-note">
+                  {language === "en"
+                    ? "Your confirmation is recorded. The lender is completing its contract record."
+                    : language === "km"
+                      ? "ការបញ្ជាក់របស់អ្នកត្រូវបានកត់ត្រា។ ស្ថាប័នផ្តល់កម្ចីកំពុងបំពេញកំណត់ត្រាកិច្ចសន្យា។"
+                      : "你的确认已记录，持牌机构正在完成合同记录。"}
+                </p>
+              ) : null}
               {summary.repayment.periodCount > 0 ? (
                 <>
                   <div className="repayment-summary">

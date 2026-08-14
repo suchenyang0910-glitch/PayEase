@@ -9,6 +9,7 @@ describe("applicant application progress", () => {
     ["SUBMITTED", "broker-review", 1],
     ["EMPLOYER_VERIFICATION", "employer-verification", 1],
     ["LENDER_FINAL_REVIEW", "lender-review", 2],
+    ["USER_CONTRACT_CONFIRMED", "contract-and-disbursement", 3],
     ["DISBURSEMENT_PENDING", "contract-and-disbursement", 3],
     ["REPAYMENT_ACTIVE", "repayment", 3],
     ["SETTLED", "settled", 3],

@@ -3,6 +3,7 @@ import {
   confirmContract,
   createDraftApplication,
   markFundsEvent,
+  recordLenderContractConfirmation,
   recordApproval,
   recordDualControl,
   resolveRejectionCondition,
@@ -60,6 +61,12 @@ describe("V1 controlled-pilot workflow", () => {
       "2026-08-12T08:20:00.000Z",
       "contract-sha256:demo",
     );
+    item = recordLenderContractConfirmation(
+      item,
+      "lender-contract-1",
+      "2026-08-12T08:20:30.000Z",
+      "contract-lender-sha256:demo",
+    );
     item = transitionApplication(
       item,
       "DISBURSEMENT_PENDING",
@@ -111,6 +118,12 @@ describe("V1 controlled-pilot workflow", () => {
       "2026-08-12T08:20:00.000Z",
       "contract-sha256:demo",
     );
+    item = recordLenderContractConfirmation(
+      item,
+      "lender-contract-1",
+      "2026-08-12T08:20:30.000Z",
+      "contract-lender-sha256:demo",
+    );
     item = transitionApplication(
       item,
       "DISBURSEMENT_PENDING",
@@ -154,6 +167,12 @@ describe("V1 controlled-pilot workflow", () => {
       "tg-1001",
       "2026-08-12T08:20:00.000Z",
       "contract-sha256:demo",
+    );
+    item = recordLenderContractConfirmation(
+      item,
+      "lender-contract-1",
+      "2026-08-12T08:20:30.000Z",
+      "contract-lender-sha256:demo",
     );
     item = transitionApplication(
       item,

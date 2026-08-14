@@ -1555,6 +1555,79 @@ app.post(
 );
 
 app.post(
+  "/v1/local/public/applications/:applicationNo/contract-confirmation",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(request.headers.cookie);
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const owned = await client.query<ApplicationRow>(
+        `SELECT applications.id, applications.status
+           FROM applications
+           JOIN users ON users.id = applications.user_id
+          WHERE applications.application_no = $1
+            AND users.telegram_user_ref = $2
+          FOR UPDATE`,
+        [params.applicationNo, applicant.telegramUserRef],
+      );
+      const application = owned.rows[0];
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "CONTRACT_PENDING") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      const terms = await client.query(
+        "SELECT 1 FROM loan_terms WHERE application_id = $1",
+        [application.id],
+      );
+      if (!terms.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "CONTRACT_TERMS_NOT_AVAILABLE" });
+      }
+      await updateStatus(
+        client,
+        application,
+        "USER_CONTRACT_CONFIRMED",
+        applicant.telegramUserRef,
+        "USER_TELEGRAM_CONTRACT_CONFIRMATION",
+      );
+      await addAuditEvent(
+        client,
+        application.id,
+        "USER_CONTRACT_CONFIRMED",
+        applicant.telegramUserRef,
+        {
+          channel: "TELEGRAM_MINI_APP",
+          confirmation: "DISPLAYED_TERMS_CONFIRMED",
+        },
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        status: "USER_CONTRACT_CONFIRMED",
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
   "/v1/local/applications/:applicationNo/contract-confirmation",
   async (request, reply) => {
     if (!requireRole(request, reply, "LENDER_CONTRACT_OFFICER")) return;
@@ -1571,7 +1644,7 @@ app.post(
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
       }
-      if (application.status !== "CONTRACT_PENDING") {
+      if (application.status !== "USER_CONTRACT_CONFIRMED") {
         await client.query("ROLLBACK");
         return reply.code(409).send({
           code: "INVALID_APPLICATION_STATE",

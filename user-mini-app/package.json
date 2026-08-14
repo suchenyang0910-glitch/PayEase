@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "tsc -b && vitest run",
     "lint": "echo 'user-mini-app lint placeholder'"
   },
   "dependencies": {

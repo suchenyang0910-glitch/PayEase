@@ -18,6 +18,7 @@ export function applicantPhase(status: string): ApplicantPhase {
     case "LENDER_FINAL_REVIEW":
       return "lender-review";
     case "CONTRACT_PENDING":
+    case "USER_CONTRACT_CONFIRMED":
     case "CONTRACT_CONFIRMED":
     case "DISBURSEMENT_PENDING":
     case "DISBURSED":

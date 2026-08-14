@@ -13,6 +13,7 @@ export const APPLICATION_STATUSES = [
   "LENDER_INITIAL_REVIEW",
   "LENDER_FINAL_REVIEW",
   "CONTRACT_PENDING",
+  "USER_CONTRACT_CONFIRMED",
   "CONTRACT_CONFIRMED",
   "DISBURSEMENT_PENDING",
   "DISBURSED",
@@ -53,6 +54,7 @@ export type AuditEvent = Readonly<{
   eventType:
     | "APPLICATION_SUBMITTED"
     | "APPROVAL_RECORDED"
+    | "USER_CONTRACT_CONFIRMED"
     | "CONTRACT_CONFIRMED"
     | "DISBURSEMENT_RECORDED"
     | "REPAYMENT_RECORDED";
@@ -98,7 +100,8 @@ const NEXT_STATUS: Readonly<
   EMPLOYER_FINANCE_VERIFICATION: ["LENDER_INITIAL_REVIEW", "REJECTED"],
   LENDER_INITIAL_REVIEW: ["LENDER_FINAL_REVIEW", "REJECTED"],
   LENDER_FINAL_REVIEW: ["CONTRACT_PENDING", "REJECTED"],
-  CONTRACT_PENDING: ["CONTRACT_CONFIRMED", "CLOSED"],
+  CONTRACT_PENDING: ["USER_CONTRACT_CONFIRMED", "CLOSED"],
+  USER_CONTRACT_CONFIRMED: ["CONTRACT_CONFIRMED", "CLOSED"],
   CONTRACT_CONFIRMED: ["DISBURSEMENT_PENDING"],
   DISBURSEMENT_PENDING: ["DISBURSED", "CLOSED"],
   DISBURSED: ["REPAYMENT_ACTIVE"],
@@ -231,6 +234,32 @@ export const recordApproval = (
 };
 
 export const confirmContract = (
+  application: LoanApplication,
+  actorUserId: string,
+  occurredAt: string,
+  evidenceReference: string,
+): LoanApplication => {
+  const updated = transitionApplication(
+    application,
+    "USER_CONTRACT_CONFIRMED",
+    actorUserId,
+    occurredAt,
+  );
+  return {
+    ...updated,
+    auditEvents: [
+      ...updated.auditEvents.slice(0, -1),
+      {
+        eventType: "USER_CONTRACT_CONFIRMED",
+        actorUserId,
+        occurredAt,
+        evidenceReference,
+      },
+    ],
+  };
+};
+
+export const recordLenderContractConfirmation = (
   application: LoanApplication,
   actorUserId: string,
   occurredAt: string,

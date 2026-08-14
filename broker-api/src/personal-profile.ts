@@ -85,6 +85,29 @@ export function personalDataEncryptionPreflight(
     environment.PAYEASE_PII_ENCRYPTION_KEY_VERSION,
   );
   encryptionKey(activeKeyVersion, environment);
+  // Historical ciphertext is self-describing and may require any retained
+  // keyring version during a complaint, audit, or data-subject request. Fail
+  // the deployment if an inactive configured key is malformed instead of
+  // discovering it only when a historical profile is opened.
+  if (environment.PAYEASE_PII_ENCRYPTION_KEYS_JSON) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(environment.PAYEASE_PII_ENCRYPTION_KEYS_JSON);
+    } catch {
+      throw new Error("PAYEASE_PII_ENCRYPTION_KEYS_JSON must be valid JSON.");
+    }
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      throw new Error("PAYEASE_PII_ENCRYPTION_KEYS_JSON must be an object.");
+    }
+    for (const version of Object.keys(parsed)) {
+      personalDataKeyVersion(version);
+      encryptionKey(version, environment);
+    }
+  }
   return { activeKeyVersion };
 }
 

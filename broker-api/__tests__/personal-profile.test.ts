@@ -92,5 +92,15 @@ describe("personal profile encryption", () => {
         PAYEASE_PII_ENCRYPTION_KEY_VERSION: "v2",
       }),
     ).toThrow("No personal-data encryption key is configured for version v2");
+
+    expect(() =>
+      personalDataEncryptionPreflight({
+        PAYEASE_PII_ENCRYPTION_KEYS_JSON: JSON.stringify({
+          v1: key,
+          legacy: "not-a-32-byte-key",
+        }),
+        PAYEASE_PII_ENCRYPTION_KEY_VERSION: "v1",
+      }),
+    ).toThrow("base64-encoded 32-byte key");
   });
 });

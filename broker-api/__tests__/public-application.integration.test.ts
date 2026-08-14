@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, createHmac } from "node:crypto";
 import { Pool } from "pg";
-import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decryptPersonalProfile } from "../src/personal-profile.js";
+import { hashPassword } from "../src/passwords.js";
 
 // Never infer a destructive test target from a developer's generic
 // DATABASE_URL. CI supplies this explicit, disposable PostgreSQL service.
@@ -136,6 +136,47 @@ integration("public applicant access", () => {
   afterAll(async () => {
     await brokerApi?.close();
     await database?.end();
+  });
+
+  it("returns the same generic response for unknown and incorrect admin credentials", async () => {
+    const department = await database.query<{ id: string }>(
+      `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)
+       VALUES ('OPS', 'LOGIN_TEST', '登录测试', 'Login test', 'Login test')
+       RETURNING id`,
+    );
+    await database.query(
+      `INSERT INTO admin_accounts (login_name, password_hash, department_id, preferred_language)
+       VALUES ($1, $2, $3, 'en')`,
+      [
+        "login-boundary-test",
+        await hashPassword("correct-login-password"),
+        department.rows[0]!.id,
+      ],
+    );
+
+    const unknown = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/login",
+      payload: {
+        loginName: "missing-login-account",
+        password: "incorrect-login-password",
+      },
+    });
+    const wrongPassword = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/login",
+      payload: {
+        loginName: "login-boundary-test",
+        password: "incorrect-login-password",
+      },
+    });
+
+    expect(unknown.statusCode).toBe(401);
+    expect(wrongPassword.statusCode).toBe(401);
+    expect(unknown.json()).toEqual({ code: "INVALID_CREDENTIALS" });
+    expect(wrongPassword.json()).toEqual({ code: "INVALID_CREDENTIALS" });
+    expect(unknown.headers["set-cookie"]).toBeUndefined();
+    expect(wrongPassword.headers["set-cookie"]).toBeUndefined();
   });
 
   it("returns full loan and repayment details only to the application's opaque cookie", async () => {

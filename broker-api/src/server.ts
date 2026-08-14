@@ -24,7 +24,7 @@ import {
   reconciliationResolutionSchema,
   telegramSessionSchema,
 } from "./validation.js";
-import { hashPassword, verifyPassword } from "./passwords.js";
+import { hashPassword, verifyLoginPassword } from "./passwords.js";
 import {
   buildRepaymentSchedule,
   formatApplicantLoanSummary,
@@ -607,7 +607,7 @@ app.post("/v1/local/auth/login", async (request, reply) => {
     [input.loginName],
   );
   const row = account.rows[0];
-  if (!row || !(await verifyPassword(input.password, row.password_hash))) {
+  if (!(await verifyLoginPassword(input.password, row?.password_hash))) {
     return reply.code(401).send({ code: "INVALID_CREDENTIALS" });
   }
   const token = randomBytes(32).toString("base64url");

@@ -5,6 +5,10 @@ import {
   progressStepForPhase,
   type ApplicantPhase,
 } from "./application-progress";
+import {
+  prependApplicationHistory,
+  type ApplicationHistoryEntry,
+} from "./application-history";
 import { applicantResult } from "./application-result";
 import "./app.css";
 
@@ -51,10 +55,10 @@ type UserSummary = {
 
 type ApplicationList = {
   preferredLanguage?: LanguageCode;
-  applications: Array<{
-    applicationNo: string;
-  }>;
+  applications: ApplicationListEntry[];
 };
+
+type ApplicationListEntry = ApplicationHistoryEntry;
 
 function usd(minor: string | null | undefined): string {
   return `$${(Number(minor ?? "0") / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -242,6 +246,9 @@ export function App(): JSX.Element {
   const [applicationNo, setApplicationNo] = useState("");
   const [approvedAmountMinor, setApprovedAmountMinor] = useState<string>();
   const [summary, setSummary] = useState<UserSummary>();
+  const [applicationHistory, setApplicationHistory] = useState<
+    ApplicationListEntry[]
+  >([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
@@ -287,6 +294,7 @@ export function App(): JSX.Element {
       if (!applications.ok) return;
       const payload = (await applications.json()) as ApplicationList;
       if (payload.preferredLanguage) setLanguage(payload.preferredLanguage);
+      setApplicationHistory(payload.applications);
       const latest = payload.applications[0];
       if (!latest) return;
       setApplicationNo(latest.applicationNo);
@@ -335,6 +343,18 @@ export function App(): JSX.Element {
       if (!response.ok || !payload.applicationNo)
         throw new Error(payload.code ?? "SUBMISSION_FAILED");
       setApplicationNo(payload.applicationNo);
+      setApplicationHistory((current) =>
+        prependApplicationHistory(current, {
+          applicationNo: payload.applicationNo!,
+          status: "BROKER_REVIEW",
+          requestedAmountMinor: String(amount * 100),
+          currency: "USD",
+          tenorDays: term,
+          approvedAmountMinor: null,
+          rejectionConditionResolved: false,
+          createdAt: new Date().toISOString(),
+        }),
+      );
       window.history.replaceState(
         null,
         "",
@@ -354,12 +374,12 @@ export function App(): JSX.Element {
     }
   }
 
-  async function checkStatus() {
-    if (!applicationNo) return;
+  async function checkStatus(targetApplicationNo = applicationNo) {
+    if (!targetApplicationNo) return;
     setLoading(true);
     try {
       const response = await fetch(
-        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}`,
+        `/api/v1/local/public/applications/${encodeURIComponent(targetApplicationNo)}`,
         { credentials: "include" },
       );
       const payload = (await response.json()) as UserSummary;
@@ -367,6 +387,7 @@ export function App(): JSX.Element {
       setApprovedAmountMinor(
         payload.application.approvedAmountMinor ?? undefined,
       );
+      setApplicationNo(targetApplicationNo);
       setSummary(payload);
       setStage("offer");
     } catch {
@@ -838,6 +859,39 @@ export function App(): JSX.Element {
           ))}
         </div>
       </section>
+      {applicationHistory.length > 0 ? (
+        <section className="history-card" aria-label="Application history">
+          <div className="progress-title">
+            <span>
+              {language === "en"
+                ? "Your applications"
+                : language === "zh-CN"
+                  ? "我的申请记录"
+                  : "ពាក្យសុំរបស់អ្នក"}
+            </span>
+            <small>{applicationHistory.length}</small>
+          </div>
+          <div className="history-list">
+            {applicationHistory.map((item) => {
+              const phase = applicantPhase(item.status);
+              return (
+                <button
+                  className="history-item"
+                  key={item.applicationNo}
+                  onClick={() => void checkStatus(item.applicationNo)}
+                  disabled={loading}
+                >
+                  <span>
+                    <strong>{usd(item.requestedAmountMinor)}</strong>
+                    <small>{item.applicationNo}</small>
+                  </span>
+                  <em>{applicantPhaseLabel(phase, language)}</em>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       <footer>
         <span>🔒 {t.secured}</span>
         <span>USD 10–500 · 7–180 days</span>

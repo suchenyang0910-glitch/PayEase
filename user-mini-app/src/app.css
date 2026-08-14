@@ -430,6 +430,47 @@ footer {
 .progress-card {
   padding-bottom: 14px;
 }
+.history-card {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #dce6dd;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 32px rgba(20, 57, 34, 0.06);
+}
+.history-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+}
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #dce6dd;
+  border-radius: 11px;
+  background: #f8fcf9;
+  color: #254233;
+  text-align: left;
+}
+.history-item > span {
+  display: grid;
+  gap: 3px;
+}
+.history-item small,
+.history-item em {
+  color: #708177;
+  font-size: 11px;
+  font-style: normal;
+}
+.history-item em {
+  align-self: center;
+  max-width: 48%;
+  color: #17653e;
+  text-align: right;
+}
 .progress-title span {
   font-size: 13px;
   font-weight: 800;

@@ -220,9 +220,11 @@ integration("public applicant access", () => {
       },
     });
     expect(valid.statusCode).toBe(200);
-    expect(valid.headers["set-cookie"]).toContain("HttpOnly");
-    expect(valid.headers["set-cookie"]).toContain("Max-Age=1800");
-    expect(valid.headers["set-cookie"]).toContain("__Host-payease_admin_csrf=");
+    expect(String(valid.headers["set-cookie"])).toContain("HttpOnly");
+    expect(String(valid.headers["set-cookie"])).toContain("Max-Age=1800");
+    expect(String(valid.headers["set-cookie"])).toContain(
+      "__Host-payease_admin_csrf=",
+    );
     const sessionCookie = String(valid.headers["set-cookie"]).split(";")[0]!;
     const storedSession = await database.query<{ expires_soon: boolean }>(
       `SELECT expires_at <= now() + interval '30 minutes 5 seconds' AS expires_soon
@@ -263,7 +265,7 @@ integration("public applicant access", () => {
       headers: { cookie: sessionCookie },
     });
     expect(logout.statusCode).toBe(204);
-    expect(logout.headers["set-cookie"]).toContain("Max-Age=0");
+    expect(String(logout.headers["set-cookie"])).toContain("Max-Age=0");
 
     const loginAudit = await database.query<{
       event_type: string;
@@ -869,12 +871,14 @@ integration("public applicant access", () => {
         },
       });
       expect(firstLogin.statusCode).toBe(201);
-      expect(firstLogin.headers["set-cookie"]).toContain(
+      expect(String(firstLogin.headers["set-cookie"])).toContain(
         "__Host-payease_applicant_session=",
       );
-      expect(firstLogin.headers["set-cookie"]).toContain("Max-Age=900");
-      expect(firstLogin.headers["set-cookie"]).toContain("SameSite=None");
-      expect(firstLogin.headers["set-cookie"]).toContain("Partitioned");
+      expect(String(firstLogin.headers["set-cookie"])).toContain("Max-Age=900");
+      expect(String(firstLogin.headers["set-cookie"])).toContain(
+        "SameSite=None",
+      );
+      expect(String(firstLogin.headers["set-cookie"])).toContain("Partitioned");
       const firstCookie = String(firstLogin.headers["set-cookie"]).split(
         ";",
       )[0]!;

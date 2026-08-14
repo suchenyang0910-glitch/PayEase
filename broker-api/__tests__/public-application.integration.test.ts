@@ -836,9 +836,14 @@ integration("public applicant access", () => {
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
       .applicationNo;
-    const applicantCookie = String(created.headers["set-cookie"]).split(
-      ";",
-    )[0]!;
+    const telegramApplicantToken = "integration-supplement-telegram-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, 'integration-user-supplement', '444444444', now() + interval '15 minutes', now())`,
+      [createHash("sha256").update(telegramApplicantToken).digest("hex")],
+    );
+    const telegramApplicantCookie = `__Host-payease_applicant_session=${telegramApplicantToken}`;
     const brokerCookie = await adminCookieForRole(
       database,
       "BROKER_OFFICER",
@@ -859,7 +864,7 @@ integration("public applicant access", () => {
     const applicantView = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/public/applications/${applicationNo}`,
-      headers: { cookie: applicantCookie },
+      headers: { cookie: telegramApplicantCookie },
     });
     expect(applicantView.statusCode).toBe(200);
     expect(applicantView.json()).toMatchObject({
@@ -868,7 +873,7 @@ integration("public applicant access", () => {
     const submittedSupplement = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/public/applications/${applicationNo}/supplement-responses`,
-      headers: { cookie: applicantCookie },
+      headers: { cookie: telegramApplicantCookie },
       payload: {
         message:
           "I have corrected the information requested by the broker review team.",
@@ -896,7 +901,7 @@ integration("public applicant access", () => {
     const applicantSupplements = await brokerApi.app.inject({
       method: "GET",
       url: `/v1/local/public/applications/${applicationNo}/supplement-responses`,
-      headers: { cookie: applicantCookie },
+      headers: { cookie: telegramApplicantCookie },
     });
     expect(applicantSupplements.statusCode).toBe(200);
     expect(applicantSupplements.json()).toMatchObject({

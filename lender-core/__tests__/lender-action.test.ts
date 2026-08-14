@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lenderActionNotice } from "../src/lender-action";
+import { lenderActionNotice } from "../src/lender-action.ts";
 
 const copy = {
   recorded: "Recorded",

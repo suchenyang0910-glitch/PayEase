@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { finalReviewPayload } from "../src/review-payload.js";
+import {
+  finalReviewPayload,
+  hasValidFinalReviewTerms,
+} from "../src/review-payload.ts";
 
 const terms = {
   approvedAmountMinor: "25000",
@@ -27,4 +30,23 @@ describe("lender final review payload", () => {
       });
     },
   );
+
+  it("guards invalid approved terms before they become a manual request", () => {
+    expect(hasValidFinalReviewTerms(terms)).toBe(true);
+    expect(
+      hasValidFinalReviewTerms({ ...terms, approvedAmountMinor: "999" }),
+    ).toBe(false);
+    expect(
+      hasValidFinalReviewTerms({ ...terms, totalRepayableMinor: "25499" }),
+    ).toBe(false);
+    expect(hasValidFinalReviewTerms({ ...terms, installmentCount: 0 })).toBe(
+      false,
+    );
+    expect(
+      hasValidFinalReviewTerms({ ...terms, firstDueDate: "15/09/2026" }),
+    ).toBe(false);
+    expect(
+      hasValidFinalReviewTerms({ ...terms, firstDueDate: "2026-02-29" }),
+    ).toBe(false);
+  });
 });

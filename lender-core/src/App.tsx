@@ -1,11 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { finalReviewPayload, type ReviewDecision } from "./review-payload";
-import { lenderActionNotice } from "./lender-action";
+import {
+  finalReviewPayload,
+  hasValidFinalReviewTerms,
+  type ReviewDecision,
+} from "./review-payload.ts";
+import { lenderActionNotice } from "./lender-action.ts";
 import {
   LENDER_COPY,
   type LenderActionKey,
   type LenderLanguage,
-} from "./lender-copy";
+} from "./lender-copy.ts";
 
 type Identity = {
   loginName: string;
@@ -154,9 +158,16 @@ export function App(): JSX.Element {
       })
       .finally(() => setChecking(false));
   }, []);
-  if (checking) return <main style={shell}>Checking secure session…</main>;
+  if (checking) return <main style={shell}>{LENDER_COPY.en.checking}</main>;
   if (!identity) return <SignIn complete={setIdentity} />;
   const copy = LENDER_COPY[identity.preferredLanguage];
+  const finalTermsValid = hasValidFinalReviewTerms({
+    approvedAmountMinor,
+    serviceFeeMinor,
+    totalRepayableMinor,
+    installmentCount: Number(installmentCount),
+    firstDueDate,
+  });
   const actions: Action[] = [
     {
       labelKey: "initialReview",
@@ -396,7 +407,13 @@ export function App(): JSX.Element {
           {available.map((action) => (
             <button
               key={action.route}
-              disabled={!applicationNo || Boolean(runningAction)}
+              disabled={
+                !applicationNo ||
+                Boolean(runningAction) ||
+                (action.route === "lender-final-review" &&
+                  reviewDecision === "APPROVED" &&
+                  !finalTermsValid)
+              }
               onClick={() => void run(action)}
             >
               {runningAction === action.route
@@ -406,6 +423,11 @@ export function App(): JSX.Element {
           ))}
         </div>
         {available.length === 0 ? <p>{copy.noRole}</p> : null}
+        {available.some((action) => action.route === "lender-final-review") &&
+        reviewDecision === "APPROVED" &&
+        !finalTermsValid ? (
+          <p role="alert">{copy.invalidFinalReviewTerms}</p>
+        ) : null}
         {notice ? (
           <pre role="status" style={{ whiteSpace: "pre-wrap" }}>
             {notice}

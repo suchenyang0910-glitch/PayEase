@@ -14,6 +14,7 @@ export type LenderActionKey =
 
 export type LenderCopy = Readonly<{
   title: string;
+  checking: string;
   signInDescription: string;
   account: string;
   password: string;
@@ -40,12 +41,14 @@ export type LenderCopy = Readonly<{
   recorded: string;
   blocked: string;
   actionFailed: string;
+  invalidFinalReviewTerms: string;
   actions: Readonly<Record<LenderActionKey, string>>;
 }>;
 
 export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   en: {
     title: "PayEase lender console",
+    checking: "Checking secure session…",
     signInDescription: "Sign in to use controlled lender operations.",
     account: "Account",
     password: "Password",
@@ -73,6 +76,8 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     recorded: "Recorded",
     blocked: "Blocked",
     actionFailed: "The request could not be sent. No operation was recorded.",
+    invalidFinalReviewTerms:
+      "For approval, enter a USD 10–500 amount, 1–6 installments, a due date, and a total that includes the approved fee.",
     actions: {
       initialReview: "Record initial review decision",
       finalReview: "Record final review decision",
@@ -88,6 +93,7 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   },
   "zh-CN": {
     title: "PayEase 持牌机构后台",
+    checking: "正在验证安全会话…",
     signInDescription: "登录后使用受控的持牌机构操作。",
     account: "账号",
     password: "密码",
@@ -115,6 +121,8 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     recorded: "已记录",
     blocked: "操作被阻止",
     actionFailed: "请求未能发送，系统未记录任何操作。",
+    invalidFinalReviewTerms:
+      "如选择同意，请填写 USD 10–500 的批准金额、1–6 期、首期还款日，以及不低于本金加已批准费用的应还总额。",
     actions: {
       initialReview: "记录初审决定",
       finalReview: "记录终审决定",
@@ -130,6 +138,7 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
   },
   km: {
     title: "ផ្ទាំងគ្រប់គ្រងស្ថាប័នឥណទាន PayEase",
+    checking: "កំពុងផ្ទៀងផ្ទាត់សម័យសុវត្ថិភាព…",
     signInDescription:
       "ចូលប្រើដើម្បីប្រើប្រតិបត្តិការរបស់ស្ថាប័នផ្តល់កម្ចីដែលត្រូវបានគ្រប់គ្រង។",
     account: "គណនី",
@@ -158,6 +167,8 @@ export const LENDER_COPY: Readonly<Record<LenderLanguage, LenderCopy>> = {
     recorded: "បានកត់ត្រា",
     blocked: "សកម្មភាពត្រូវបានទប់ស្កាត់",
     actionFailed: "មិនអាចផ្ញើសំណើបានទេ។ មិនមានប្រតិបត្តិការត្រូវបានកត់ត្រាទេ។",
+    invalidFinalReviewTerms:
+      "សម្រាប់ការអនុម័ត សូមបញ្ចូលចំនួន USD 10–500 ចំនួនវគ្គ 1–6 កាលបរិច្ឆេទសង និងចំនួនសរុបដែលរួមបញ្ចូលកម្រៃដែលបានអនុម័ត។",
     actions: {
       initialReview: "កត់ត្រាសេចក្តីសម្រេចពិនិត្យដំបូង",
       finalReview: "កត់ត្រាសេចក្តីសម្រេចពិនិត្យចុងក្រោយ",

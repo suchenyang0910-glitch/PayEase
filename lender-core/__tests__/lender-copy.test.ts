@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LENDER_COPY, type LenderActionKey } from "../src/lender-copy.js";
+import { LENDER_COPY, type LenderActionKey } from "../src/lender-copy.ts";
 
 const actionKeys: readonly LenderActionKey[] = [
   "initialReview",
@@ -19,6 +19,7 @@ describe("lender console translations", () => {
     for (const language of ["zh-CN", "en", "km"] as const) {
       const copy = LENDER_COPY[language];
       expect(copy.title).not.toHaveLength(0);
+      expect(copy.checking).not.toHaveLength(0);
       expect(copy.signInDescription).not.toHaveLength(0);
       expect(copy.account).not.toHaveLength(0);
       expect(copy.password).not.toHaveLength(0);

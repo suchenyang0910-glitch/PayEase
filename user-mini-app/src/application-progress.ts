@@ -13,6 +13,7 @@ export function applicantPhase(status: string): ApplicantPhase {
     case "BROKER_REVIEW":
       return "broker-review";
     case "EMPLOYER_VERIFICATION":
+    case "EMPLOYER_FINANCE_VERIFICATION":
       return "employer-verification";
     case "LENDER_INITIAL_REVIEW":
     case "LENDER_FINAL_REVIEW":

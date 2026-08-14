@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   configuredTelegramBots,
   isTelegramBotEnabled,
+  requireEnabledTelegramBot,
   verifyTelegramMiniAppInitData,
 } from "../src/telegram-auth.js";
 
@@ -119,6 +120,24 @@ describe("Telegram multi-bot Mini App verification", () => {
         ]),
       ),
     ).toThrow("Telegram bot tokens must be unique");
+  });
+
+  it("rejects startup configuration with no enabled recovery Bot", () => {
+    expect(() => requireEnabledTelegramBot("")).toThrow("at least one enabled");
+    expect(() =>
+      requireEnabledTelegramBot(
+        JSON.stringify([
+          { botId: "888888888", botToken: "h".repeat(24), enabled: false },
+        ]),
+      ),
+    ).toThrow("at least one enabled");
+    expect(
+      requireEnabledTelegramBot(
+        JSON.stringify([
+          { botId: "999999999", botToken: "i".repeat(24), enabled: true },
+        ]),
+      ),
+    ).toHaveLength(1);
   });
 
   it("treats a disabled bot as unavailable without disabling a healthy fallback bot", () => {

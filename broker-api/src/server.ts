@@ -36,6 +36,7 @@ import {
 import {
   configuredTelegramBots,
   isTelegramBotEnabled,
+  requireEnabledTelegramBot,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
 import {
@@ -2815,6 +2816,10 @@ const close = async (): Promise<void> => {
 };
 
 if (process.env.NODE_ENV !== "test") {
+  // Fail before opening the port when real applicant authentication would be
+  // impossible. Per-request configuration is still used so a compromised Bot
+  // can be disabled without a restart.
+  if (requiresTelegramAuthentication()) requireEnabledTelegramBot();
   await runDatabaseMigrations(pool);
   const port = Number(process.env.PORT ?? 3100);
   const host = process.env.HOST ?? "127.0.0.1";

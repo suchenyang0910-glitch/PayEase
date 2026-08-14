@@ -54,6 +54,24 @@ export function configuredTelegramBots(
 }
 
 /**
+ * Fail deployment readiness early when applicant authentication is expected.
+ * This must be used only by the startup path: request handlers intentionally
+ * re-read configuration so an incident response can disable one Bot without
+ * restarting the service.
+ */
+export function requireEnabledTelegramBot(
+  source = process.env.TELEGRAM_BOTS_JSON,
+): TelegramBotConfig[] {
+  const bots = configuredTelegramBots(source);
+  if (!bots.some((bot) => bot.enabled)) {
+    throw new Error(
+      "TELEGRAM_BOTS_JSON must contain at least one enabled Telegram bot",
+    );
+  }
+  return bots;
+}
+
+/**
  * A bot can be disabled during an incident without deleting its configuration.
  * Callers must check this for an existing session as well as at login time:
  * otherwise a compromised bot could retain access through sessions minted just

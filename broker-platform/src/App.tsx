@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BROKER_COPY, LANGUAGE_LABELS } from "./broker-copy";
+import { brokerReviewNotice } from "./broker-review-action";
 
 type Language = "zh-CN" | "en" | "km";
 type Domain = "OPS" | "BROKER" | "LENDER" | "EMPLOYER";
@@ -137,6 +138,7 @@ export function App(): JSX.Element {
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("DOCUMENTS_COMPLETE");
   const [notice, setNotice] = useState("");
+  const [reviewInProgress, setReviewInProgress] = useState(false);
   const [personalProfile, setPersonalProfile] =
     useState<PersonalProfileResponse>();
   const [departments, setDepartments] = useState<unknown[]>([]);
@@ -210,16 +212,18 @@ export function App(): JSX.Element {
     if (response.ok) await refreshDirectory();
   };
   const review = async (decision: "APPROVED" | "RETURNED") => {
-    const response = await request(
-      `/v1/local/applications/${encodeURIComponent(applicationNo)}/broker-review`,
-      { method: "POST", body: JSON.stringify({ decision, reasonCode }) },
+    setReviewInProgress(true);
+    setNotice("");
+    const result = await brokerReviewNotice(
+      () =>
+        request(
+          `/v1/local/applications/${encodeURIComponent(applicationNo)}/broker-review`,
+          { method: "POST", body: JSON.stringify({ decision, reasonCode }) },
+        ),
+      copy,
     );
-    const payload = await response.json().catch(() => ({}));
-    setNotice(
-      response.ok
-        ? `${copy.recorded}: ${JSON.stringify(payload)}`
-        : `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
-    );
+    setNotice(result);
+    setReviewInProgress(false);
   };
   const loadPersonalProfile = async () => {
     setPersonalProfile(undefined);
@@ -295,16 +299,16 @@ export function App(): JSX.Element {
                 {copy.viewProfile}
               </button>
               <button
-                disabled={!applicationNo}
-                onClick={() => review("APPROVED")}
+                disabled={!applicationNo || reviewInProgress}
+                onClick={() => void review("APPROVED")}
               >
-                {copy.documentsComplete}
+                {reviewInProgress ? "…" : copy.documentsComplete}
               </button>
               <button
-                disabled={!applicationNo}
-                onClick={() => review("RETURNED")}
+                disabled={!applicationNo || reviewInProgress}
+                onClick={() => void review("RETURNED")}
               >
-                {copy.requestSupplement}
+                {reviewInProgress ? "…" : copy.requestSupplement}
               </button>
             </div>
             {personalProfile ? (

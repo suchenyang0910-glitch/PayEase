@@ -13,6 +13,7 @@ describe("broker console language copy", () => {
       expect(copy.reviewTitle.trim()).not.toBe("");
       expect(copy.directoryTitle.trim()).not.toBe("");
       expect(copy.profileAccessRecorded.trim()).not.toBe("");
+      expect(copy.reviewRequestFailed.trim()).not.toBe("");
       expect(copy.unavailableDescription.trim()).not.toBe("");
     }
   });

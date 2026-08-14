@@ -1,6 +1,6 @@
 export type BrokerLanguage = "zh-CN" | "en" | "km";
 
-type BrokerCopy = Readonly<{
+export type BrokerCopy = Readonly<{
   title: string;
   checkingSession: string;
   signIn: string;
@@ -30,6 +30,7 @@ type BrokerCopy = Readonly<{
   profileAccessRecorded: string;
   recorded: string;
   blocked: string;
+  reviewRequestFailed: string;
   directoryTitle: string;
   directoryDescription: string;
   refreshDirectory: string;
@@ -82,6 +83,8 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     profileAccessRecorded: "Profile access recorded in the audit log.",
     recorded: "Recorded",
     blocked: "Action blocked",
+    reviewRequestFailed:
+      "The review request could not be sent. No review decision was recorded.",
     directoryTitle: "Platform directory administration",
     directoryDescription:
       "Create departments, roles and accounts. New accounts carry their own default language preference and role set.",
@@ -134,6 +137,7 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
     profileAccessRecorded: "资料访问已写入审计日志。",
     recorded: "已记录",
     blocked: "操作被阻止",
+    reviewRequestFailed: "审核请求未能发送，系统未记录任何审核决定。",
     directoryTitle: "平台组织目录管理",
     directoryDescription:
       "创建部门、角色和账号。新账号拥有独立的默认语言和角色集合。",
@@ -186,6 +190,8 @@ export const BROKER_COPY: Readonly<Record<BrokerLanguage, BrokerCopy>> = {
       "ការចូលមើលព័ត៌មានត្រូវបានកត់ត្រាក្នុងកំណត់ហេតុសវនកម្ម។",
     recorded: "បានកត់ត្រា",
     blocked: "សកម្មភាពត្រូវបានរារាំង",
+    reviewRequestFailed:
+      "មិនអាចផ្ញើសំណើពិនិត្យបានទេ។ មិនមានសេចក្តីសម្រេចពិនិត្យត្រូវបានកត់ត្រាទេ។",
     directoryTitle: "ការគ្រប់គ្រងបញ្ជីអង្គភាពវេទិកា",
     directoryDescription:
       "បង្កើតនាយកដ្ឋាន តួនាទី និងគណនី។ គណនីថ្មីមានភាសាលំនាំដើម និងតួនាទីផ្ទាល់ខ្លួន។",

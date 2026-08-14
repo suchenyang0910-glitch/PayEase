@@ -188,6 +188,19 @@ function requireRole(
   return true;
 }
 
+function requireLenderRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  if (
+    !request.adminIdentity?.roles.some((role) => role.startsWith("LENDER_"))
+  ) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
 app.addHook("onSend", async (_request, reply) => {
   reply.header("X-PayEase-Environment", "controlled-preview");
   reply.header("Cache-Control", "no-store");
@@ -1162,6 +1175,7 @@ app.post(
 );
 
 app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
+  if (!requireLenderRole(request, reply)) return;
   const params = z
     .object({ applicationNo: z.string().min(1) })
     .parse(request.params);

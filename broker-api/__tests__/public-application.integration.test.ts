@@ -575,6 +575,29 @@ integration("public applicant access", () => {
         outstandingMinor: "0",
       },
     });
+    const employerFullDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/applications/${applicationNo}`,
+      headers: {
+        cookie: await adminCookieForRole(database, "EMPLOYER_HR", "EMPLOYER"),
+      },
+    });
+    expect(employerFullDetail.statusCode).toBe(403);
+    const lenderFullDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/applications/${applicationNo}`,
+      headers: {
+        cookie: await adminCookieForRole(
+          database,
+          "LENDER_CREDIT_REVIEWER",
+          "LENDER",
+        ),
+      },
+    });
+    expect(lenderFullDetail.statusCode).toBe(200);
+    expect(lenderFullDetail.json()).toMatchObject({
+      terms: { serviceFeeMinor: "500", totalRepayableMinor: "25500" },
+    });
     const auditEvents = await database.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM audit_events WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)",
       [applicationNo],

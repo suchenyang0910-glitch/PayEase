@@ -42,6 +42,19 @@ export function configuredTelegramBots(
   });
 }
 
+/**
+ * A bot can be disabled during an incident without deleting its configuration.
+ * Callers must check this for an existing session as well as at login time:
+ * otherwise a compromised bot could retain access through sessions minted just
+ * before it was disabled.
+ */
+export function isTelegramBotEnabled(
+  botId: string,
+  bots: readonly TelegramBotConfig[],
+): boolean {
+  return bots.some((bot) => bot.botId === botId && bot.enabled);
+}
+
 function safeEqual(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left, "hex");
   const rightBytes = Buffer.from(right, "hex");

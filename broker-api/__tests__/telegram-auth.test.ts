@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   configuredTelegramBots,
+  isTelegramBotEnabled,
   verifyTelegramMiniAppInitData,
 } from "../src/telegram-auth.js";
 
@@ -99,5 +100,18 @@ describe("Telegram multi-bot Mini App verification", () => {
         ]),
       ),
     ).toThrow("unique");
+  });
+
+  it("treats a disabled bot as unavailable without disabling a healthy fallback bot", () => {
+    const bots = configuredTelegramBots(
+      JSON.stringify([
+        { botId: "666666666", botToken: "f".repeat(24), enabled: false },
+        { botId: "777777777", botToken: "g".repeat(24), enabled: true },
+      ]),
+    );
+
+    expect(isTelegramBotEnabled("666666666", bots)).toBe(false);
+    expect(isTelegramBotEnabled("777777777", bots)).toBe(true);
+    expect(isTelegramBotEnabled("missing-bot", bots)).toBe(false);
   });
 });

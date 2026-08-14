@@ -33,6 +33,7 @@ import {
 } from "./repayment.js";
 import {
   configuredTelegramBots,
+  isTelegramBotEnabled,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
 import { requiresTelegramAuthentication } from "./telegram-auth-policy.js";
@@ -104,13 +105,28 @@ async function authenticatedApplicant(
 ): Promise<{ telegramUserRef: string } | undefined> {
   const token = applicantSessionToken(cookieHeader);
   if (!token) return undefined;
-  const result = await pool.query<{ telegram_user_ref: string }>(
-    `SELECT telegram_user_ref FROM telegram_auth_sessions
+  const result = await pool.query<{
+    telegram_user_ref: string;
+    authenticated_bot_id: string;
+  }>(
+    `SELECT telegram_user_ref, authenticated_bot_id FROM telegram_auth_sessions
      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
     [eventHash([token])],
   );
   const identity = result.rows[0];
-  return identity ? { telegramUserRef: identity.telegram_user_ref } : undefined;
+  if (!identity) return undefined;
+  // Re-evaluate the Bot allowlist for every authenticated request.  This gives
+  // incident responders an immediate kill switch for sessions minted by a bot
+  // that was disabled after a suspected compromise; users can authenticate
+  // through another enabled Bot because their record is keyed by Telegram ID.
+  if (
+    !isTelegramBotEnabled(
+      identity.authenticated_bot_id,
+      configuredTelegramBots(),
+    )
+  )
+    return undefined;
+  return { telegramUserRef: identity.telegram_user_ref };
 }
 
 async function hasRole(

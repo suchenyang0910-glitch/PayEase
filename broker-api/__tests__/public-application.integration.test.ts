@@ -517,6 +517,26 @@ integration("public applicant access", () => {
         ],
       });
 
+      // Disabling a compromised Bot invalidates sessions that it issued.  The
+      // fallback Bot remains able to access the same Telegram-ID-owned record.
+      process.env.TELEGRAM_BOTS_JSON = JSON.stringify([
+        { ...botA, enabled: false },
+        { ...botB, enabled: true },
+      ]);
+      const disabledBotSession = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+        headers: { cookie: firstCookie },
+      });
+      expect(disabledBotSession.statusCode).toBe(401);
+
+      const fallbackBotSession = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+        headers: { cookie: secondCookie },
+      });
+      expect(fallbackBotSession.statusCode).toBe(200);
+
       const detail = await brokerApi.app.inject({
         method: "GET",
         url: `/v1/local/public/applications/${applicationNo}`,

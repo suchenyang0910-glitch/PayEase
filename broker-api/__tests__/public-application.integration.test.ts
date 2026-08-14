@@ -197,7 +197,10 @@ integration("public applicant access", () => {
       payload: { preferredLanguage: "zh-CN" },
     });
     expect(languagePreference.statusCode).toBe(200);
-    expect(languagePreference.json()).toEqual({ preferredLanguage: "zh-CN" });
+    expect(languagePreference.json()).toEqual({
+      loginName: "login-boundary-test",
+      preferredLanguage: "zh-CN",
+    });
     const persistedIdentity = await brokerApi.app.inject({
       method: "GET",
       url: "/v1/local/auth/me",

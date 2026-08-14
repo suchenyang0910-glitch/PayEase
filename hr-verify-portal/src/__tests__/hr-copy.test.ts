@@ -9,6 +9,7 @@ describe("HR portal language copy", () => {
       expect(copy.title.trim()).not.toBe("");
       expect(copy.confirmEmployment.trim()).not.toBe("");
       expect(copy.requestFailed.trim()).not.toBe("");
+      expect(copy.sessionExpired.trim()).not.toBe("");
       expect(copy.unavailableDescription.trim()).not.toBe("");
     }
   });

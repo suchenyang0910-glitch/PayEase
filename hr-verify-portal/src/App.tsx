@@ -27,11 +27,17 @@ async function api(path: string, init?: RequestInit) {
   });
 }
 
-function Login({ done }: { done: (identity: Identity) => void }): JSX.Element {
+function Login({
+  done,
+  initialError = "",
+}: {
+  done: (identity: Identity) => void;
+  initialError?: string;
+}): JSX.Element {
   const [language, setLanguage] = useState<HrLanguage>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const copy = HR_COPY[language];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -119,6 +125,7 @@ export function App(): JSX.Element {
     "EMPLOYMENT_AND_SALARY_RANGE_CONFIRMED",
   );
   const [notice, setNotice] = useState("");
+  const [signInError, setSignInError] = useState("");
   const [running, setRunning] = useState(false);
   useEffect(() => {
     api("/v1/local/auth/me")
@@ -142,19 +149,23 @@ export function App(): JSX.Element {
     setRunning(true);
     setNotice("");
     try {
-      setNotice(
-        await hrVerificationNotice(
-          () =>
-            api(
-              `/v1/local/applications/${encodeURIComponent(applicationNo)}/${route}`,
-              {
-                method: "POST",
-                body: JSON.stringify({ decision, reasonCode }),
-              },
-            ),
-          copy,
-        ),
+      const result = await hrVerificationNotice(
+        () =>
+          api(
+            `/v1/local/applications/${encodeURIComponent(applicationNo)}/${route}`,
+            {
+              method: "POST",
+              body: JSON.stringify({ decision, reasonCode }),
+            },
+          ),
+        copy,
       );
+      if (result.sessionExpired) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      setNotice(result.notice);
     } finally {
       setRunning(false);
     }
@@ -172,9 +183,13 @@ export function App(): JSX.Element {
       setIdentity((current) =>
         current ? { ...current, preferredLanguage } : current,
       );
+    else if (response.status === 401) {
+      setSignInError(copy.sessionExpired);
+      setIdentity(undefined);
+    }
   };
   if (checking) return <main style={layout}>{copy.checking}</main>;
-  if (!identity) return <Login done={setIdentity} />;
+  if (!identity) return <Login done={setIdentity} initialError={signInError} />;
   return (
     <main style={layout}>
       <header style={{ display: "flex", justifyContent: "space-between" }}>

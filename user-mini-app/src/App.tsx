@@ -11,6 +11,7 @@ import {
 } from "./application-history";
 import { applicantResult } from "./application-result";
 import { applicantSessionRecoveryMessage } from "./applicant-session-message";
+import { formatUsdMinor } from "./format-usd-minor";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -63,10 +64,6 @@ type ApplicationList = {
 };
 
 type ApplicationListEntry = ApplicationHistoryEntry;
-
-function usd(minor: string | null | undefined): string {
-  return `$${(Number(minor ?? "0") / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function applicantPhaseLabel(
   phase: ApplicantPhase,
@@ -751,9 +748,7 @@ export function App(): JSX.Element {
                 : language === "km"
                   ? "ទំហំបានអនុម័ត៖ "
                   : "审核额度："}
-              <strong>
-                ${(Number(approvedAmountMinor) / 100).toLocaleString("en-US")}
-              </strong>
+              <strong>{formatUsdMinor(approvedAmountMinor)}</strong>
             </p>
           ) : result === "rejected-resolved" ? (
             <button
@@ -801,7 +796,9 @@ export function App(): JSX.Element {
                         ? "បានស្នើ"
                         : "申请金额"}
                   </span>
-                  <b>{usd(summary.application.requestedAmountMinor)}</b>
+                  <b>
+                    {formatUsdMinor(summary.application.requestedAmountMinor)}
+                  </b>
                 </div>
                 <div>
                   <span>
@@ -813,7 +810,7 @@ export function App(): JSX.Element {
                   </span>
                   <b>
                     {summary.terms
-                      ? usd(summary.terms.approvedAmountMinor)
+                      ? formatUsdMinor(summary.terms.approvedAmountMinor)
                       : "—"}
                   </b>
                 </div>
@@ -826,7 +823,9 @@ export function App(): JSX.Element {
                         : "服务费"}
                   </span>
                   <b>
-                    {summary.terms ? usd(summary.terms.serviceFeeMinor) : "—"}
+                    {summary.terms
+                      ? formatUsdMinor(summary.terms.serviceFeeMinor)
+                      : "—"}
                   </b>
                 </div>
                 <div>
@@ -839,7 +838,7 @@ export function App(): JSX.Element {
                   </span>
                   <b>
                     {summary.terms
-                      ? usd(summary.terms.totalRepayableMinor)
+                      ? formatUsdMinor(summary.terms.totalRepayableMinor)
                       : "—"}
                   </b>
                 </div>
@@ -918,7 +917,9 @@ export function App(): JSX.Element {
                             ? "នៅសល់ត្រូវសង"
                             : "待还金额"}
                       </span>
-                      <b>{usd(summary.repayment.outstandingMinor)}</b>
+                      <b>
+                        {formatUsdMinor(summary.repayment.outstandingMinor)}
+                      </b>
                     </div>
                     <div>
                       <span>
@@ -930,7 +931,9 @@ export function App(): JSX.Element {
                       </span>
                       <b>
                         {summary.repayment.overduePeriods} ·{" "}
-                        {usd(summary.repayment.overdueOutstandingMinor)}
+                        {formatUsdMinor(
+                          summary.repayment.overdueOutstandingMinor,
+                        )}
                       </b>
                     </div>
                   </div>
@@ -944,7 +947,9 @@ export function App(): JSX.Element {
                             : "下一期还款"}
                       </span>
                       <strong>
-                        {usd(summary.repayment.nextInstallment.amountDueMinor)}
+                        {formatUsdMinor(
+                          summary.repayment.nextInstallment.amountDueMinor,
+                        )}
                       </strong>
                       <small>
                         #{summary.repayment.nextInstallment.installmentNo} ·{" "}
@@ -968,7 +973,7 @@ export function App(): JSX.Element {
                         <span>
                           #{item.installmentNo} · {item.dueDate}
                         </span>
-                        <b>{usd(item.amountDueMinor)}</b>
+                        <b>{formatUsdMinor(item.amountDueMinor)}</b>
                         <em
                           className={
                             item.status === "PAID" ? "paid" : "pending"
@@ -1044,7 +1049,7 @@ export function App(): JSX.Element {
                   disabled={loading}
                 >
                   <span>
-                    <strong>{usd(item.requestedAmountMinor)}</strong>
+                    <strong>{formatUsdMinor(item.requestedAmountMinor)}</strong>
                     <small>{item.applicationNo}</small>
                   </span>
                   <em>{applicantPhaseLabel(phase, language)}</em>

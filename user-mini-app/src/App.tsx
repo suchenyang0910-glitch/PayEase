@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
+import { applicantResult } from "./application-result";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -183,18 +184,6 @@ function telegramInitData(): string | undefined {
     }
   ).Telegram;
   return telegram?.WebApp?.initData || undefined;
-}
-
-function applicantResult(
-  application: UserSummary["application"] | undefined,
-): "approved" | "rejected-resolved" | "rejected-pending" | "reviewing" {
-  if (application?.approvedAmountMinor) return "approved";
-  if (application?.status === "REJECTED") {
-    return application.rejectionConditionResolved
-      ? "rejected-resolved"
-      : "rejected-pending";
-  }
-  return "reviewing";
 }
 
 export function App(): JSX.Element {

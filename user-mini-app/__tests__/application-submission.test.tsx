@@ -62,4 +62,85 @@ describe("applicant submission", () => {
       personalDataAndPhoneConsent: true,
     });
   });
+
+  it("renders the approved terms and repayment dashboard returned for the applicant", async () => {
+    window.history.replaceState(null, "", "/?application=APP-LOAN-001");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          application: {
+            applicationNo: "APP-LOAN-001",
+            status: "REPAYMENT_ACTIVE",
+            requestedAmountMinor: "25000",
+            currency: "USD",
+            tenorDays: 30,
+            approvedAmountMinor: "25000",
+            rejectionConditionResolved: false,
+            supplementRequested: false,
+          },
+          terms: {
+            approvedAmountMinor: "25000",
+            serviceFeeMinor: "500",
+            totalRepayableMinor: "25500",
+            installmentCount: 2,
+            firstDueDate: "2026-09-15",
+          },
+          repayment: {
+            periodCount: 2,
+            paidPeriods: 1,
+            unpaidPeriods: 1,
+            overduePeriods: 0,
+            totalDueMinor: "25500",
+            totalPaidMinor: "12750",
+            outstandingMinor: "12750",
+            overdueOutstandingMinor: "0",
+            nextInstallment: {
+              installmentNo: 2,
+              dueDate: "2026-10-15",
+              amountDueMinor: "12750",
+            },
+            installments: [
+              {
+                installmentNo: 1,
+                dueDate: "2026-09-15",
+                amountDueMinor: "12750",
+                amountPaidMinor: "12750",
+                status: "PAID",
+              },
+              {
+                installmentNo: 2,
+                dueDate: "2026-10-15",
+                amountDueMinor: "12750",
+                amountPaidMinor: "0",
+                status: "PENDING",
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: /view application status/i }),
+    );
+
+    expect(await screen.findByText("Your loan information")).toBeVisible();
+    expect(screen.getByText("Service fee")).toBeVisible();
+    expect(screen.getByText("$5.00")).toBeVisible();
+    expect(screen.getByText("Total repayable")).toBeVisible();
+    expect(screen.getByText("$255.00")).toBeVisible();
+    expect(screen.getByText("Paid periods")).toBeVisible();
+    expect(screen.getByText("Unpaid periods")).toBeVisible();
+    expect(screen.getByText("Next payment")).toBeVisible();
+    expect(screen.getAllByText(/#2.*2026-10-15/)).toHaveLength(2);
+    expect(screen.getByText("Paid")).toBeVisible();
+    expect(screen.getByText("Pending")).toBeVisible();
+    expect(screen.queryByText("Estimated monthly payment")).toBeNull();
+  });
 });

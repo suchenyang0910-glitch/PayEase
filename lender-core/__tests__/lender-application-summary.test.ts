@@ -41,6 +41,10 @@ describe("lender application summary", () => {
     expect(lenderSummaryLines(parsed!)).toContain(
       "Repayment: 1 paid / 1 unpaid; outstanding $102.50 USD",
     );
+    expect(parsed?.terms?.serviceFee).toEqual({
+      amountMinor: "500",
+      currency: "USD",
+    });
   });
 
   it.each([

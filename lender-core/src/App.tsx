@@ -16,6 +16,7 @@ import {
   parseLenderApplicationSummary,
   type LenderApplicationSummary,
 } from "./lender-application-summary.ts";
+import { lenderServiceFeeSummaryLabel } from "./lender-summary-label.ts";
 import { formatHuman } from "@payease/shared-money";
 
 type Identity = {
@@ -588,6 +589,10 @@ export function App(): JSX.Element {
                 ) : null}
                 {applicationSummary.terms ? (
                   <>
+                    <dt>
+                      {lenderServiceFeeSummaryLabel(identity.preferredLanguage)}
+                    </dt>
+                    <dd>{formatHuman(applicationSummary.terms.serviceFee)}</dd>
                     <dt>{copy.loanTerms}</dt>
                     <dd>
                       {formatHuman(applicationSummary.terms.totalRepayable)} ·{" "}

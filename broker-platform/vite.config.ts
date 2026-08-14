@@ -21,4 +21,9 @@ const headers = (): PluginOption => ({
     });
   },
 });
-export default defineConfig({ plugins: [react(), headers()] });
+export default defineConfig({
+  plugins: [react(), headers()],
+  // Prefer authored TS/TSX if a developer has stale ignored tsc output beside
+  // it.  Otherwise Vite can resolve `./App` to `App.js` before `App.tsx`.
+  resolve: { extensions: [".tsx", ".ts", ".jsx", ".js", ".json"] },
+});

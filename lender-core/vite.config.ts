@@ -22,4 +22,8 @@ const securityHeaders = (): PluginOption => ({
   },
 });
 
-export default defineConfig({ plugins: [react(), securityHeaders()] });
+export default defineConfig({
+  plugins: [react(), securityHeaders()],
+  // Prefer source files over stale ignored JavaScript emitted by tsc.
+  resolve: { extensions: [".tsx", ".ts", ".jsx", ".js", ".json"] },
+});

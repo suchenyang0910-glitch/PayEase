@@ -139,7 +139,8 @@ app.addHook("onRequest", async (request, reply) => {
     request.method === "POST" && request.url === "/v1/local/applications";
   const isPublicTelegramSession =
     request.method === "POST" &&
-    request.url === "/v1/local/public/telegram-sessions";
+    (request.url === "/v1/local/public/telegram-sessions" ||
+      request.url === "/v1/local/public/telegram-sessions/logout");
   const isPublicApplicantLanguagePreference =
     request.method === "PUT" &&
     request.url === "/v1/local/public/profile/preferred-language";
@@ -874,6 +875,26 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     client.release();
   }
 });
+
+app.post(
+  "/v1/local/public/telegram-sessions/logout",
+  async (request, reply) => {
+    const token = applicantSessionToken(request.headers.cookie);
+    if (!token)
+      return reply.code(401).send({ code: "TELEGRAM_SESSION_REQUIRED" });
+    await pool.query(
+      `UPDATE telegram_auth_sessions
+          SET revoked_at = now()
+        WHERE token_hash = $1 AND revoked_at IS NULL`,
+      [eventHash([token])],
+    );
+    reply.header(
+      "Set-Cookie",
+      "payease_applicant_session=; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=0",
+    );
+    return { loggedOut: true };
+  },
+);
 
 app.post("/v1/local/applications", async (request, reply) => {
   const input = createApplicationSchema.parse(request.body);

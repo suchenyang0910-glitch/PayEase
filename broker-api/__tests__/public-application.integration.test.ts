@@ -289,11 +289,16 @@ integration("public applicant access", () => {
       );
       expect(createdUser.rows[0]?.telegram_user_ref).toBe("telegram-42424242");
 
+      const secondInitData = signedInitData(
+        botB.botToken,
+        42424242,
+        "bot-b-session",
+      );
       const secondLogin = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/public/telegram-sessions",
         payload: {
-          initData: signedInitData(botB.botToken, 42424242, "bot-b-session"),
+          initData: secondInitData,
         },
       });
       expect(secondLogin.statusCode).toBe(201);
@@ -413,6 +418,26 @@ integration("public applicant access", () => {
         },
       });
       expect(eligibleRetry.statusCode).toBe(201);
+
+      const logout = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions/logout",
+        headers: { cookie: secondCookie },
+      });
+      expect(logout.statusCode).toBe(200);
+      expect(logout.json()).toEqual({ loggedOut: true });
+      const listAfterLogout = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/applications",
+        headers: { cookie: secondCookie },
+      });
+      expect(listAfterLogout.statusCode).toBe(401);
+      const replayAfterLogout = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/public/telegram-sessions",
+        payload: { initData: secondInitData },
+      });
+      expect(replayAfterLogout.statusCode).toBe(409);
     } finally {
       if (originalBotConfig === undefined)
         delete process.env.TELEGRAM_BOTS_JSON;

@@ -7,6 +7,16 @@ type Identity = Readonly<{
   preferredLanguage: Language;
   roles: string[];
 }>;
+type PersonalProfileResponse = Readonly<{
+  applicationNo: string;
+  profile: { fullName: string; phone: string; employerName: string };
+  consent: {
+    personalDataVersion: string | null;
+    personalDataConsentedAt: string | null;
+    phoneVersion: string | null;
+    phoneConsentedAt: string | null;
+  };
+}>;
 
 const domains: Domain[] = ["OPS", "BROKER", "LENDER", "EMPLOYER"];
 const shell = {
@@ -90,6 +100,8 @@ export function App(): JSX.Element {
   const [applicationNo, setApplicationNo] = useState("");
   const [reasonCode, setReasonCode] = useState("DOCUMENTS_COMPLETE");
   const [notice, setNotice] = useState("");
+  const [personalProfile, setPersonalProfile] =
+    useState<PersonalProfileResponse>();
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
   const [department, setDepartment] = useState({
@@ -126,6 +138,7 @@ export function App(): JSX.Element {
   const logout = async () => {
     await request("/v1/local/auth/logout", { method: "POST" });
     setIdentity(undefined);
+    setPersonalProfile(undefined);
   };
   const updateLanguage = async (preferredLanguage: Language) => {
     const response = await request("/v1/local/auth/me/preferred-language", {
@@ -170,6 +183,21 @@ export function App(): JSX.Element {
         : `Action blocked (${response.status}): ${JSON.stringify(payload)}`,
     );
   };
+  const loadPersonalProfile = async () => {
+    setPersonalProfile(undefined);
+    const response = await request(
+      `/v1/local/applications/${encodeURIComponent(applicationNo)}/personal-profile`,
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setNotice(
+        `Profile unavailable (${response.status}): ${JSON.stringify(payload)}`,
+      );
+      return;
+    }
+    setPersonalProfile((await response.json()) as PersonalProfileResponse);
+    setNotice("Profile access recorded in the audit log.");
+  };
   if (checking) return <main style={shell}>Checking secure session…</main>;
   if (!identity) return <Login onLogin={setIdentity} />;
   const isBroker = identity.roles.includes("BROKER_OFFICER");
@@ -203,7 +231,10 @@ export function App(): JSX.Element {
               Application number
               <input
                 value={applicationNo}
-                onChange={(e) => setApplicationNo(e.target.value)}
+                onChange={(e) => {
+                  setApplicationNo(e.target.value);
+                  setPersonalProfile(undefined);
+                }}
                 placeholder="APP-…"
                 required
               />
@@ -219,6 +250,12 @@ export function App(): JSX.Element {
             <div style={{ display: "flex", gap: 12 }}>
               <button
                 disabled={!applicationNo}
+                onClick={() => void loadPersonalProfile()}
+              >
+                View authorised profile
+              </button>
+              <button
+                disabled={!applicationNo}
                 onClick={() => review("APPROVED")}
               >
                 Documents complete
@@ -230,6 +267,37 @@ export function App(): JSX.Element {
                 Request supplement
               </button>
             </div>
+            {personalProfile ? (
+              <section
+                aria-live="polite"
+                style={{ ...card, marginTop: 0, background: "#f8fafc" }}
+              >
+                <h3>Applicant profile — access logged</h3>
+                <dl
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "max-content 1fr",
+                    gap: 8,
+                  }}
+                >
+                  <dt>Full name</dt>
+                  <dd>{personalProfile.profile.fullName}</dd>
+                  <dt>Phone</dt>
+                  <dd>{personalProfile.profile.phone}</dd>
+                  <dt>Employer</dt>
+                  <dd>{personalProfile.profile.employerName}</dd>
+                  <dt>Personal-data consent</dt>
+                  <dd>
+                    {personalProfile.consent.personalDataVersion ??
+                      "Not recorded"}
+                  </dd>
+                  <dt>Phone consent</dt>
+                  <dd>
+                    {personalProfile.consent.phoneVersion ?? "Not recorded"}
+                  </dd>
+                </dl>
+              </section>
+            ) : null}
           </div>
         </section>
       ) : null}

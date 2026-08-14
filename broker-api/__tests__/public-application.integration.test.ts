@@ -1605,6 +1605,39 @@ integration("public applicant access", () => {
       status: "DISBURSEMENT_PENDING",
       approval: "MAKER_RECORDED",
     });
+    // A misconfigured account can accidentally receive both operational
+    // roles. The checker route must still reject that account: role-based
+    // authorization alone is not sufficient for maker/checker separation.
+    await database.query(
+      `INSERT INTO admin_account_roles (account_id, role_id)
+       SELECT session.account_id, role.id
+         FROM admin_sessions AS session
+         CROSS JOIN roles AS role
+        WHERE session.token_hash = $1
+          AND role.code = 'LENDER_DISBURSEMENT_CHECKER'
+       ON CONFLICT DO NOTHING`,
+      [
+        createHash("sha256")
+          .update(disbursementMaker.split("=")[1]!)
+          .digest("hex"),
+      ],
+    );
+    const sameAccountConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/disbursement-confirmation`,
+      headers: {
+        cookie: disbursementMaker,
+        "idempotency-key": "disbursement-confirmation-same-account",
+      },
+      payload: {
+        reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
+        evidenceReference: "DISBURSEMENT-SAME-ACCOUNT-REJECTED",
+      },
+    });
+    expect(sameAccountConfirmation.statusCode).toBe(409);
+    expect(sameAccountConfirmation.json()).toEqual({
+      code: "DUAL_CONTROL_CONFLICT",
+    });
     const disbursementChecker = await adminCookieForRole(
       database,
       "LENDER_DISBURSEMENT_CHECKER",

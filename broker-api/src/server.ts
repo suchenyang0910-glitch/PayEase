@@ -891,6 +891,35 @@ app.post("/v1/local/applications", async (request, reply) => {
        RETURNING id`,
       [telegramUserRef, input.preferredLanguage],
     );
+    const existing = await client.query<{
+      application_no: string;
+      status: string;
+      rejection_condition_resolved: boolean;
+    }>(
+      `SELECT application_no, status, rejection_condition_resolved
+         FROM applications
+        WHERE user_id = $1
+          AND (
+            status NOT IN ('REJECTED', 'SETTLED', 'CLOSED')
+            OR (status = 'REJECTED' AND rejection_condition_resolved = false)
+          )
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [user.rows[0]!.id],
+    );
+    const blockingApplication = existing.rows[0];
+    if (blockingApplication) {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({
+        code:
+          blockingApplication.status === "REJECTED"
+            ? "REAPPLICATION_REJECTION_CONDITION_UNRESOLVED"
+            : "REAPPLICATION_ACTIVE_APPLICATION_EXISTS",
+        applicationNo: blockingApplication.application_no,
+        currentStatus: blockingApplication.status,
+      });
+    }
     const applicationNo = `APP-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
     const created = await client.query<{
       id: string;

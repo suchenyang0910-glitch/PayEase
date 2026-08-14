@@ -283,6 +283,64 @@ integration("public applicant access", () => {
       expect(detail.json()).toMatchObject({
         application: { applicationNo, requestedAmountMinor: "10000" },
       });
+
+      const activeApplicationRetry = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: { cookie: secondCookie },
+        payload: {
+          preferredLanguage: "zh-CN",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+        },
+      });
+      expect(activeApplicationRetry.statusCode).toBe(409);
+      expect(activeApplicationRetry.json()).toMatchObject({
+        code: "REAPPLICATION_ACTIVE_APPLICATION_EXISTS",
+        applicationNo,
+        currentStatus: "BROKER_REVIEW",
+      });
+
+      await database.query(
+        `UPDATE applications
+            SET status = 'REJECTED', rejection_condition_resolved = false
+          WHERE application_no = $1`,
+        [applicationNo],
+      );
+      const unresolvedRejectionRetry = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: { cookie: secondCookie },
+        payload: {
+          preferredLanguage: "zh-CN",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+        },
+      });
+      expect(unresolvedRejectionRetry.statusCode).toBe(409);
+      expect(unresolvedRejectionRetry.json()).toMatchObject({
+        code: "REAPPLICATION_REJECTION_CONDITION_UNRESOLVED",
+        applicationNo,
+        currentStatus: "REJECTED",
+      });
+
+      await database.query(
+        `UPDATE applications
+            SET rejection_condition_resolved = true
+          WHERE application_no = $1`,
+        [applicationNo],
+      );
+      const eligibleRetry = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: { cookie: secondCookie },
+        payload: {
+          preferredLanguage: "zh-CN",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+        },
+      });
+      expect(eligibleRetry.statusCode).toBe(201);
     } finally {
       if (originalBotConfig === undefined)
         delete process.env.TELEGRAM_BOTS_JSON;

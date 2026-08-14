@@ -1,5 +1,10 @@
 # VPS controlled-preview only. Keep the database on the internal Docker network;
 # Caddy is the only public entry point and must enforce preview authentication.
+# A release is unpacked into a commit-specific directory. Pinning the Compose
+# project name prevents Docker from deriving a different name from that
+# directory and accidentally creating an empty database volume during upgrade.
+name: payease-preview
+
 services:
   postgres:
     image: postgres:16-alpine

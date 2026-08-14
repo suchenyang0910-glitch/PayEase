@@ -42,23 +42,41 @@ describe("lender application summary", () => {
     );
   });
 
-  it("only exposes actions that match the authoritative case status", () => {
-    const parsed = parseLenderApplicationSummary(activeRepaymentCase)!;
-    expect(allowedLenderActionRoutes(parsed)).toEqual([
-      "repayment-write-off",
-      "repayment-confirmation",
-    ]);
-    expect(
-      allowedLenderActionRoutes({
-        ...parsed,
-        application: {
-          ...parsed.application,
-          status: "REJECTED",
-          rejectionConditionResolved: true,
-        },
-      }),
-    ).toEqual([]);
-  });
+  it.each([
+    ["LENDER_INITIAL_REVIEW", false, ["lender-initial-review"]],
+    ["LENDER_FINAL_REVIEW", false, ["lender-final-review"]],
+    ["REJECTED", false, ["reapplication-condition-resolved"]],
+    ["REJECTED", true, []],
+    ["USER_CONTRACT_CONFIRMED", false, ["contract-confirmation"]],
+    ["CONTRACT_CONFIRMED", false, ["open-disbursement"]],
+    [
+      "DISBURSEMENT_PENDING",
+      false,
+      ["disbursement-release", "disbursement-confirmation"],
+    ],
+    ["DISBURSED", false, ["activate-repayment"]],
+    [
+      "REPAYMENT_ACTIVE",
+      false,
+      ["repayment-write-off", "repayment-confirmation"],
+    ],
+    ["SETTLED", false, []],
+  ] as const)(
+    "only exposes actions matching authoritative status %s",
+    (status, rejectionConditionResolved, expectedRoutes) => {
+      const parsed = parseLenderApplicationSummary(activeRepaymentCase)!;
+      expect(
+        allowedLenderActionRoutes({
+          ...parsed,
+          application: {
+            ...parsed.application,
+            status,
+            rejectionConditionResolved,
+          },
+        }),
+      ).toEqual(expectedRoutes);
+    },
+  );
 
   it("rejects malformed response data rather than rendering it as an operator case", () => {
     expect(

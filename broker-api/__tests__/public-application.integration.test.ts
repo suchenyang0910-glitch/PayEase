@@ -2493,7 +2493,11 @@ integration("public applicant access", () => {
     });
     expect(applicantView.statusCode).toBe(200);
     expect(applicantView.json()).toMatchObject({
-      application: { status: "SETTLED", approvedAmountMinor: "25000" },
+      application: {
+        status: "SETTLED",
+        approvedAmountMinor: "25000",
+        employerTenantDisplayName: "Lifecycle factory",
+      },
       repayment: {
         periodCount: 2,
         paidPeriods: 2,

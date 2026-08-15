@@ -2310,15 +2310,19 @@ app.get(
       rejection_condition_resolved: boolean;
       supplement_requested: boolean;
       rejected_reason_code: string | null;
+      employer_tenant_display_name: string | null;
     }>(
-      `SELECT id, application_no, requested_amount_minor::text, currency, tenor_days, status,
+      `SELECT applications.id, applications.application_no, applications.requested_amount_minor::text,
+            applications.currency, applications.tenor_days, applications.status,
             approved_amount_minor::text, rejection_condition_resolved, supplement_requested,
+            tenant.display_name AS employer_tenant_display_name,
             (
               SELECT reason_code FROM approval_events
                WHERE application_id = applications.id AND decision = 'REJECTED'
                ORDER BY occurred_at DESC LIMIT 1
             ) AS rejected_reason_code
        FROM applications
+       LEFT JOIN employer_tenants tenant ON tenant.id = applications.employer_tenant_id
        WHERE application_no = $1
          AND (
            ($4::boolean AND applicant_access_token_hash = $2)
@@ -2354,6 +2358,7 @@ app.get(
           application.rejected_reason_code,
         ),
         supplementRequested: application.supplement_requested,
+        employerTenantDisplayName: application.employer_tenant_display_name,
       },
       loanDetails.terms,
       loanDetails.repayment,
@@ -2384,11 +2389,13 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     supplement_requested: boolean;
     rejected_reason_code: string | null;
     created_at: Date;
+    employer_tenant_display_name: string | null;
   }>(
     `SELECT applications.application_no, applications.status,
             applications.requested_amount_minor::text, applications.currency,
             applications.tenor_days, applications.approved_amount_minor::text,
             applications.rejection_condition_resolved, applications.supplement_requested,
+            tenant.display_name AS employer_tenant_display_name,
             (
               SELECT reason_code FROM approval_events
                WHERE application_id = applications.id AND decision = 'REJECTED'
@@ -2397,6 +2404,7 @@ app.get("/v1/local/public/applications", async (request, reply) => {
             applications.created_at
        FROM applications
        JOIN users ON users.id = applications.user_id
+       LEFT JOIN employer_tenants tenant ON tenant.id = applications.employer_tenant_id
       WHERE users.telegram_user_ref = $1
       ORDER BY applications.created_at DESC
       LIMIT 20`,
@@ -2417,6 +2425,7 @@ app.get("/v1/local/public/applications", async (request, reply) => {
         application.rejected_reason_code,
       ),
       supplementRequested: application.supplement_requested,
+      employerTenantDisplayName: application.employer_tenant_display_name,
       createdAt: application.created_at.toISOString(),
     })),
   };

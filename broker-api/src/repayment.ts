@@ -38,6 +38,9 @@ export type ApplicantLoanSummary = Readonly<{
       | "LENDER_DECISION"
       | null;
     supplementRequested: boolean;
+    // The selected factory name is shown only in the applicant's own
+    // authorised summary. It is not an employer membership or volume view.
+    employerTenantDisplayName?: string | null;
   }>;
   terms: null | Readonly<{
     approvedAmountMinor: string;

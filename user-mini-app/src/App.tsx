@@ -46,6 +46,7 @@ type UserSummary = {
       | "LENDER_DECISION"
       | null;
     supplementRequested: boolean;
+    employerTenantDisplayName?: string | null;
   };
   terms: null | {
     approvedAmountMinor: string;
@@ -1798,6 +1799,12 @@ export function App(): JSX.Element {
                         : "天"}
                   </b>
                 </div>
+                {summary.application.employerTenantDisplayName ? (
+                  <div>
+                    <span>{factoryCopy.factory}</span>
+                    <b>{summary.application.employerTenantDisplayName}</b>
+                  </div>
+                ) : null}
               </div>
               {summary.application.status === "CONTRACT_PENDING" ? (
                 <section

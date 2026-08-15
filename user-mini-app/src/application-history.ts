@@ -13,6 +13,7 @@ export type ApplicationHistoryEntry = Readonly<{
     | "LENDER_DECISION"
     | null;
   supplementRequested: boolean;
+  employerTenantDisplayName?: string | null;
   createdAt: string;
 }>;
 

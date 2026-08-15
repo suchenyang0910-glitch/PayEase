@@ -2156,6 +2156,11 @@ export function App(): JSX.Element {
                   <span>
                     <strong>{formatUsdMinor(item.requestedAmountMinor)}</strong>
                     <small>{item.applicationNo}</small>
+                    {item.employerTenantDisplayName ? (
+                      <small>
+                        {factoryCopy.factory}: {item.employerTenantDisplayName}
+                      </small>
+                    ) : null}
                   </span>
                   <em>{applicantPhaseLabel(phase, language)}</em>
                 </button>

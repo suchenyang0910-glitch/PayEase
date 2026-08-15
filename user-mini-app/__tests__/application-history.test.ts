@@ -30,4 +30,15 @@ describe("applicant history", () => {
       prependApplicationHistory([entry("APP-ONE")], entry("APP-ONE")),
     ).toEqual([entry("APP-ONE")]);
   });
+
+  it("preserves the selected factory when application history is refreshed", () => {
+    const refreshed = {
+      ...entry("APP-FACTORY"),
+      employerTenantDisplayName: "Lanhai International Factory A",
+    };
+
+    expect(
+      prependApplicationHistory([entry("APP-FACTORY")], refreshed),
+    ).toEqual([refreshed]);
+  });
 });

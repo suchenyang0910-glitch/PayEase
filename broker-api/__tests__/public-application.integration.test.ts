@@ -1798,6 +1798,7 @@ integration("public applicant access", () => {
     expect(JSON.stringify(hrQueue.json())).not.toContain(
       "integration-lifecycle-user",
     );
+    expect(JSON.stringify(hrQueue.json())).not.toContain("KH-ID-10001");
     const otherTenant = await database.query<{ id: string }>(
       `INSERT INTO employer_tenants (external_ref, display_name)
        VALUES ('OTHER_LIFECYCLE_FACTORY', 'Other lifecycle factory') RETURNING id`,

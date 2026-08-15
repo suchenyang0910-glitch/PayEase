@@ -2487,6 +2487,53 @@ app.post(
   ),
 );
 
+app.get("/v1/local/employer/verifications/open", async (request, reply) => {
+  const roles = request.adminIdentity!.roles;
+  const isHr = roles.includes("EMPLOYER_HR");
+  const isFinance = roles.includes("EMPLOYER_FINANCE");
+  if (!isHr && !isFinance) {
+    return reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+  }
+  const statuses = [
+    ...(isHr ? ["EMPLOYER_VERIFICATION"] : []),
+    ...(isFinance ? ["EMPLOYER_FINANCE_VERIFICATION"] : []),
+  ];
+  const result = await pool.query<{
+    application_no: string;
+    requested_amount_minor: string;
+    currency: string;
+    tenor_days: number;
+    status: string;
+    created_at: Date;
+    identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
+    employer_tenant_id: string;
+  }>(
+    `SELECT a.application_no, a.requested_amount_minor::text, a.currency,
+            a.tenor_days, a.status, a.created_at, u.identity_document_type,
+            a.employer_tenant_id
+       FROM applications a
+       JOIN users u ON u.id = a.user_id
+       JOIN employer_tenant_members m ON m.employer_tenant_id = a.employer_tenant_id
+       JOIN admin_accounts account ON account.id = m.account_id
+      WHERE account.login_name = $1 AND account.is_active = true
+        AND a.status = ANY($2::text[])
+      ORDER BY a.created_at ASC`,
+    [request.adminIdentity!.loginName, statuses],
+  );
+  return {
+    items: result.rows.map((row) => ({
+      applicationNo: row.application_no,
+      requestedAmountMinor: row.requested_amount_minor,
+      currency: row.currency,
+      tenorDays: row.tenor_days,
+      stage: row.status,
+      createdAt: row.created_at.toISOString(),
+      identityDocumentType: row.identity_document_type,
+      employerTenantId: row.employer_tenant_id,
+    })),
+  };
+});
+
 app.post(
   "/v1/local/applications/:applicationNo/lender-initial-review",
   createStageHandler(

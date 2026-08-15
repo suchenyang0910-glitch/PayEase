@@ -1712,12 +1712,74 @@ integration("public applicant access", () => {
       tenant.rows[0]!.id,
       employerFinanceCookie,
     );
+    const hrQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/employer/verifications/open",
+      headers: { cookie: employerHrCookie },
+    });
+    expect(hrQueue.statusCode).toBe(200);
+    expect(hrQueue.json()).toMatchObject({
+      items: [
+        {
+          applicationNo,
+          requestedAmountMinor: "25000",
+          stage: "EMPLOYER_VERIFICATION",
+          employerTenantId: tenant.rows[0]!.id,
+        },
+      ],
+    });
+    expect(JSON.stringify(hrQueue.json())).not.toContain(
+      "integration-lifecycle-user",
+    );
+    const otherTenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('OTHER_LIFECYCLE_FACTORY', 'Other lifecycle factory') RETURNING id`,
+    );
+    const otherHrCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_HR",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(
+      database,
+      otherTenant.rows[0]!.id,
+      otherHrCookie,
+    );
+    const otherHrQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/employer/verifications/open",
+      headers: { cookie: otherHrCookie },
+    });
+    expect(otherHrQueue.statusCode).toBe(200);
+    expect(otherHrQueue.json()).toEqual({ items: [] });
+    const crossTenantApproval = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-verification`,
+      headers: {
+        cookie: otherHrCookie,
+        "idempotency-key": "cross-tenant-approval-001",
+      },
+      payload: { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
+    });
+    expect(crossTenantApproval.statusCode).toBe(403);
+    expect(crossTenantApproval.json()).toEqual({
+      code: "EMPLOYER_TENANT_ACCESS_DENIED",
+    });
     await call(
       "employer-verification",
       employerHrCookie,
       { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
       "EMPLOYER_FINANCE_VERIFICATION",
     );
+    const financeQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/employer/verifications/open",
+      headers: { cookie: employerFinanceCookie },
+    });
+    expect(financeQueue.statusCode).toBe(200);
+    expect(financeQueue.json()).toMatchObject({
+      items: [{ applicationNo, stage: "EMPLOYER_FINANCE_VERIFICATION" }],
+    });
     await call(
       "employer-finance-verification",
       employerFinanceCookie,

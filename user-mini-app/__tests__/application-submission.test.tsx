@@ -81,6 +81,92 @@ describe("applicant submission", () => {
     });
   });
 
+  it("requires a signed-in applicant to choose a factory and submit an identity document", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "signed-init-data" } },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 201 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ applications: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            tenants: [
+              { id: "tenant-lanhai-a", displayName: "Lanhai Factory A" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            applicationNo: "APP-FACTORY-001",
+            status: "BROKER_REVIEW",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    await screen.findByRole("option", { name: "Lanhai Factory A" });
+    fireEvent.change(screen.getByLabelText("Full name"), {
+      target: { value: "Factory Applicant" },
+    });
+    fireEvent.change(screen.getByLabelText("Mobile number"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(screen.getByLabelText("Employer"), {
+      target: { value: "Lanhai Factory A" },
+    });
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /personal-data authorization and privacy notice/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /submit for broker review/i }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select your factory and enter a valid identity document number.",
+    );
+    const requestCountBeforeFactorySelection = fetchMock.mock.calls.length;
+
+    fireEvent.change(screen.getByLabelText("Select factory"), {
+      target: { value: "tenant-lanhai-a" },
+    });
+    fireEvent.change(screen.getByLabelText("National ID / passport number"), {
+      target: { value: "KH-ID-10001" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /submit for broker review/i }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledTimes(
+        requestCountBeforeFactorySelection + 1,
+      ),
+    );
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      employerTenantId: "tenant-lanhai-a",
+      identityDocument: { type: "NATIONAL_ID", number: "KH-ID-10001" },
+    });
+  });
+
   it("does not send malformed phone data to the application API", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

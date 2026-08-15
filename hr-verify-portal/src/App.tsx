@@ -14,6 +14,7 @@ type VerificationQueueItem = {
   tenorDays: number;
   stage: string;
   identityDocumentType: "NATIONAL_ID" | "PASSPORT" | null;
+  identityMatchStatus: "PENDING" | "MATCHED" | "NOT_MATCHED";
 };
 const layout = {
   maxWidth: 900,
@@ -154,6 +155,7 @@ export function App(): JSX.Element {
   const [signInError, setSignInError] = useState("");
   const [running, setRunning] = useState(false);
   const verificationIdempotencyKey = useRef<string>();
+  const identityMatchIdempotencyKey = useRef<string>();
   const route = identity?.roles.includes("EMPLOYER_HR")
     ? "employer-verification"
     : identity?.roles.includes("EMPLOYER_FINANCE")
@@ -222,6 +224,45 @@ export function App(): JSX.Element {
         verificationIdempotencyKey.current = undefined;
       setNotice(result.notice);
       if (!result.deliveryUncertain) await loadQueue();
+    } finally {
+      setRunning(false);
+    }
+  };
+  const recordIdentityMatch = async (decision: "MATCHED" | "NOT_MATCHED") => {
+    if (!applicationNo) return;
+    setRunning(true);
+    setNotice("");
+    const idempotencyKey =
+      identityMatchIdempotencyKey.current ?? crypto.randomUUID();
+    identityMatchIdempotencyKey.current = idempotencyKey;
+    try {
+      const response = await api(
+        `/v1/local/applications/${encodeURIComponent(applicationNo)}/employer-identity-match`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            decision,
+            reasonCode:
+              decision === "MATCHED"
+                ? "FACTORY_EMPLOYEE_IDENTITY_MATCHED"
+                : "FACTORY_EMPLOYEE_IDENTITY_NOT_MATCHED",
+          }),
+          headers: { "Idempotency-Key": idempotencyKey },
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      if (response.ok) {
+        identityMatchIdempotencyKey.current = undefined;
+        setNotice(JSON.stringify(payload));
+        await loadQueue();
+      } else {
+        setNotice(JSON.stringify(payload));
+      }
     } finally {
       setRunning(false);
     }
@@ -308,7 +349,8 @@ export function App(): JSX.Element {
                       >
                         {item.applicationNo} · {item.currency}{" "}
                         {item.requestedAmountMinor} · {item.tenorDays}d ·{" "}
-                        {item.identityDocumentType ?? "—"}
+                        {item.identityDocumentType ?? "—"} ·{" "}
+                        {item.identityMatchStatus}
                       </button>
                     </li>
                   ))}
@@ -339,6 +381,26 @@ export function App(): JSX.Element {
               />
             </label>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button
+                disabled={!applicationNo || running}
+                onClick={() => void recordIdentityMatch("MATCHED")}
+              >
+                {language === "zh-CN"
+                  ? "确认员工证件匹配"
+                  : language === "km"
+                    ? "បញ្ជាក់ការផ្គូផ្គងអត្តសញ្ញាណបុគ្គលិក"
+                    : "Confirm employee identity match"}
+              </button>
+              <button
+                disabled={!applicationNo || running}
+                onClick={() => void recordIdentityMatch("NOT_MATCHED")}
+              >
+                {language === "zh-CN"
+                  ? "确认不匹配"
+                  : language === "km"
+                    ? "បញ្ជាក់ថាមិនផ្គូផ្គង"
+                    : "Confirm not matched"}
+              </button>
               <button
                 disabled={!applicationNo || running}
                 onClick={() => void run("APPROVED")}

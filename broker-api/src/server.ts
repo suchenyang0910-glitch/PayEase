@@ -440,6 +440,11 @@ type ApprovalCommand = Readonly<{
   reasonCode: string;
 }>;
 
+type EmploymentIdentityMatchCommand = Readonly<{
+  decision: "MATCHED" | "NOT_MATCHED";
+  reasonCode: string;
+}>;
+
 type FinalReviewTerms = Readonly<{
   approvedAmountMinor?: string;
   serviceFeeMinor?: string;
@@ -452,6 +457,7 @@ class DualControlConflictError extends Error {}
 
 type ManualActionName =
   | "BROKER_REVIEW"
+  | "EMPLOYER_IDENTITY_MATCH"
   | "EMPLOYER_VERIFICATION"
   | "EMPLOYER_FINANCE_VERIFICATION"
   | "LENDER_INITIAL_REVIEW"
@@ -1732,6 +1738,30 @@ const createStageHandler = (
             .send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
         }
       }
+      // Authenticated production applications carry an identity lookup hash.
+      // HR must record a factory-record match before approving such a case.
+      // Legacy controlled-preview records without a document remain usable.
+      if (requiredRole === "EMPLOYER_HR" && input.decision === "APPROVED") {
+        const identityMatch = await client.query<{
+          employment_identity_match_status: string;
+          identity_document_lookup_hash: string | null;
+        }>(
+          `SELECT a.employment_identity_match_status, u.identity_document_lookup_hash
+             FROM applications a JOIN users u ON u.id = a.user_id
+            WHERE a.id = $1`,
+          [application.id],
+        );
+        const identity = identityMatch.rows[0];
+        if (
+          identity?.identity_document_lookup_hash &&
+          identity.employment_identity_match_status !== "MATCHED"
+        ) {
+          await client.query("ROLLBACK");
+          return reply
+            .code(409)
+            .send({ code: "EMPLOYMENT_IDENTITY_MATCH_REQUIRED" });
+        }
+      }
       const status = await recordSingleApproval(
         client,
         application,
@@ -2501,6 +2531,118 @@ app.post(
 );
 
 app.post(
+  "/v1/local/applications/:applicationNo/employer-identity-match",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "EMPLOYER_HR")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = z
+      .object({
+        decision: z.enum(["MATCHED", "NOT_MATCHED"]),
+        reasonCode: z.string().min(1).max(64),
+      })
+      .parse(request.body) as EmploymentIdentityMatchCommand;
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "EMPLOYER_IDENTITY_MATCH",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      if (application.status !== "EMPLOYER_VERIFICATION") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      const access = await employerTenantAccess(
+        client,
+        application,
+        actorUserRef,
+      );
+      if (access === "APPLICATION_UNASSIGNED") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "EMPLOYER_TENANT_NOT_ASSIGNED" });
+      }
+      if (access === "DENIED") {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
+      }
+      const hasIdentity = await client.query(
+        `SELECT 1 FROM users u JOIN applications a ON a.user_id = u.id
+          WHERE a.id = $1 AND u.identity_document_lookup_hash IS NOT NULL`,
+        [application.id],
+      );
+      if (!hasIdentity.rowCount) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "IDENTITY_DOCUMENT_NOT_AVAILABLE" });
+      }
+      await client.query(
+        `UPDATE applications
+            SET employment_identity_match_status = $1,
+                employment_identity_matched_at = now(),
+                employment_identity_matched_by = $2
+          WHERE id = $3`,
+        [input.decision, actorUserRef, application.id],
+      );
+      await addAuditEvent(
+        client,
+        application.id,
+        "EMPLOYMENT_IDENTITY_MATCH_RECORDED",
+        actorUserRef,
+        { decision: input.decision, reasonCode: input.reasonCode },
+      );
+      const response = {
+        applicationNo: params.applicationNo,
+        identityMatchStatus: input.decision,
+      };
+      await recordManualActionResult(
+        client,
+        application,
+        "EMPLOYER_IDENTITY_MATCH",
+        actorUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return response;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
   "/v1/local/applications/:applicationNo/employer-verification",
   createStageHandler(
     "EMPLOYER_VERIFICATION",
@@ -2543,10 +2685,12 @@ app.get("/v1/local/employer/verifications/open", async (request, reply) => {
     status: string;
     created_at: Date;
     identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
+    employment_identity_match_status: "PENDING" | "MATCHED" | "NOT_MATCHED";
     employer_tenant_id: string;
   }>(
     `SELECT a.application_no, a.requested_amount_minor::text, a.currency,
             a.tenor_days, a.status, a.created_at, u.identity_document_type,
+            a.employment_identity_match_status,
             a.employer_tenant_id
        FROM applications a
        JOIN users u ON u.id = a.user_id
@@ -2566,6 +2710,7 @@ app.get("/v1/local/employer/verifications/open", async (request, reply) => {
       stage: row.status,
       createdAt: row.created_at.toISOString(),
       identityDocumentType: row.identity_document_type,
+      identityMatchStatus: row.employment_identity_match_status,
       employerTenantId: row.employer_tenant_id,
     })),
   };

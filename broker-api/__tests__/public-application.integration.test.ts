@@ -118,7 +118,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0026__employer_tenants_and_identity_documents.sql",
+      filename: "V0027__employment_identity_match_gate.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -1709,6 +1709,7 @@ integration("public applicant access", () => {
         requestedAmount: { amountMinor: "25000", currency: "USD" },
         tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
+        identityDocument: { type: "NATIONAL_ID", number: "KH-ID-10001" },
       },
     });
     expect(created.statusCode).toBe(201);
@@ -1830,6 +1831,36 @@ integration("public applicant access", () => {
     expect(crossTenantApproval.statusCode).toBe(403);
     expect(crossTenantApproval.json()).toEqual({
       code: "EMPLOYER_TENANT_ACCESS_DENIED",
+    });
+    const identityMatchRequired = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-verification`,
+      headers: {
+        cookie: employerHrCookie,
+        "idempotency-key": "identity-match-required-001",
+      },
+      payload: { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
+    });
+    expect(identityMatchRequired.statusCode).toBe(409);
+    expect(identityMatchRequired.json()).toEqual({
+      code: "EMPLOYMENT_IDENTITY_MATCH_REQUIRED",
+    });
+    const identityMatched = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-identity-match`,
+      headers: {
+        cookie: employerHrCookie,
+        "idempotency-key": "identity-match-recorded-001",
+      },
+      payload: {
+        decision: "MATCHED",
+        reasonCode: "FACTORY_EMPLOYEE_IDENTITY_MATCHED",
+      },
+    });
+    expect(identityMatched.statusCode).toBe(200);
+    expect(identityMatched.json()).toEqual({
+      applicationNo,
+      identityMatchStatus: "MATCHED",
     });
     await call(
       "employer-verification",

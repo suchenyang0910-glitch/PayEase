@@ -2593,6 +2593,20 @@ app.post(
         await client.query("ROLLBACK");
         return reply.code(403).send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
       }
+      const existingMatch = await client.query<{
+        employment_identity_match_status: string;
+      }>(
+        "SELECT employment_identity_match_status FROM applications WHERE id = $1",
+        [application.id],
+      );
+      if (
+        existingMatch.rows[0]?.employment_identity_match_status !== "PENDING"
+      ) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "EMPLOYMENT_IDENTITY_MATCH_ALREADY_RECORDED" });
+      }
       const hasIdentity = await client.query(
         `SELECT 1 FROM users u JOIN applications a ON a.user_id = u.id
           WHERE a.id = $1 AND u.identity_document_lookup_hash IS NOT NULL`,

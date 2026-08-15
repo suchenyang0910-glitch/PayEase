@@ -1862,6 +1862,22 @@ integration("public applicant access", () => {
       applicationNo,
       identityMatchStatus: "MATCHED",
     });
+    const identityMatchOverwrite = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-identity-match`,
+      headers: {
+        cookie: employerHrCookie,
+        "idempotency-key": "identity-match-overwrite-001",
+      },
+      payload: {
+        decision: "NOT_MATCHED",
+        reasonCode: "SHOULD_NOT_OVERWRITE",
+      },
+    });
+    expect(identityMatchOverwrite.statusCode).toBe(409);
+    expect(identityMatchOverwrite.json()).toEqual({
+      code: "EMPLOYMENT_IDENTITY_MATCH_ALREADY_RECORDED",
+    });
     await call(
       "employer-verification",
       employerHrCookie,

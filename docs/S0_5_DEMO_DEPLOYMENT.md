@@ -20,19 +20,19 @@ REM   Network-Zero: no fetch/axios/WebSocket/bank-domain markers inside dist/ass
 REM   CI-10 amountMinor: never a JS number; always string minor unit inside dist/assets/*.js
 ```
 
-If the build machine is Linux/macOS, use the Bash equivalent:
+If the build machine is Linux/macOS, use this executable Bash equivalent. It intentionally builds the dedicated demo entrypoints, not the normal portal entrypoints.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)"
 cd "$ROOT"
-for pkg in @payease/shared-money @payease/partner-contracts @payease/hr-verify-portal @payease/finance-verify-portal; do
-  pnpm --filter "$pkg" run "${pkg#@payease/shared-money}" = "shared-money" ? "build" : "typecheck"
-  # ^ replace the inline ternary with actual calls; the exact behaviour mirrors scripts/build-demo-portals.cmd
-done
-pnpm --filter @payease/hr-verify-portal run build
-pnpm --filter @payease/finance-verify-portal run build
+pnpm --filter @payease/shared-money run build
+pnpm --filter @payease/partner-contracts run typecheck
+pnpm --filter @payease/hr-verify-portal run typecheck
+pnpm --filter @payease/finance-verify-portal run typecheck
+pnpm --filter @payease/hr-verify-portal run build:demo
+pnpm --filter @payease/finance-verify-portal run build:demo
 # Network-Zero assertion (HR):
 if grep -R -E -I -q 'fetch\(|XMLHttpRequest|WebSocket\(|axios|\.ababank\.com|wingmoney\.com|acledabank\.com\.kh|stripe\.com|payway\.com\.kh|sap\.|oracle\.com|quickbooks|xero' hr-verify-portal/dist/assets; then
   echo "FAIL hr-verify-portal network zero"; exit 1
@@ -106,7 +106,32 @@ Optional (recommended): **disable directory listing and hidden-file serving** in
 sudo find /var/www/hr-demo /var/www/fin-demo \( -name ".git" -o -name ".env*" -o -name "*.log" -o -name "*.bak" \) -delete
 ```
 
-## 5. Nginx virtual hosts
+## 5. Nginx virtual hosts and TLS issue order
+
+Do not enable a TLS server block that references a certificate before the certificate exists. First install a temporary HTTP-only bootstrap vhost, obtain each certificate, then replace it with the hardened TLS vhost below. `limit_req_zone` is valid only inside Nginx's `http` context, so install it as a separate `conf.d` file rather than inside a `server` block.
+
+```nginx
+# /etc/nginx/conf.d/payease-demo-rate-limit.conf
+# This file is included from nginx.conf's http {} context on Ubuntu.
+limit_req_zone $binary_remote_addr zone=hrdemo:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=findemo:10m rate=10r/s;
+```
+
+Install the rate-limit file and a temporary HTTP-only vhost for each hostname. It must serve `/.well-known/acme-challenge/` for Certbot; all other routes may return 404 during bootstrap.
+
+```nginx
+# /etc/nginx/sites-available/hr-demo (bootstrap only)
+server {
+  listen 80;
+  listen [::]:80;
+  server_name HR_VERIFY_DEMO_HOST;
+  root /var/www/hr-demo;
+  location /.well-known/acme-challenge/ { allow all; }
+  location / { return 404; }
+}
+```
+
+Create the equivalent `fin-demo` bootstrap file using `FIN_VERIFY_DEMO_HOST` and `/var/www/fin-demo`, enable both files, then run `sudo nginx -t && sudo systemctl reload nginx`. Issue certificates with the commands in section 6. Only after both commands succeed, replace the bootstrap files with the hardened TLS vhosts below and reload Nginx.
 
 ### /etc/nginx/sites-available/hr-demo
 
@@ -140,17 +165,12 @@ server {
   add_header Permissions-Policy                  "camera=(), microphone=(), geolocation=(), payment=()" always;
 
   # Deny access to hidden files and any accidental text/yml/json secrets
-  location ~ /\. { deny all; access_log off; log_not_found off; }
+  location ~ /\.(?!well-known/) { deny all; access_log off; log_not_found off; }
   location ~* \.(log|bak|sql|pem|key|crt|p12|pfx|env|swp)$ { deny all; }
 
-  # Vite React SPA fallback (HashRouter works even without this; adding for compatibility with BrowserRouter future migrations)
-  location / {
-    try_files $uri /index.html;
-  }
-
-  # Optional basic rate-limit per IP: 10 req/s burst 20 (to prevent htpasswd brute-force; fail2ban is stronger)
-  limit_req_zone $binary_remote_addr zone=hrdemo:10m rate=10r/s;
-  location = /login.html { limit_req zone=hrdemo burst=20 nodelay; try_files /index.html =404; }
+  # HashRouter works without fallback; retain this for a future BrowserRouter migration.
+  # The rate-limit zone is declared in conf.d under http {}.
+  location / { limit_req zone=hrdemo burst=20 nodelay; try_files $uri /index.html; }
 }
 
 # HTTP -> HTTPS redirect
@@ -170,9 +190,9 @@ Identical structure with:
 - `ssl_certificate/ssl_certificate_key` point to `FIN_VERIFY_DEMO_HOST` certs
 - `auth_basic_user_file /etc/nginx/.htpasswd-fin;`
 - `root /var/www/fin-demo;`
-- `limit_req_zone $binary_remote_addr zone=findemo:10m rate=10r/s;`
+- use `limit_req zone=findemo burst=20 nodelay;` inside its `location /` block; its zone is declared in `/etc/nginx/conf.d/payease-demo-rate-limit.conf`
 
-Enable and test:
+Enable and test only after replacing both bootstrap files with the TLS vhosts:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/hr-demo /etc/nginx/sites-enabled/hr-demo
@@ -181,11 +201,13 @@ sudo nginx -t  # must print "syntax is ok / test is successful"
 sudo systemctl reload nginx
 ```
 
-## 6. Issue TLS certificate via Let's Encrypt certbot (zero-touch)
+## 6. Issue TLS certificate via Let's Encrypt
 
 ```bash
-sudo certbot --nginx -d HR_VERIFY_DEMO_HOST --non-interactive --agree-tos --redirect --email security-owner@payease.example
-sudo certbot --nginx -d FIN_VERIFY_DEMO_HOST   --non-interactive --agree-tos --redirect --email security-owner@payease.example
+# Run while the HTTP bootstrap vhosts are enabled. Certbot creates the certificates;
+# it must not be asked to redirect or rewrite the bootstrap configs at this stage.
+sudo certbot certonly --webroot -w /var/www/hr-demo -d HR_VERIFY_DEMO_HOST --non-interactive --agree-tos --email security-owner@payease.example
+sudo certbot certonly --webroot -w /var/www/fin-demo -d FIN_VERIFY_DEMO_HOST --non-interactive --agree-tos --email security-owner@payease.example
 sudo systemctl status certbot.timer  # ensure auto-renewal timer is active
 ```
 

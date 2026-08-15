@@ -152,6 +152,8 @@ export function App(): JSX.Element {
   const [reasonCode, setReasonCode] = useState(
     "EMPLOYMENT_AND_SALARY_RANGE_CONFIRMED",
   );
+  const [factoryRecordIdentityNumber, setFactoryRecordIdentityNumber] =
+    useState("");
   const [notice, setNotice] = useState("");
   const [signInError, setSignInError] = useState("");
   const [running, setRunning] = useState(false);
@@ -234,8 +236,12 @@ export function App(): JSX.Element {
       setRunning(false);
     }
   };
-  const recordIdentityMatch = async (decision: "MATCHED" | "NOT_MATCHED") => {
+  const recordIdentityMatch = async () => {
     if (!applicationNo) return;
+    if (!factoryRecordIdentityNumber.trim()) {
+      setNotice("FACTORY_RECORD_IDENTITY_DOCUMENT_REQUIRED");
+      return;
+    }
     setRunning(true);
     setNotice("");
     const idempotencyKey =
@@ -247,11 +253,8 @@ export function App(): JSX.Element {
         {
           method: "POST",
           body: JSON.stringify({
-            decision,
-            reasonCode:
-              decision === "MATCHED"
-                ? "FACTORY_EMPLOYEE_IDENTITY_MATCHED"
-                : "FACTORY_EMPLOYEE_IDENTITY_NOT_MATCHED",
+            identityDocumentNumber: factoryRecordIdentityNumber.trim(),
+            reasonCode: "FACTORY_PERSONNEL_RECORD_COMPARISON",
           }),
           headers: { "Idempotency-Key": idempotencyKey },
         },
@@ -386,10 +389,24 @@ export function App(): JSX.Element {
                 onChange={(e) => setReasonCode(e.target.value)}
               />
             </label>
+            {identity.roles.includes("EMPLOYER_HR") ? (
+              <label style={{ display: "block", marginTop: 10 }}>
+                Factory personnel-record identity document number
+                <input
+                  value={factoryRecordIdentityNumber}
+                  onChange={(event) =>
+                    setFactoryRecordIdentityNumber(event.target.value)
+                  }
+                  autoComplete="off"
+                  inputMode="text"
+                />
+              </label>
+            ) : null}
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button
+                hidden={!identity.roles.includes("EMPLOYER_HR")}
                 disabled={!applicationNo || running}
-                onClick={() => void recordIdentityMatch("MATCHED")}
+                onClick={() => void recordIdentityMatch()}
               >
                 {language === "zh-CN"
                   ? "确认员工证件匹配"
@@ -398,8 +415,9 @@ export function App(): JSX.Element {
                     : "Confirm employee identity match"}
               </button>
               <button
+                hidden
                 disabled={!applicationNo || running}
-                onClick={() => void recordIdentityMatch("NOT_MATCHED")}
+                onClick={() => void recordIdentityMatch()}
               >
                 {language === "zh-CN"
                   ? "确认不匹配"

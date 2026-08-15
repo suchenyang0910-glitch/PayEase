@@ -441,7 +441,7 @@ type ApprovalCommand = Readonly<{
 }>;
 
 type EmploymentIdentityMatchCommand = Readonly<{
-  decision: "MATCHED" | "NOT_MATCHED";
+  identityDocumentNumber: string;
   reasonCode: string;
 }>;
 
@@ -2655,7 +2655,12 @@ app.post(
       .parse(request.params);
     const input = z
       .object({
-        decision: z.enum(["MATCHED", "NOT_MATCHED"]),
+        // HR enters the number from the factory's own personnel record.
+        // The applicant's number is never returned to the employer portal.
+        identityDocumentNumber: z
+          .string()
+          .trim()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9 -]{4,63}$/),
         reasonCode: z.string().min(1).max(64),
       })
       .parse(request.body) as EmploymentIdentityMatchCommand;
@@ -2718,16 +2723,43 @@ app.post(
           .code(409)
           .send({ code: "EMPLOYMENT_IDENTITY_MATCH_ALREADY_RECORDED" });
       }
-      const hasIdentity = await client.query(
-        `SELECT 1 FROM users u JOIN applications a ON a.user_id = u.id
-          WHERE a.id = $1 AND u.identity_document_lookup_hash IS NOT NULL`,
+      const applicantIdentity = await client.query<{
+        identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
+        identity_document_lookup_hash: string | null;
+      }>(
+        `SELECT u.identity_document_type, u.identity_document_lookup_hash
+           FROM users u JOIN applications a ON a.user_id = u.id
+          WHERE a.id = $1`,
         [application.id],
       );
-      if (!hasIdentity.rowCount) {
+      const storedIdentity = applicantIdentity.rows[0];
+      if (
+        !storedIdentity?.identity_document_type ||
+        !storedIdentity.identity_document_lookup_hash
+      ) {
         await client.query("ROLLBACK");
         return reply
           .code(409)
           .send({ code: "IDENTITY_DOCUMENT_NOT_AVAILABLE" });
+      }
+      let identityMatchStatus: "MATCHED" | "NOT_MATCHED";
+      try {
+        identityMatchStatus =
+          identityDocumentLookupHash({
+            type: storedIdentity.identity_document_type,
+            number: input.identityDocumentNumber,
+          }) === storedIdentity.identity_document_lookup_hash
+            ? "MATCHED"
+            : "NOT_MATCHED";
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          "identity document comparison unavailable",
+        );
+        await client.query("ROLLBACK");
+        return reply
+          .code(503)
+          .send({ code: "IDENTITY_DOCUMENT_STORAGE_UNAVAILABLE" });
       }
       await client.query(
         `UPDATE applications
@@ -2735,18 +2767,18 @@ app.post(
                 employment_identity_matched_at = now(),
                 employment_identity_matched_by = $2
           WHERE id = $3`,
-        [input.decision, actorUserRef, application.id],
+        [identityMatchStatus, actorUserRef, application.id],
       );
       await addAuditEvent(
         client,
         application.id,
         "EMPLOYMENT_IDENTITY_MATCH_RECORDED",
         actorUserRef,
-        { decision: input.decision, reasonCode: input.reasonCode },
+        { decision: identityMatchStatus, reasonCode: input.reasonCode },
       );
       const response = {
         applicationNo: params.applicationNo,
-        identityMatchStatus: input.decision,
+        identityMatchStatus,
       };
       await recordManualActionResult(
         client,

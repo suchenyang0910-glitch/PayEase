@@ -1980,7 +1980,7 @@ integration("public applicant access", () => {
         "idempotency-key": "cross-tenant-identity-match-001",
       },
       payload: {
-        decision: "MATCHED",
+        identityDocumentNumber: "KH-ID-10001",
         reasonCode: "UNAUTHORIZED_FACTORY_ATTEMPT",
       },
     });
@@ -2009,7 +2009,7 @@ integration("public applicant access", () => {
         "idempotency-key": "identity-match-recorded-001",
       },
       payload: {
-        decision: "MATCHED",
+        identityDocumentNumber: "khid10001",
         reasonCode: "FACTORY_EMPLOYEE_IDENTITY_MATCHED",
       },
     });
@@ -2026,7 +2026,7 @@ integration("public applicant access", () => {
         "idempotency-key": "identity-match-overwrite-001",
       },
       payload: {
-        decision: "NOT_MATCHED",
+        identityDocumentNumber: "KH-ID-99999",
         reasonCode: "SHOULD_NOT_OVERWRITE",
       },
     });

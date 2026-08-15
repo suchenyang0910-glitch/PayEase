@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { HR_COPY, HR_LANGUAGE_LABELS, type HrLanguage } from "./hr-copy";
 import { requiresIdentityMatchBeforeApproval } from "./hr-identity-match-gate";
 import { hrVerificationNotice } from "./hr-verification-action";
+import { IDENTITY_RECORD_COPY } from "./identity-record-copy";
 
 type Identity = {
   loginName: string;
@@ -198,6 +199,7 @@ export function App(): JSX.Element {
   }, [route]);
   const language = identity?.preferredLanguage ?? "en";
   const copy = HR_COPY[language];
+  const identityRecordCopy = IDENTITY_RECORD_COPY[language];
   const selectedVerification = queue.find(
     (item) => item.applicationNo === applicationNo,
   );
@@ -239,7 +241,7 @@ export function App(): JSX.Element {
   const recordIdentityMatch = async () => {
     if (!applicationNo) return;
     if (!factoryRecordIdentityNumber.trim()) {
-      setNotice("FACTORY_RECORD_IDENTITY_DOCUMENT_REQUIRED");
+      setNotice(identityRecordCopy.required);
       return;
     }
     setRunning(true);
@@ -391,7 +393,7 @@ export function App(): JSX.Element {
             </label>
             {identity.roles.includes("EMPLOYER_HR") ? (
               <label style={{ display: "block", marginTop: 10 }}>
-                Factory personnel-record identity document number
+                {identityRecordCopy.label}
                 <input
                   value={factoryRecordIdentityNumber}
                   onChange={(event) =>
@@ -405,9 +407,14 @@ export function App(): JSX.Element {
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button
                 hidden={!identity.roles.includes("EMPLOYER_HR")}
+                aria-label={identityRecordCopy.action}
+                style={{ fontSize: 0 }}
                 disabled={!applicationNo || running}
                 onClick={() => void recordIdentityMatch()}
               >
+                <span style={{ fontSize: 14 }}>
+                  {identityRecordCopy.action}
+                </span>
                 {language === "zh-CN"
                   ? "确认员工证件匹配"
                   : language === "km"

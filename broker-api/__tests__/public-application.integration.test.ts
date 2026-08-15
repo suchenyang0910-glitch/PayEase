@@ -2576,6 +2576,123 @@ integration("public applicant access", () => {
     expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(11);
   });
 
+  it("isolates reconciliation queues, assignments, and resolutions by factory tenant", async () => {
+    const firstTenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('RECON_FACTORY_A', 'Reconciliation factory A') RETURNING id`,
+    );
+    const secondTenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('RECON_FACTORY_B', 'Reconciliation factory B') RETURNING id`,
+    );
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('telegram-reconciliation-tenant', 'en') RETURNING id`,
+    );
+    const application = await database.query<{ id: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, employer_tenant_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ('APP-20260815-RECON', $1, $2, 10000, 'USD', 30, 'DISBURSED')
+       RETURNING id`,
+      [user.rows[0]!.id, firstTenant.rows[0]!.id],
+    );
+    const workItem = await database.query<{ id: string }>(
+      `INSERT INTO reconciliation_work_items
+        (application_id, evidence_type, evidence_reference)
+       VALUES ($1, 'DISBURSEMENT_RECEIPT', 'RECON-TENANT-001') RETURNING id`,
+      [application.rows[0]!.id],
+    );
+    const firstFinanceCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_FINANCE",
+      "EMPLOYER",
+    );
+    const secondFinanceCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_FINANCE",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(
+      database,
+      firstTenant.rows[0]!.id,
+      firstFinanceCookie,
+    );
+    await grantEmployerTenantMember(
+      database,
+      secondTenant.rows[0]!.id,
+      secondFinanceCookie,
+    );
+
+    const secondFactoryQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/reconciliation/open",
+      headers: { cookie: secondFinanceCookie },
+    });
+    expect(secondFactoryQueue.statusCode).toBe(200);
+    expect(secondFactoryQueue.json()).toEqual([]);
+
+    const crossTenantAssignment = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reconciliation/${workItem.rows[0]!.id}/assign`,
+      headers: { cookie: secondFinanceCookie },
+      payload: { assigneeLoginName: "integration-employer_finance-999" },
+    });
+    expect(crossTenantAssignment.statusCode).toBe(403);
+    expect(crossTenantAssignment.json()).toEqual({
+      code: "EMPLOYER_TENANT_ACCESS_DENIED",
+    });
+
+    const secondFinanceToken = secondFinanceCookie.slice(
+      "payease_session=".length,
+    );
+    const secondFinanceLogin = await database.query<{ login_name: string }>(
+      `SELECT account.login_name
+         FROM admin_sessions session
+         JOIN admin_accounts account ON account.id = session.account_id
+        WHERE session.token_hash = $1`,
+      [createHash("sha256").update(secondFinanceToken).digest("hex")],
+    );
+    const crossTenantAssignee = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reconciliation/${workItem.rows[0]!.id}/assign`,
+      headers: { cookie: firstFinanceCookie },
+      payload: { assigneeLoginName: secondFinanceLogin.rows[0]!.login_name },
+    });
+    expect(crossTenantAssignee.statusCode).toBe(422);
+    expect(crossTenantAssignee.json()).toEqual({
+      code: "INVALID_FINANCE_ASSIGNEE",
+    });
+
+    const firstFinanceToken = firstFinanceCookie.slice(
+      "payease_session=".length,
+    );
+    const firstFinanceLogin = await database.query<{ login_name: string }>(
+      `SELECT account.login_name
+         FROM admin_sessions session
+         JOIN admin_accounts account ON account.id = session.account_id
+        WHERE session.token_hash = $1`,
+      [createHash("sha256").update(firstFinanceToken).digest("hex")],
+    );
+    const assigned = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reconciliation/${workItem.rows[0]!.id}/assign`,
+      headers: { cookie: firstFinanceCookie },
+      payload: { assigneeLoginName: firstFinanceLogin.rows[0]!.login_name },
+    });
+    expect(assigned.statusCode).toBe(200);
+
+    const crossTenantResolution = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reconciliation/${workItem.rows[0]!.id}/match`,
+      headers: { cookie: secondFinanceCookie },
+      payload: { reasonCode: "OUT_OF_SCOPE" },
+    });
+    expect(crossTenantResolution.statusCode).toBe(403);
+    expect(crossTenantResolution.json()).toEqual({
+      code: "EMPLOYER_TENANT_ACCESS_DENIED",
+    });
+  });
+
   it("keeps complaint text encrypted while routing the final outcome to the licensed lender", async () => {
     const applicantRef = "telegram-service-case-applicant";
     const user = await database.query<{ id: string }>(

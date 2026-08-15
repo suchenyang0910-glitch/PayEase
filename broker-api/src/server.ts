@@ -4597,8 +4597,16 @@ app.get("/v1/local/reconciliation/open", async (request, reply) => {
             r.assigned_to_user_ref, r.resolution_reason, r.created_at
      FROM reconciliation_work_items r
      JOIN applications a ON a.id = r.application_id
+     JOIN employer_tenants tenant ON tenant.id = a.employer_tenant_id
+     JOIN employer_tenant_members membership
+       ON membership.employer_tenant_id = a.employer_tenant_id
+     JOIN admin_accounts account ON account.id = membership.account_id
      WHERE r.status IN ('OPEN', 'DIFFERENCE')
+       AND account.login_name = $1
+       AND account.is_active = true
+       AND tenant.is_active = true
      ORDER BY r.created_at ASC`,
+    [request.adminIdentity!.loginName],
   );
   return result.rows;
 });
@@ -4617,6 +4625,25 @@ async function lockReconciliationWorkItem(
     [workItemId],
   );
   return result.rows[0];
+}
+
+async function reconciliationTenantAccess(
+  client: PoolClient,
+  applicationId: string,
+  loginName: string,
+): Promise<boolean> {
+  const membership = await client.query(
+    `SELECT 1
+       FROM applications application
+       JOIN employer_tenants tenant ON tenant.id = application.employer_tenant_id
+       JOIN employer_tenant_members membership
+         ON membership.employer_tenant_id = application.employer_tenant_id
+       JOIN admin_accounts account ON account.id = membership.account_id
+      WHERE application.id = $1 AND account.login_name = $2
+        AND account.is_active = true AND tenant.is_active = true`,
+    [applicationId, loginName],
+  );
+  return Boolean(membership.rowCount);
 }
 
 app.post(
@@ -4640,10 +4667,29 @@ app.post(
           .code(404)
           .send({ code: "RECONCILIATION_WORK_ITEM_NOT_FOUND" });
       }
+      if (
+        !(await reconciliationTenantAccess(
+          client,
+          workItem.application_id,
+          request.adminIdentity!.loginName,
+        ))
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
+      }
       const assignee = await client.query(
-        `SELECT 1 FROM admin_accounts a JOIN admin_account_roles ar ON ar.account_id = a.id
-       JOIN roles r ON r.id = ar.role_id WHERE a.login_name = $1 AND a.is_active = true AND r.code = 'EMPLOYER_FINANCE'`,
-        [input.assigneeLoginName],
+        `SELECT 1
+           FROM applications application
+           JOIN employer_tenants tenant ON tenant.id = application.employer_tenant_id
+           JOIN employer_tenant_members membership
+             ON membership.employer_tenant_id = application.employer_tenant_id
+           JOIN admin_accounts account ON account.id = membership.account_id
+           JOIN admin_account_roles account_role ON account_role.account_id = account.id
+           JOIN roles role ON role.id = account_role.role_id
+          WHERE application.id = $1 AND account.login_name = $2
+            AND account.is_active = true AND tenant.is_active = true
+            AND role.code = 'EMPLOYER_FINANCE'`,
+        [workItem.application_id, input.assigneeLoginName],
       );
       if (!assignee.rowCount) {
         await client.query("ROLLBACK");
@@ -4708,6 +4754,16 @@ async function resolveReconciliation(
       return reply
         .code(404)
         .send({ code: "RECONCILIATION_WORK_ITEM_NOT_FOUND" });
+    }
+    if (
+      !(await reconciliationTenantAccess(
+        client,
+        workItem.application_id,
+        request.adminIdentity!.loginName,
+      ))
+    ) {
+      await client.query("ROLLBACK");
+      return reply.code(403).send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
     }
     if (
       !ensureAssignedToCurrentUser(

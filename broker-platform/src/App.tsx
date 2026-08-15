@@ -240,6 +240,14 @@ export function App(): JSX.Element {
   const [departments, setDepartments] = useState<unknown[]>([]);
   const [roles, setRoles] = useState<unknown[]>([]);
   const [accounts, setAccounts] = useState<DirectoryAccount[]>([]);
+  const [employerTenants, setEmployerTenants] = useState<
+    Array<{
+      id: string;
+      externalRef: string;
+      displayName: string;
+      isActive: boolean;
+    }>
+  >([]);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string>>({});
   const [department, setDepartment] = useState({
     domain: "BROKER" as Domain,
@@ -261,6 +269,14 @@ export function App(): JSX.Element {
     departmentCode: "",
     roleCodes: "",
     preferredLanguage: "zh-CN" as Language,
+  });
+  const [employerTenant, setEmployerTenant] = useState({
+    externalRef: "",
+    displayName: "",
+  });
+  const [tenantMember, setTenantMember] = useState({
+    tenantId: "",
+    loginName: "",
   });
   useEffect(() => {
     request("/v1/local/auth/me")
@@ -295,16 +311,28 @@ export function App(): JSX.Element {
     else if (response.status === 401) expireSession();
   };
   const refreshDirectory = async () => {
-    const [d, r, a] = await Promise.all([
+    const [d, r, a, tenants] = await Promise.all([
       request("/v1/local/admin/departments"),
       request("/v1/local/admin/roles"),
       request("/v1/local/admin/accounts"),
+      request("/v1/local/admin/employer-tenants"),
     ]);
     if (d.ok) setDepartments((await d.json()) as unknown[]);
     if (r.ok) setRoles((await r.json()) as unknown[]);
     if (a.ok) {
       setAccounts(parseDirectoryAccounts(await a.json()));
       setRoleDrafts({});
+    }
+    if (tenants.ok) {
+      const payload = (await tenants.json()) as {
+        tenants?: Array<{
+          id: string;
+          externalRef: string;
+          displayName: string;
+          isActive: boolean;
+        }>;
+      };
+      if (Array.isArray(payload.tenants)) setEmployerTenants(payload.tenants);
     }
   };
   const adminRequest = async (
@@ -1092,6 +1120,136 @@ export function App(): JSX.Element {
               </label>
               <button disabled={adminInProgress}>
                 {adminInProgress ? "…" : copy.createAccount}
+              </button>
+            </form>
+            <form
+              style={form}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void adminPost("/v1/local/admin/employer-tenants", {
+                  externalRef: employerTenant.externalRef,
+                  displayName: employerTenant.displayName,
+                });
+              }}
+            >
+              <h3>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "创建工厂租户"
+                  : identity.preferredLanguage === "km"
+                    ? "បង្កើតអ្នកជួលរោងចក្រ"
+                    : "Create factory tenant"}
+              </h3>
+              <label>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "工厂代码"
+                  : identity.preferredLanguage === "km"
+                    ? "លេខកូដរោងចក្រ"
+                    : "Factory code"}
+                <input
+                  value={employerTenant.externalRef}
+                  onChange={(event) =>
+                    setEmployerTenant({
+                      ...employerTenant,
+                      externalRef: event.target.value.toUpperCase(),
+                    })
+                  }
+                  placeholder="LANHAI_FACTORY_A"
+                  required
+                />
+              </label>
+              <label>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "工厂名称"
+                  : identity.preferredLanguage === "km"
+                    ? "ឈ្មោះរោងចក្រ"
+                    : "Factory name"}
+                <input
+                  value={employerTenant.displayName}
+                  onChange={(event) =>
+                    setEmployerTenant({
+                      ...employerTenant,
+                      displayName: event.target.value,
+                    })
+                  }
+                  required
+                />
+              </label>
+              <button disabled={adminInProgress}>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "创建工厂"
+                  : identity.preferredLanguage === "km"
+                    ? "បង្កើតរោងចក្រ"
+                    : "Create factory"}
+              </button>
+            </form>
+            <form
+              style={form}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!tenantMember.tenantId || !tenantMember.loginName) return;
+                void adminRequest(
+                  `/v1/local/admin/employer-tenants/${encodeURIComponent(tenantMember.tenantId)}/members/${encodeURIComponent(tenantMember.loginName)}`,
+                  "PUT",
+                  {},
+                );
+              }}
+            >
+              <h3>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "授权工厂 HR/财务账号"
+                  : identity.preferredLanguage === "km"
+                    ? "ផ្តល់សិទ្ធិគណនី HR/ហិរញ្ញវត្ថុ"
+                    : "Authorize factory HR/finance account"}
+              </h3>
+              <label>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "工厂"
+                  : identity.preferredLanguage === "km"
+                    ? "រោងចក្រ"
+                    : "Factory"}
+                <select
+                  value={tenantMember.tenantId}
+                  onChange={(event) =>
+                    setTenantMember({
+                      ...tenantMember,
+                      tenantId: event.target.value,
+                    })
+                  }
+                  required
+                >
+                  <option value="">—</option>
+                  {employerTenants
+                    .filter((tenant) => tenant.isActive)
+                    .map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.displayName} ({tenant.externalRef})
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "企业账号"
+                  : identity.preferredLanguage === "km"
+                    ? "គណនីក្រុមហ៊ុន"
+                    : "Employer account"}
+                <input
+                  value={tenantMember.loginName}
+                  onChange={(event) =>
+                    setTenantMember({
+                      ...tenantMember,
+                      loginName: event.target.value,
+                    })
+                  }
+                  required
+                />
+              </label>
+              <button disabled={adminInProgress}>
+                {identity.preferredLanguage === "zh-CN"
+                  ? "授予访问"
+                  : identity.preferredLanguage === "km"
+                    ? "ផ្តល់សិទ្ធិ"
+                    : "Grant access"}
               </button>
             </form>
           </div>

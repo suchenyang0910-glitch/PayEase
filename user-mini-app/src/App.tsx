@@ -88,6 +88,44 @@ type TelegramEntryPoints = {
   entrypoints: unknown;
 };
 
+type EmployerTenantDirectory = {
+  tenants: Array<{ id: string; displayName: string }>;
+};
+
+function factoryFormCopy(language: LanguageCode) {
+  if (language === "zh-CN") {
+    return {
+      factory: "选择工厂",
+      factoryPlaceholder: "请选择您工作的工厂",
+      identityType: "证件类型",
+      nationalId: "身份证",
+      passport: "护照",
+      identityNumber: "身份证/护照号码",
+      required: "请选择工厂并填写有效证件号码。",
+    };
+  }
+  if (language === "km") {
+    return {
+      factory: "ជ្រើសរោងចក្រ",
+      factoryPlaceholder: "សូមជ្រើសរើសរោងចក្រដែលអ្នកធ្វើការ",
+      identityType: "ប្រភេទឯកសារ",
+      nationalId: "អត្តសញ្ញាណប័ណ្ណ",
+      passport: "លិខិតឆ្លងដែន",
+      identityNumber: "លេខអត្តសញ្ញាណប័ណ្ណ / លិខិតឆ្លងដែន",
+      required: "សូមជ្រើសរើសរោងចក្រ និងបំពេញលេខឯកសារដែលមានសុពលភាព។",
+    };
+  }
+  return {
+    factory: "Select factory",
+    factoryPlaceholder: "Choose the factory where you work",
+    identityType: "Document type",
+    nationalId: "National ID",
+    passport: "Passport",
+    identityNumber: "National ID / passport number",
+    required: "Select your factory and enter a valid identity document number.",
+  };
+}
+
 function trustedTelegramEntryPoint(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   let url: URL;
@@ -470,6 +508,14 @@ export function App(): JSX.Element {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [employer, setEmployer] = useState("");
+  const [employerTenantId, setEmployerTenantId] = useState("");
+  const [employerTenants, setEmployerTenants] = useState<
+    EmployerTenantDirectory["tenants"]
+  >([]);
+  const [identityDocumentType, setIdentityDocumentType] = useState<
+    "NATIONAL_ID" | "PASSPORT"
+  >("NATIONAL_ID");
+  const [identityDocumentNumber, setIdentityDocumentNumber] = useState("");
   const [consent, setConsent] = useState(false);
   const [applicationNo, setApplicationNo] = useState("");
   const [approvedAmountMinor, setApprovedAmountMinor] = useState<string>();
@@ -494,6 +540,7 @@ export function App(): JSX.Element {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const t = labels[language];
+  const factoryCopy = factoryFormCopy(language);
   const amountInputError =
     t.amountInvalid ?? "Enter an amount from USD 10.00 to 500.00.";
   const phoneInputError = t.phoneInvalid ?? "Enter a valid mobile number.";
@@ -536,6 +583,9 @@ export function App(): JSX.Element {
     setName("");
     setPhone("");
     setEmployer("");
+    setEmployerTenantId("");
+    setIdentityDocumentType("NATIONAL_ID");
+    setIdentityDocumentNumber("");
     setConsent(false);
     setServiceCaseMessage("");
     setServiceCaseNotice("");
@@ -578,6 +628,21 @@ export function App(): JSX.Element {
       setStage("submitted");
     }
   }, []);
+
+  useEffect(() => {
+    if (stage !== "details" || !applicantSession) return;
+    let cancelled = false;
+    void applicantRequest("/api/v1/local/public/employer-tenants")
+      .then(async (response) => {
+        const payload = (await response.json()) as EmployerTenantDirectory;
+        if (!response.ok || !Array.isArray(payload.tenants)) return;
+        if (!cancelled) setEmployerTenants(payload.tenants);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [applicantSession, stage]);
 
   useEffect(() => {
     const initData = telegramInitData();
@@ -710,6 +775,14 @@ export function App(): JSX.Element {
       );
       return;
     }
+    if (
+      applicantSession &&
+      (!employerTenantId ||
+        !/^[A-Za-z0-9][A-Za-z0-9 -]{4,63}$/.test(identityDocumentNumber.trim()))
+    ) {
+      setError(factoryCopy.required);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -727,6 +800,15 @@ export function App(): JSX.Element {
             currency: "USD",
           },
           tenorDays: term,
+          ...(employerTenantId
+            ? {
+                employerTenantId,
+                identityDocument: {
+                  type: identityDocumentType,
+                  number: identityDocumentNumber.trim(),
+                },
+              }
+            : {}),
           personalProfile: {
             fullName: name.trim(),
             phone: phone.trim(),
@@ -1291,6 +1373,48 @@ export function App(): JSX.Element {
                   value={employer}
                   onChange={(event) => setEmployer(event.target.value)}
                   placeholder={t.employer}
+                />
+              </label>
+              <label>
+                {factoryCopy.factory}
+                <select
+                  aria-label={factoryCopy.factory}
+                  value={employerTenantId}
+                  onChange={(event) => setEmployerTenantId(event.target.value)}
+                >
+                  <option value="">{factoryCopy.factoryPlaceholder}</option>
+                  {employerTenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {factoryCopy.identityType}
+                <select
+                  aria-label={factoryCopy.identityType}
+                  value={identityDocumentType}
+                  onChange={(event) =>
+                    setIdentityDocumentType(
+                      event.target.value as "NATIONAL_ID" | "PASSPORT",
+                    )
+                  }
+                >
+                  <option value="NATIONAL_ID">{factoryCopy.nationalId}</option>
+                  <option value="PASSPORT">{factoryCopy.passport}</option>
+                </select>
+              </label>
+              <label>
+                {factoryCopy.identityNumber}
+                <input
+                  value={identityDocumentNumber}
+                  onChange={(event) =>
+                    setIdentityDocumentNumber(event.target.value)
+                  }
+                  placeholder={factoryCopy.identityNumber}
+                  autoComplete="off"
+                  maxLength={64}
                 />
               </label>
               <label className="consent">

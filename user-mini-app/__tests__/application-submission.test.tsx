@@ -167,6 +167,12 @@ describe("applicant submission", () => {
           headers: { "content-type": "application/json" },
         }),
       )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ tenants: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -186,7 +192,7 @@ describe("applicant submission", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "ចាកចេញ" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
     fireEvent.click(screen.getByRole("button", { name: /ចាប់ផ្តើមដាក់ពាក្យ/ }));
     expect(screen.getByLabelText("ឈ្មោះពេញ")).toHaveValue("");
     expect(screen.getByLabelText("លេខទូរស័ព្ទ")).toHaveValue("");

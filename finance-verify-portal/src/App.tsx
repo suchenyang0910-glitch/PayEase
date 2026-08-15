@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   FINANCE_COPY,
   FINANCE_LANGUAGE_LABELS,
@@ -18,6 +18,14 @@ type WorkItem = {
   evidence_reference: string;
   status: string;
   assigned_to_user_ref: string | null;
+};
+type VerificationQueueItem = {
+  applicationNo: string;
+  requestedAmountMinor: string;
+  currency: string;
+  tenorDays: number;
+  stage: string;
+  identityDocumentType: "NATIONAL_ID" | "PASSPORT" | null;
 };
 const layout = {
   maxWidth: 1000,
@@ -149,10 +157,16 @@ export function App(): JSX.Element {
   const [signInError, setSignInError] = useState("");
   const [checking, setChecking] = useState(true);
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [verificationItems, setVerificationItems] = useState<
+    VerificationQueueItem[]
+  >([]);
+  const [verificationApplicationNo, setVerificationApplicationNo] =
+    useState("");
   const [assignee, setAssignee] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_EVIDENCE_MATCHED");
   const [notice, setNotice] = useState("");
   const [runningAction, setRunningAction] = useState(false);
+  const verificationIdempotencyKey = useRef<string>();
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (response) => {
@@ -187,6 +201,55 @@ export function App(): JSX.Element {
       setRunningAction(false);
     }
   };
+  const loadVerificationQueue = async () => {
+    if (!permitted) return;
+    const response = await api("/v1/local/employer/verifications/open");
+    if (response.status === 401) return expireSession();
+    const payload = (await response.json().catch(() => undefined)) as
+      { items?: VerificationQueueItem[] } | undefined;
+    if (response.ok && Array.isArray(payload?.items)) {
+      setVerificationItems(payload.items);
+    }
+  };
+  const decideVerification = async (
+    decision: "APPROVED" | "REJECTED" | "RETURNED",
+  ) => {
+    if (!verificationApplicationNo) return;
+    setRunningAction(true);
+    setNotice("");
+    const idempotencyKey =
+      verificationIdempotencyKey.current ?? crypto.randomUUID();
+    verificationIdempotencyKey.current = idempotencyKey;
+    try {
+      const response = await api(
+        `/v1/local/applications/${encodeURIComponent(verificationApplicationNo)}/employer-finance-verification`,
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify({ decision, reasonCode }),
+        },
+      );
+      if (response.status === 401) return expireSession();
+      const payload = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        status?: string;
+      };
+      if (!response.ok) {
+        setNotice(
+          `${copy.blocked} (${response.status}): ${payload.code ?? copy.loadFailed}`,
+        );
+        return;
+      }
+      verificationIdempotencyKey.current = undefined;
+      setNotice(`Recorded: ${payload.status ?? decision}`);
+      await loadVerificationQueue();
+    } finally {
+      setRunningAction(false);
+    }
+  };
+  useEffect(() => {
+    void loadVerificationQueue();
+  }, [permitted]);
   const action = async (
     id: string,
     operation: "assign" | "match" | "difference" | "close",
@@ -259,6 +322,92 @@ export function App(): JSX.Element {
       <section style={panel}>
         {permitted ? (
           <>
+            <section style={{ ...panel, marginTop: 0 }}>
+              <h2>
+                {language === "zh-CN"
+                  ? "本工厂薪资核验"
+                  : language === "km"
+                    ? "ការផ្ទៀងផ្ទាត់ប្រាក់ខែរោងចក្រនេះ"
+                    : "Factory salary verification"}
+              </h2>
+              <p>
+                {language === "zh-CN"
+                  ? "仅显示本工厂待办；不显示姓名、手机号或证件号码。"
+                  : language === "km"
+                    ? "បង្ហាញតែកិច្ចការរង់ចាំរបស់រោងចក្រនេះប៉ុណ្ណោះ។"
+                    : "Only this factory's queued applications are shown; no name, phone number or document number is displayed."}
+              </p>
+              <button
+                disabled={runningAction}
+                onClick={() => void loadVerificationQueue()}
+              >
+                {language === "zh-CN"
+                  ? "刷新待办"
+                  : language === "km"
+                    ? "ផ្ទុកកិច្ចការឡើងវិញ"
+                    : "Refresh queue"}
+              </button>
+              <ul>
+                {verificationItems.map((item) => (
+                  <li key={item.applicationNo}>
+                    <button
+                      onClick={() =>
+                        setVerificationApplicationNo(item.applicationNo)
+                      }
+                    >
+                      {item.applicationNo} · {item.currency}{" "}
+                      {item.requestedAmountMinor} · {item.tenorDays}d ·{" "}
+                      {item.identityDocumentType ?? "—"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <label>
+                {language === "zh-CN"
+                  ? "申请编号"
+                  : language === "km"
+                    ? "លេខពាក្យស្នើ"
+                    : "Application number"}
+                <input
+                  value={verificationApplicationNo}
+                  onChange={(event) =>
+                    setVerificationApplicationNo(event.target.value)
+                  }
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  disabled={!verificationApplicationNo || runningAction}
+                  onClick={() => void decideVerification("APPROVED")}
+                >
+                  {language === "zh-CN"
+                    ? "确认"
+                    : language === "km"
+                      ? "បញ្ជាក់"
+                      : "Confirm"}
+                </button>
+                <button
+                  disabled={!verificationApplicationNo || runningAction}
+                  onClick={() => void decideVerification("RETURNED")}
+                >
+                  {language === "zh-CN"
+                    ? "退回补充"
+                    : language === "km"
+                      ? "ស្នើបន្ថែម"
+                      : "Request correction"}
+                </button>
+                <button
+                  disabled={!verificationApplicationNo || runningAction}
+                  onClick={() => void decideVerification("REJECTED")}
+                >
+                  {language === "zh-CN"
+                    ? "无法核验"
+                    : language === "km"
+                      ? "មិនអាចផ្ទៀងផ្ទាត់"
+                      : "Cannot verify"}
+                </button>
+              </div>
+            </section>
             <h2>{copy.queueTitle}</h2>
             <p>{copy.queueDescription}</p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

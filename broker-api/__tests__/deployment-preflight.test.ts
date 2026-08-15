@@ -120,6 +120,42 @@ describe("Telegram deployment preflight", () => {
     expect(result.error).toContain("PAYEASE_PII_ENCRYPTION_KEY is required");
   });
 
+  it("refuses to require Telegram phone verification until every enabled Bot has a webhook secret", () => {
+    const missingWebhookSecret = telegramAuthenticationPreflight({
+      PAYEASE_DEPLOYMENT_MODE: "production",
+      REQUIRE_TELEGRAM_PHONE_VERIFICATION: "true",
+      TELEGRAM_BOTS_JSON: validRecoveryBots,
+      PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+      PAYEASE_IDENTITY_LOOKUP_KEY: validIdentityLookupKey,
+    });
+    expect(missingWebhookSecret.ready).toBe(false);
+    expect(missingWebhookSecret.error).toContain("webhook secret");
+
+    const ready = telegramAuthenticationPreflight({
+      PAYEASE_DEPLOYMENT_MODE: "production",
+      REQUIRE_TELEGRAM_PHONE_VERIFICATION: "true",
+      TELEGRAM_BOTS_JSON: JSON.stringify([
+        {
+          botId: "123456789",
+          botToken: "preflight-token-one-not-real-00001",
+          enabled: true,
+          entryUrl: "https://t.me/payease_primary?startapp=apply",
+          webhookSecret: "preflight_telegram_webhook_secret_001",
+        },
+        {
+          botId: "987654321",
+          botToken: "preflight-token-two-not-real-00002",
+          enabled: true,
+          entryUrl: "https://t.me/payease_recovery?startapp=apply",
+          webhookSecret: "preflight_telegram_webhook_secret_002",
+        },
+      ]),
+      PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+      PAYEASE_IDENTITY_LOOKUP_KEY: validIdentityLookupKey,
+    });
+    expect(ready.ready).toBe(true);
+  });
+
   it("serializes only operational metadata and never deployment secrets", () => {
     const output = serializeDeploymentPreflight({
       PAYEASE_DEPLOYMENT_MODE: "production",

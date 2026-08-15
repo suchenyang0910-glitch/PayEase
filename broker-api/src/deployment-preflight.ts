@@ -6,6 +6,7 @@ import {
 import {
   isControlledPreview,
   requiresTelegramAuthentication,
+  requiresTelegramPhoneVerification,
 } from "./telegram-auth-policy.js";
 import {
   identityDocumentLookupPreflight,
@@ -16,6 +17,7 @@ type AuthenticationEnvironment = Readonly<{
   PAYEASE_DEPLOYMENT_MODE?: string;
   PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW?: string;
   REQUIRE_TELEGRAM_AUTH?: string;
+  REQUIRE_TELEGRAM_PHONE_VERIFICATION?: string;
   TELEGRAM_BOTS_JSON?: string;
   PAYEASE_PII_ENCRYPTION_KEY?: string;
   PAYEASE_PII_ENCRYPTION_KEY_VERSION?: string;
@@ -103,6 +105,14 @@ export function telegramAuthenticationPreflight(
   }
   try {
     requireTelegramRecoveryTopology(environment.TELEGRAM_BOTS_JSON);
+    if (
+      requiresTelegramPhoneVerification(environment) &&
+      bots.some((bot) => bot.enabled && !bot.webhookSecret)
+    ) {
+      throw new Error(
+        "Every enabled Telegram bot must configure a webhook secret before Telegram phone verification can be required",
+      );
+    }
     return {
       ready: piiEncryptionReady,
       authenticationRequired,

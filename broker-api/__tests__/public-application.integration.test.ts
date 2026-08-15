@@ -296,6 +296,13 @@ integration("public applicant access", () => {
       expect(blockedSubmission.json()).toEqual({
         code: "TELEGRAM_PHONE_VERIFICATION_REQUIRED",
       });
+      // Keep each scenario independent: this tenant exists only to exercise
+      // the required-phone gate and must not appear in the later public
+      // active-factory directory assertion.
+      await database.query(
+        "UPDATE employer_tenants SET is_active = false WHERE id = $1",
+        [tenant.rows[0]!.id],
+      );
 
       const forwardedContact = await brokerApi.app.inject({
         method: "POST",

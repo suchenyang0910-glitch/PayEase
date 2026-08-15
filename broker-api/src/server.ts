@@ -260,6 +260,9 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicApplicantLanguagePreference =
     request.method === "PUT" &&
     requestPath === "/v1/local/public/profile/preferred-language";
+  const isPublicApplicantPhoneVerification =
+    request.method === "GET" &&
+    requestPath === "/v1/local/public/profile/telegram-phone-verification";
   const isPublicUserApplicationView =
     requestPath === "/v1/local/public/applications" ||
     requestPath.startsWith("/v1/local/public/applications/");
@@ -342,9 +345,15 @@ app.addHook("onRequest", async (request, reply) => {
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
     isPublicApplicantLanguagePreference ||
+    isPublicApplicantPhoneVerification ||
     isPublicUserApplicationView ||
     isPublicTelegramEntryPoints ||
-    isPublicEmployerTenantList
+    isPublicEmployerTenantList ||
+    // Telegram invokes this server-to-server endpoint without a browser or
+    // an admin cookie. Its handler below performs its own per-Bot webhook
+    // secret authentication, so it must not fall through to admin-session
+    // authentication here.
+    isTelegramBotWebhook
   )
     return;
   const token = sessionToken(request.headers.cookie);
@@ -1975,6 +1984,25 @@ app.post(
         bots,
       )
     ) {
+      // This is intentionally secret-free operational telemetry. A failed
+      // webhook must be diagnosable without ever logging a Bot token, its
+      // webhook secret, or a caller-supplied secret value.
+      request.log.warn(
+        {
+          botId: params.botId,
+          suppliedSecretPresent: typeof suppliedSecretValue === "string",
+          configuredEnabledBot: bots.some(
+            (bot) => bot.botId === params.botId && bot.enabled,
+          ),
+          configuredWebhookSecret: bots.some(
+            (bot) =>
+              bot.botId === params.botId &&
+              bot.enabled &&
+              bot.webhookSecret !== undefined,
+          ),
+        },
+        "telegram webhook authentication failed",
+      );
       return reply.code(401).send({ code: "TELEGRAM_WEBHOOK_UNAUTHORIZED" });
     }
     const contact = verifiedTelegramContactFromUpdate(request.body);

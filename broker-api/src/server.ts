@@ -42,7 +42,9 @@ import {
   configuredTelegramBots,
   enabledTelegramBotEntryUrls,
   isTelegramBotEnabled,
+  isTelegramWebhookSecretValid,
   requireTelegramRecoveryTopology,
+  verifiedTelegramContactFromUpdate,
   verifyTelegramMiniAppInitData,
 } from "./telegram-auth.js";
 import {
@@ -262,6 +264,9 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicEmployerTenantList =
     request.method === "GET" &&
     requestPath === "/v1/local/public/employer-tenants";
+  const isTelegramBotWebhook =
+    request.method === "POST" &&
+    /^\/v1\/local\/internal\/telegram-bot-updates\/\d{5,20}$/.test(requestPath);
   const isApplicantStateChange =
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
@@ -282,6 +287,7 @@ app.addHook("onRequest", async (request, reply) => {
     !isPublicUserApplicationSubmission &&
     !isPublicTelegramSession &&
     !isPublicApplicantLanguagePreference &&
+    !isTelegramBotWebhook &&
     requestPath !== "/v1/local/auth/login" &&
     requestPath !== "/v1/local/auth/bootstrap";
   // In production, the Telegram iframe's fetch Origin is the Mini App's own
@@ -1887,6 +1893,14 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // A user may share their Telegram contact before their first loan
+    // application. Create the minimal identity row at authenticated login so
+    // the Bot webhook has a safe record to bind that proof to.
+    await client.query(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ($1, 'en') ON CONFLICT (telegram_user_ref) DO NOTHING`,
+      [identity.telegramUserRef],
+    );
     const replay = await client.query(
       `INSERT INTO telegram_initdata_replay_guards
         (initdata_hash, authenticated_bot_id, expires_at)
@@ -1929,6 +1943,74 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     client.release();
   }
 });
+
+// Telegram calls this endpoint after a user explicitly shares a contact from
+// a private chat or Mini App. It is intentionally not a browser session
+// endpoint: the per-Bot setWebhook secret is mandatory and CSRF is irrelevant.
+// Invalid/unsupported updates return 204 to avoid creating a webhook oracle.
+app.post(
+  "/v1/local/internal/telegram-bot-updates/:botId",
+  async (request, reply) => {
+    const params = z
+      .object({ botId: z.string().regex(/^\d{5,20}$/) })
+      .parse(request.params);
+    const suppliedSecret = request.headers["x-telegram-bot-api-secret-token"];
+    const bots = configuredTelegramBots();
+    if (
+      !isTelegramWebhookSecretValid(
+        params.botId,
+        typeof suppliedSecret === "string" ? suppliedSecret : undefined,
+        bots,
+      )
+    ) {
+      return reply.code(401).send({ code: "TELEGRAM_WEBHOOK_UNAUTHORIZED" });
+    }
+    const contact = verifiedTelegramContactFromUpdate(request.body);
+    if (!contact) return reply.code(204).send();
+    let encryptedPhone: Buffer;
+    try {
+      encryptedPhone = encryptPersonalValue(contact.phoneNumber);
+    } catch (error) {
+      request.log.error({ err: error }, "telegram phone storage unavailable");
+      return reply
+        .code(503)
+        .send({ code: "TELEGRAM_PHONE_STORAGE_UNAVAILABLE" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const user = await client.query<{ id: string }>(
+        `UPDATE users
+            SET telegram_phone_encrypted = $1,
+                telegram_phone_verified_at = now(),
+                telegram_phone_verified_bot_id = $2,
+                updated_at = now()
+          WHERE telegram_user_ref = $3
+        RETURNING id`,
+        [encryptedPhone, params.botId, contact.telegramUserRef],
+      );
+      if (!user.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(204).send();
+      }
+      await addAuditEvent(
+        client,
+        user.rows[0]!.id,
+        "TELEGRAM_PHONE_VERIFIED",
+        contact.telegramUserRef,
+        { authenticatedBotId: params.botId },
+        "USER",
+      );
+      await client.query("COMMIT");
+      return reply.code(204).send();
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
 
 // This remains readable without an applicant session so a person whose Bot
 // was disabled can still navigate to another enabled PayEase Bot. It exposes

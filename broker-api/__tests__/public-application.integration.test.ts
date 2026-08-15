@@ -118,7 +118,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0027__employment_identity_match_gate.sql",
+      filename: "V0028__telegram_phone_verification.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -175,6 +175,90 @@ integration("public applicant access", () => {
       service: "broker-api",
       storage: "postgresql",
     });
+  });
+
+  it("records only a secret-authenticated self-shared Telegram contact", async () => {
+    const originalBotConfig = process.env.TELEGRAM_BOTS_JSON;
+    process.env.TELEGRAM_BOTS_JSON = JSON.stringify([
+      {
+        botId: "444444444",
+        botToken: "integration-test-token-not-real-0001",
+        enabled: true,
+        webhookSecret: "integration_telegram_webhook_secret_001",
+      },
+    ]);
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('telegram-99112233', 'en') RETURNING id`,
+    );
+    try {
+      const unauthorized = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/internal/telegram-bot-updates/444444444",
+        payload: {},
+      });
+      expect(unauthorized.statusCode).toBe(401);
+
+      const accepted = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/internal/telegram-bot-updates/444444444",
+        headers: {
+          "x-telegram-bot-api-secret-token":
+            "integration_telegram_webhook_secret_001",
+        },
+        payload: {
+          message: {
+            chat: { type: "private" },
+            from: { id: 99112233 },
+            contact: { user_id: 99112233, phone_number: "+855 12 345 678" },
+          },
+        },
+      });
+      expect(accepted.statusCode).toBe(204);
+      const stored = await database.query<{
+        telegram_phone_encrypted: Buffer;
+        telegram_phone_verified_bot_id: string;
+      }>(
+        `SELECT telegram_phone_encrypted, telegram_phone_verified_bot_id
+           FROM users WHERE id = $1`,
+        [user.rows[0]!.id],
+      );
+      expect(
+        decryptPersonalValue(stored.rows[0]!.telegram_phone_encrypted),
+      ).toBe("+855 12 345 678");
+      expect(stored.rows[0]!.telegram_phone_verified_bot_id).toBe("444444444");
+
+      const forwardedContact = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/internal/telegram-bot-updates/444444444",
+        headers: {
+          "x-telegram-bot-api-secret-token":
+            "integration_telegram_webhook_secret_001",
+        },
+        payload: {
+          message: {
+            chat: { type: "private" },
+            from: { id: 99112233 },
+            contact: { user_id: 55555555, phone_number: "+855 99 999 999" },
+          },
+        },
+      });
+      expect(forwardedContact.statusCode).toBe(204);
+      const afterForwardedContact = await database.query<{
+        telegram_phone_encrypted: Buffer;
+      }>("SELECT telegram_phone_encrypted FROM users WHERE id = $1", [
+        user.rows[0]!.id,
+      ]);
+      expect(
+        decryptPersonalValue(
+          afterForwardedContact.rows[0]!.telegram_phone_encrypted,
+        ),
+      ).toBe("+855 12 345 678");
+    } finally {
+      if (originalBotConfig === undefined)
+        delete process.env.TELEGRAM_BOTS_JSON;
+      else process.env.TELEGRAM_BOTS_JSON = originalBotConfig;
+    }
   });
 
   it("lists only active factory tenants for an unauthenticated applicant selector", async () => {

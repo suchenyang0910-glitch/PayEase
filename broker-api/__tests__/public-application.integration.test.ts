@@ -1832,6 +1832,22 @@ integration("public applicant access", () => {
     expect(crossTenantApproval.json()).toEqual({
       code: "EMPLOYER_TENANT_ACCESS_DENIED",
     });
+    const crossTenantIdentityMatch = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-identity-match`,
+      headers: {
+        cookie: otherHrCookie,
+        "idempotency-key": "cross-tenant-identity-match-001",
+      },
+      payload: {
+        decision: "MATCHED",
+        reasonCode: "UNAUTHORIZED_FACTORY_ATTEMPT",
+      },
+    });
+    expect(crossTenantIdentityMatch.statusCode).toBe(403);
+    expect(crossTenantIdentityMatch.json()).toEqual({
+      code: "EMPLOYER_TENANT_ACCESS_DENIED",
+    });
     const identityMatchRequired = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/applications/${applicationNo}/employer-verification`,

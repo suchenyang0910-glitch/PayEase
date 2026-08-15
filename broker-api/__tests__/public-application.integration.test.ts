@@ -87,6 +87,23 @@ async function lenderComplaintOfficerCookie(database: Pool): Promise<string> {
   return adminCookieForRole(database, "LENDER_COMPLAINT_OFFICER", "LENDER");
 }
 
+async function grantEmployerTenantMember(
+  database: Pool,
+  tenantId: string,
+  cookie: string,
+): Promise<void> {
+  const token = cookie.slice("payease_session=".length);
+  const account = await database.query<{ account_id: string }>(
+    "SELECT account_id FROM admin_sessions WHERE token_hash = $1",
+    [createHash("sha256").update(token).digest("hex")],
+  );
+  await database.query(
+    `INSERT INTO employer_tenant_members (employer_tenant_id, account_id)
+     VALUES ($1, $2)`,
+    [tenantId, account.rows[0]!.account_id],
+  );
+}
+
 integration("public applicant access", () => {
   let database: Pool;
   let brokerApi: BrokerApi;
@@ -1118,6 +1135,11 @@ integration("public applicant access", () => {
         phone: "+85512345678",
         employerName: "Pilot Factory",
       };
+      const authenticatedTenant = await database.query<{ id: string }>(
+        `INSERT INTO employer_tenants (external_ref, display_name)
+         VALUES ('AUTHENTICATED_FACTORY', 'Authenticated factory')
+         RETURNING id`,
+      );
       const unauthenticatedList = await brokerApi.app.inject({
         method: "GET",
         url: "/v1/local/public/applications",
@@ -1224,6 +1246,8 @@ integration("public applicant access", () => {
           preferredLanguage: "en",
           requestedAmount: { amountMinor: "10000", currency: "USD" },
           tenorDays: 30,
+          employerTenantId: authenticatedTenant.rows[0]!.id,
+          identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
           personalProfile,
           personalDataAndPhoneConsent: true,
         },
@@ -1598,6 +1622,10 @@ integration("public applicant access", () => {
   });
 
   it("records the full manual pilot lifecycle with distinct approval accounts", async () => {
+    const tenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('LIFECYCLE_FACTORY', 'Lifecycle factory') RETURNING id`,
+    );
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
@@ -1606,6 +1634,7 @@ integration("public applicant access", () => {
         preferredLanguage: "en",
         requestedAmount: { amountMinor: "25000", currency: "USD" },
         tenorDays: 30,
+        employerTenantId: tenant.rows[0]!.id,
       },
     });
     expect(created.statusCode).toBe(201);
@@ -1655,15 +1684,35 @@ integration("public applicant access", () => {
       { decision: "APPROVED", reasonCode: "DOCUMENTS_COMPLETE" },
       "EMPLOYER_VERIFICATION",
     );
+    const employerHrCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_HR",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(
+      database,
+      tenant.rows[0]!.id,
+      employerHrCookie,
+    );
+    const employerFinanceCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_FINANCE",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(
+      database,
+      tenant.rows[0]!.id,
+      employerFinanceCookie,
+    );
     await call(
       "employer-verification",
-      await adminCookieForRole(database, "EMPLOYER_HR", "EMPLOYER"),
+      employerHrCookie,
       { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
       "EMPLOYER_FINANCE_VERIFICATION",
     );
     await call(
       "employer-finance-verification",
-      await adminCookieForRole(database, "EMPLOYER_FINANCE", "EMPLOYER"),
+      employerFinanceCookie,
       { decision: "APPROVED", reasonCode: "SALARY_RANGE_CONFIRMED" },
       "LENDER_INITIAL_REVIEW",
     );

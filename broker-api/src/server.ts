@@ -18,6 +18,7 @@ import {
   createApplicationSchema,
   disbursementDualControlSchema,
   employerVerificationSchema,
+  employerTenantCreateSchema,
   lenderFinalReviewSchema,
   lenderInitialReviewSchema,
   lifecycleActorSchema,
@@ -548,6 +549,22 @@ async function lockApplication(
     [applicationNo],
   );
   return result.rows[0];
+}
+
+async function employerTenantAccess(
+  client: PoolClient,
+  application: ApplicationRow,
+  loginName: string,
+): Promise<"GRANTED" | "APPLICATION_UNASSIGNED" | "DENIED"> {
+  if (!application.employer_tenant_id) return "APPLICATION_UNASSIGNED";
+  const membership = await client.query(
+    `SELECT 1
+       FROM employer_tenant_members m
+       JOIN admin_accounts a ON a.id = m.account_id
+      WHERE m.employer_tenant_id = $1 AND a.login_name = $2 AND a.is_active = true`,
+    [application.employer_tenant_id, loginName],
+  );
+  return membership.rowCount ? "GRANTED" : "DENIED";
 }
 
 async function updateStatus(
@@ -1293,6 +1310,154 @@ app.post("/v1/local/admin/accounts", async (request, reply) => {
   }
 });
 
+// A factory is a tenant boundary, not a display-only grouping.  OPS_ADMIN is
+// the only actor allowed to create a tenant or grant/revoke its staff access.
+app.get("/v1/local/admin/employer-tenants", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const result = await pool.query(
+    `SELECT id, external_ref AS "externalRef", display_name AS "displayName", is_active AS "isActive"
+       FROM employer_tenants ORDER BY display_name`,
+  );
+  return { tenants: result.rows };
+});
+
+app.post("/v1/local/admin/employer-tenants", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const input = employerTenantCreateSchema.parse(request.body);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const created = await client.query<{
+      id: string;
+      external_ref: string;
+      display_name: string;
+    }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ($1, $2) RETURNING id, external_ref, display_name`,
+      [input.externalRef, input.displayName],
+    );
+    await addAuditEvent(
+      client,
+      created.rows[0]!.id,
+      "EMPLOYER_TENANT_CREATED",
+      request.adminIdentity!.loginName,
+      { externalRef: input.externalRef },
+      "EMPLOYER_TENANT",
+    );
+    await client.query("COMMIT");
+    return reply.code(201).send({
+      id: created.rows[0]!.id,
+      externalRef: created.rows[0]!.external_ref,
+      displayName: created.rows[0]!.display_name,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.put(
+  "/v1/local/admin/employer-tenants/:tenantId/members/:loginName",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const params = z
+      .object({
+        tenantId: z.string().uuid(),
+        loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+      })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const account = await client.query<{ id: string }>(
+        `SELECT a.id
+           FROM admin_accounts a JOIN departments d ON d.id = a.department_id
+          WHERE a.login_name = $1 AND a.is_active = true AND d.domain = 'EMPLOYER'
+          FOR KEY SHARE`,
+        [params.loginName],
+      );
+      if (!account.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({ code: "EMPLOYER_ACCOUNT_REQUIRED" });
+      }
+      const tenant = await client.query(
+        "SELECT 1 FROM employer_tenants WHERE id = $1 FOR KEY SHARE",
+        [params.tenantId],
+      );
+      if (!tenant.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "EMPLOYER_TENANT_NOT_FOUND" });
+      }
+      await client.query(
+        `INSERT INTO employer_tenant_members (employer_tenant_id, account_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [params.tenantId, account.rows[0]!.id],
+      );
+      await addAuditEvent(
+        client,
+        params.tenantId,
+        "EMPLOYER_TENANT_MEMBER_GRANTED",
+        request.adminIdentity!.loginName,
+        { targetLoginNameHash: eventHash([params.loginName]) },
+        "EMPLOYER_TENANT",
+      );
+      await client.query("COMMIT");
+      return reply.code(204).send();
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.delete(
+  "/v1/local/admin/employer-tenants/:tenantId/members/:loginName",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const params = z
+      .object({
+        tenantId: z.string().uuid(),
+        loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+      })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const removed = await client.query(
+        `DELETE FROM employer_tenant_members m
+        USING admin_accounts a
+       WHERE m.account_id = a.id AND m.employer_tenant_id = $1 AND a.login_name = $2`,
+        [params.tenantId, params.loginName],
+      );
+      if (!removed.rowCount) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(404)
+          .send({ code: "EMPLOYER_TENANT_MEMBER_NOT_FOUND" });
+      }
+      await addAuditEvent(
+        client,
+        params.tenantId,
+        "EMPLOYER_TENANT_MEMBER_REVOKED",
+        request.adminIdentity!.loginName,
+        { targetLoginNameHash: eventHash([params.loginName]) },
+        "EMPLOYER_TENANT",
+      );
+      await client.query("COMMIT");
+      return reply.code(204).send();
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
 // Disabling an internal account is an incident/offboarding control, not a
 // cosmetic directory edit. Revoke every outstanding session in the same
 // transaction so the account loses access immediately.
@@ -1509,6 +1674,26 @@ const createStageHandler = (
           code: "INVALID_APPLICATION_STATE",
           currentStatus: application.status,
         });
+      }
+      if (
+        requiredRole === "EMPLOYER_HR" ||
+        requiredRole === "EMPLOYER_FINANCE"
+      ) {
+        const access = await employerTenantAccess(
+          client,
+          application,
+          securedInput.actorUserRef,
+        );
+        if (access === "APPLICATION_UNASSIGNED") {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ code: "EMPLOYER_TENANT_NOT_ASSIGNED" });
+        }
+        if (access === "DENIED") {
+          await client.query("ROLLBACK");
+          return reply
+            .code(403)
+            .send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
+        }
       }
       const status = await recordSingleApproval(
         client,

@@ -233,3 +233,8 @@ export const adminAccountRolesUpdateSchema = z.object({
       message: "Role codes must be unique.",
     }),
 });
+
+export const employerTenantCreateSchema = z.object({
+  externalRef: z.string().regex(/^[A-Z0-9_-]{3,64}$/),
+  displayName: z.string().trim().min(1).max(160),
+});

@@ -1768,6 +1768,27 @@ const createStageHandler = (
           currentStatus: application.status,
         });
       }
+      // A broker must not hand an application into a verification queue whose
+      // factory has been deactivated.  The employer-side access check below
+      // protects HR/finance actions; this complementary check prevents a
+      // broker from creating a queue item that nobody can lawfully process.
+      if (
+        requiredRole === "BROKER_OFFICER" &&
+        input.decision === "APPROVED" &&
+        approvedStatus === "EMPLOYER_VERIFICATION" &&
+        application.employer_tenant_id
+      ) {
+        const activeTenant = await client.query(
+          `SELECT 1 FROM employer_tenants
+            WHERE id = $1 AND is_active = true
+            FOR KEY SHARE`,
+          [application.employer_tenant_id],
+        );
+        if (!activeTenant.rowCount) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ code: "EMPLOYER_TENANT_UNAVAILABLE" });
+        }
+      }
       if (
         requiredRole === "EMPLOYER_HR" ||
         requiredRole === "EMPLOYER_FINANCE"

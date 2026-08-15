@@ -204,6 +204,55 @@ integration("public applicant access", () => {
     });
   });
 
+  it("does not hand a broker-reviewed application to a deactivated factory", async () => {
+    const tenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name, is_active)
+       VALUES ('FROZEN_REVIEW_FACTORY', 'Frozen review factory', false)
+       RETURNING id`,
+    );
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "deactivated-factory-review-user",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    await database.query(
+      `UPDATE applications SET employer_tenant_id = $1
+        WHERE application_no = $2`,
+      [tenant.rows[0]!.id, applicationNo],
+    );
+    const brokerCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+
+    const review = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "deactivated-factory-broker-review-001",
+      },
+      payload: { decision: "APPROVED", reasonCode: "DOCUMENTS_COMPLETE" },
+    });
+
+    expect(review.statusCode).toBe(409);
+    expect(review.json()).toEqual({ code: "EMPLOYER_TENANT_UNAVAILABLE" });
+    const persisted = await database.query<{ status: string }>(
+      "SELECT status FROM applications WHERE application_no = $1",
+      [applicationNo],
+    );
+    expect(persisted.rows[0]?.status).toBe("BROKER_REVIEW");
+  });
+
   it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
     process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
     const bootstrap = await brokerApi.app.inject({

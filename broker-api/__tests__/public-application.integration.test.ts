@@ -2691,6 +2691,29 @@ integration("public applicant access", () => {
     expect(crossTenantResolution.json()).toEqual({
       code: "EMPLOYER_TENANT_ACCESS_DENIED",
     });
+
+    const matched = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reconciliation/${workItem.rows[0]!.id}/match`,
+      headers: { cookie: firstFinanceCookie },
+      payload: { reasonCode: "RECEIPT_MATCHED" },
+    });
+    expect(matched.statusCode).toBe(200);
+    expect(matched.json()).toEqual({
+      workItemId: workItem.rows[0]!.id,
+      status: "MATCHED",
+    });
+    const closed = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reconciliation/${workItem.rows[0]!.id}/close`,
+      headers: { cookie: firstFinanceCookie },
+      payload: { reasonCode: "RECEIPT_ARCHIVED" },
+    });
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json()).toEqual({
+      workItemId: workItem.rows[0]!.id,
+      status: "CLOSED",
+    });
   });
 
   it("keeps complaint text encrypted while routing the final outcome to the licensed lender", async () => {

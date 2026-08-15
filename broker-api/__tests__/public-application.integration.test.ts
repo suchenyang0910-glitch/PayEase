@@ -101,7 +101,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0025__approval_action_idempotency.sql",
+      filename: "V0026__employer_tenants_and_identity_documents.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;

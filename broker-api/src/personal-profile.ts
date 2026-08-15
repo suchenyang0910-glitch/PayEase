@@ -3,6 +3,7 @@ import {
   createDecipheriv,
   createHmac,
   randomBytes,
+  timingSafeEqual,
 } from "node:crypto";
 
 const algorithm = "aes-256-gcm";
@@ -208,6 +209,27 @@ export function identityDocumentLookupHash(
   return createHmac("sha256", key)
     .update(`${document.type}|${normalizedNumber}`, "utf8")
     .digest("hex");
+}
+
+/**
+ * Compares two identity lookup HMAC values without short-circuiting on a
+ * matching prefix. Neither value is a document number, but this keeps the HR
+ * verification endpoint from becoming a timing oracle for the stored lookup.
+ */
+export function identityDocumentLookupHashesMatch(
+  expectedHash: string,
+  candidateHash: string,
+): boolean {
+  if (
+    !/^[0-9a-f]{64}$/i.test(expectedHash) ||
+    !/^[0-9a-f]{64}$/i.test(candidateHash)
+  ) {
+    return false;
+  }
+  return timingSafeEqual(
+    Buffer.from(expectedHash, "hex"),
+    Buffer.from(candidateHash, "hex"),
+  );
 }
 
 export function identityDocumentLookupPreflight(

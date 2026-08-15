@@ -59,6 +59,7 @@ import {
   encryptPersonalProfile,
   encryptPersonalValue,
   identityDocumentLookupHash,
+  identityDocumentLookupHashesMatch,
   personalDataEncryptionPreflight,
   personalDataKeyVersion,
 } from "./personal-profile.js";
@@ -2753,13 +2754,15 @@ app.post(
       }
       let identityMatchStatus: "MATCHED" | "NOT_MATCHED";
       try {
-        identityMatchStatus =
+        identityMatchStatus = identityDocumentLookupHashesMatch(
+          storedIdentity.identity_document_lookup_hash,
           identityDocumentLookupHash({
             type: storedIdentity.identity_document_type,
             number: input.identityDocumentNumber,
-          }) === storedIdentity.identity_document_lookup_hash
-            ? "MATCHED"
-            : "NOT_MATCHED";
+          }),
+        )
+          ? "MATCHED"
+          : "NOT_MATCHED";
       } catch (error) {
         request.log.error(
           { err: error },

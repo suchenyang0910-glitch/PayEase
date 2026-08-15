@@ -3,6 +3,7 @@ import {
   decryptPersonalProfile,
   encryptPersonalProfile,
   identityDocumentLookupHash,
+  identityDocumentLookupHashesMatch,
   personalDataEncryptionPreflight,
 } from "../src/personal-profile.js";
 
@@ -121,6 +122,17 @@ describe("personal profile encryption", () => {
     );
     expect(first).toMatch(/^[0-9a-f]{64}$/);
     expect(first).toBe(normalized);
+    expect(identityDocumentLookupHashesMatch(first, normalized)).toBe(true);
+    expect(
+      identityDocumentLookupHashesMatch(
+        first,
+        identityDocumentLookupHash(
+          { type: "NATIONAL_ID", number: "AB12346" },
+          key,
+        ),
+      ),
+    ).toBe(false);
+    expect(identityDocumentLookupHashesMatch(first, "not-a-hash")).toBe(false);
     expect(() =>
       identityDocumentLookupHash(
         { type: "PASSPORT", number: "P12345" },

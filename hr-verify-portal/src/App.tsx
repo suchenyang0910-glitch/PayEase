@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { HR_COPY, HR_LANGUAGE_LABELS, type HrLanguage } from "./hr-copy";
+import { requiresIdentityMatchBeforeApproval } from "./hr-identity-match-gate";
 import { hrVerificationNotice } from "./hr-verification-action";
 
 type Identity = {
@@ -195,6 +196,11 @@ export function App(): JSX.Element {
   }, [route]);
   const language = identity?.preferredLanguage ?? "en";
   const copy = HR_COPY[language];
+  const selectedVerification = queue.find(
+    (item) => item.applicationNo === applicationNo,
+  );
+  const identityMatchRequired =
+    requiresIdentityMatchBeforeApproval(selectedVerification);
   const run = async (decision: "APPROVED" | "REJECTED" | "RETURNED") => {
     if (!route) return;
     setRunning(true);
@@ -402,7 +408,7 @@ export function App(): JSX.Element {
                     : "Confirm not matched"}
               </button>
               <button
-                disabled={!applicationNo || running}
+                disabled={!applicationNo || running || identityMatchRequired}
                 onClick={() => void run("APPROVED")}
               >
                 {copy.confirm}
@@ -420,6 +426,15 @@ export function App(): JSX.Element {
                 {copy.cannotVerify}
               </button>
             </div>
+            {identityMatchRequired ? (
+              <p role="status">
+                {language === "zh-CN"
+                  ? "请先确认员工证件匹配，才可以通过核验。"
+                  : language === "km"
+                    ? "សូមបញ្ជាក់ការផ្គូផ្គងអត្តសញ្ញាណបុគ្គលិកជាមុនសិន មុនអនុម័តការផ្ទៀងផ្ទាត់។"
+                    : "Confirm the employee identity match before approving this verification."}
+              </p>
+            ) : null}
             {notice ? (
               <pre role="status" style={{ whiteSpace: "pre-wrap" }}>
                 {notice}

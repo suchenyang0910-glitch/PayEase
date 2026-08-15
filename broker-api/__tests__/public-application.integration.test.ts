@@ -218,6 +218,10 @@ integration("public applicant access", () => {
       const blocked = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",
+        headers: {
+          cookie: "__Host-payease_applicant_csrf=controlled-preview-csrf-token",
+          "x-csrf-token": "controlled-preview-csrf-token",
+        },
         payload: {},
       });
 

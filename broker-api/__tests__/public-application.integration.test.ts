@@ -851,6 +851,8 @@ integration("public applicant access", () => {
       amountMinor: "10000",
       currency: "USD",
       tenorDays: 30,
+      employerTenantSelected: true,
+      identityDocumentProvided: true,
       personalDataAndPhoneConsent: true,
       personalDataConsentVersion: "PAYEASE-PERSONAL-DATA-v1",
       personalDataConsentLanguage: "en",

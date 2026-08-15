@@ -20,6 +20,7 @@ import { isControlledPreviewBuild } from "./deployment-mode.ts";
 import { formatUsdMinor } from "./format-usd-minor.ts";
 import { usdInputToMinor } from "./usd-amount.ts";
 import { applicantProfileValidationError } from "./applicant-profile.ts";
+import { applicantSubmissionErrorMessage } from "./applicant-submission-error.ts";
 import {
   parseApplicantServiceCaseList,
   applicantServiceCaseLabel,
@@ -838,6 +839,14 @@ export function App(): JSX.Element {
           `?application=${encodeURIComponent(payload.applicationNo)}`,
         );
         await checkStatus(payload.applicationNo);
+        return;
+      }
+      const submissionError = applicantSubmissionErrorMessage(
+        payload.code,
+        language,
+      );
+      if (submissionError) {
+        setError(submissionError);
         return;
       }
       if (!response.ok || !payload.applicationNo)

@@ -997,6 +997,11 @@ integration("public applicant access", () => {
     });
     expect(JSON.stringify(second.json())).not.toContain(firstApplicationNo);
     expect(JSON.stringify(second.json())).not.toContain("BROKER_REVIEW");
+    const rolledBackUser = await database.query(
+      `SELECT 1 FROM users
+        WHERE telegram_user_ref = 'identity-collision-second-account'`,
+    );
+    expect(rolledBackUser.rowCount).toBe(0);
   });
 
   it("allows the same broker account to decide again after a returned supplement request", async () => {

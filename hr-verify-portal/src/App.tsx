@@ -7,6 +7,14 @@ type Identity = {
   preferredLanguage: HrLanguage;
   roles: string[];
 };
+type VerificationQueueItem = {
+  applicationNo: string;
+  requestedAmountMinor: string;
+  currency: string;
+  tenorDays: number;
+  stage: string;
+  identityDocumentType: "NATIONAL_ID" | "PASSPORT" | null;
+};
 const layout = {
   maxWidth: 900,
   margin: "0 auto",
@@ -137,6 +145,8 @@ export function App(): JSX.Element {
   const [identity, setIdentity] = useState<Identity>();
   const [checking, setChecking] = useState(true);
   const [applicationNo, setApplicationNo] = useState("");
+  const [queue, setQueue] = useState<VerificationQueueItem[]>([]);
+  const [queueLoading, setQueueLoading] = useState(false);
   const [reasonCode, setReasonCode] = useState(
     "EMPLOYMENT_AND_SALARY_RANGE_CONFIRMED",
   );
@@ -144,6 +154,11 @@ export function App(): JSX.Element {
   const [signInError, setSignInError] = useState("");
   const [running, setRunning] = useState(false);
   const verificationIdempotencyKey = useRef<string>();
+  const route = identity?.roles.includes("EMPLOYER_HR")
+    ? "employer-verification"
+    : identity?.roles.includes("EMPLOYER_FINANCE")
+      ? "employer-finance-verification"
+      : undefined;
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (response) => {
@@ -154,13 +169,30 @@ export function App(): JSX.Element {
       })
       .finally(() => setChecking(false));
   }, []);
+  const loadQueue = async () => {
+    if (!route) return;
+    setQueueLoading(true);
+    try {
+      const response = await api("/v1/local/employer/verifications/open");
+      if (response.status === 401) {
+        setSignInError(
+          HR_COPY[identity?.preferredLanguage ?? "en"].sessionExpired,
+        );
+        setIdentity(undefined);
+        return;
+      }
+      const payload = (await response.json().catch(() => undefined)) as
+        { items?: VerificationQueueItem[] } | undefined;
+      if (response.ok && Array.isArray(payload?.items)) setQueue(payload.items);
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+  useEffect(() => {
+    void loadQueue();
+  }, [route]);
   const language = identity?.preferredLanguage ?? "en";
   const copy = HR_COPY[language];
-  const route = identity?.roles.includes("EMPLOYER_HR")
-    ? "employer-verification"
-    : identity?.roles.includes("EMPLOYER_FINANCE")
-      ? "employer-finance-verification"
-      : undefined;
   const run = async (decision: "APPROVED" | "REJECTED" | "RETURNED") => {
     if (!route) return;
     setRunning(true);
@@ -189,6 +221,7 @@ export function App(): JSX.Element {
       if (!result.deliveryUncertain)
         verificationIdempotencyKey.current = undefined;
       setNotice(result.notice);
+      if (!result.deliveryUncertain) await loadQueue();
     } finally {
       setRunning(false);
     }
@@ -245,6 +278,51 @@ export function App(): JSX.Element {
                 : copy.confirmSalaryRange}
             </h2>
             <p>{copy.privacyBoundary}</p>
+            <div style={{ marginBottom: 14 }}>
+              <strong>
+                {language === "zh-CN"
+                  ? "本工厂待办"
+                  : language === "km"
+                    ? "កិច្ចការរោងចក្រនេះ"
+                    : "Factory verification queue"}
+              </strong>
+              <button
+                style={{ marginLeft: 10 }}
+                disabled={queueLoading}
+                onClick={() => void loadQueue()}
+              >
+                {queueLoading
+                  ? "…"
+                  : language === "zh-CN"
+                    ? "刷新"
+                    : language === "km"
+                      ? "ផ្ទុកឡើងវិញ"
+                      : "Refresh"}
+              </button>
+              {queue.length ? (
+                <ul>
+                  {queue.map((item) => (
+                    <li key={item.applicationNo}>
+                      <button
+                        onClick={() => setApplicationNo(item.applicationNo)}
+                      >
+                        {item.applicationNo} · {item.currency}{" "}
+                        {item.requestedAmountMinor} · {item.tenorDays}d ·{" "}
+                        {item.identityDocumentType ?? "—"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>
+                  {language === "zh-CN"
+                    ? "暂无待办"
+                    : language === "km"
+                      ? "មិនមានកិច្ចការរង់ចាំ"
+                      : "No open verification items."}
+                </p>
+              )}
+            </div>
             <label>
               {copy.applicationNumber}
               <input

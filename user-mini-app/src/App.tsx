@@ -21,6 +21,7 @@ import { formatUsdMinor } from "./format-usd-minor.ts";
 import { usdInputToMinor } from "./usd-amount.ts";
 import { applicantProfileValidationError } from "./applicant-profile.ts";
 import { applicantSubmissionErrorMessage } from "./applicant-submission-error.ts";
+import { requestTelegramPhoneContact } from "./telegram-phone-contact.ts";
 import {
   parseApplicantServiceCaseList,
   applicantServiceCaseLabel,
@@ -94,6 +95,12 @@ type EmployerTenantDirectory = {
   tenants: Array<{ id: string; displayName: string }>;
 };
 
+type TelegramPhoneVerification = {
+  verified: boolean;
+  required: boolean;
+  verifiedAt?: string;
+};
+
 function factoryFormCopy(language: LanguageCode) {
   if (language === "zh-CN") {
     return {
@@ -125,6 +132,44 @@ function factoryFormCopy(language: LanguageCode) {
     passport: "Passport",
     identityNumber: "National ID / passport number",
     required: "Select your factory and enter a valid identity document number.",
+  };
+}
+
+function phoneVerificationCopy(language: LanguageCode) {
+  if (language === "zh-CN") {
+    return {
+      verified: "Telegram 手机号已验证",
+      required: "提交申请前需通过 Telegram 验证手机号。",
+      request: "通过 Telegram 验证手机号",
+      check: "检查手机号验证",
+      refresh: "刷新验证状态",
+      sent: "Telegram 已收到请求，请返回后刷新验证状态。",
+      cancelled: "你取消了 Telegram 手机号验证。",
+      unsupported: "请在 Telegram 内打开页面以验证手机号。",
+    };
+  }
+  if (language === "km") {
+    return {
+      verified: "លេខទូរស័ព្ទ Telegram ត្រូវបានផ្ទៀងផ្ទាត់",
+      required: "ត្រូវផ្ទៀងផ្ទាត់លេខទូរស័ព្ទតាម Telegram មុនដាក់ពាក្យ។",
+      request: "ផ្ទៀងផ្ទាត់លេខទូរស័ព្ទតាម Telegram",
+      check: "ពិនិត្យការផ្ទៀងផ្ទាត់លេខទូរស័ព្ទ",
+      refresh: "ធ្វើបច្ចុប្បន្នភាពស្ថានភាព",
+      sent: "Telegram បានទទួលសំណើ។ សូមត្រឡប់មកវិញ ហើយធ្វើបច្ចុប្បន្នភាពស្ថានភាព។",
+      cancelled: "អ្នកបានបោះបង់ការផ្ទៀងផ្ទាត់លេខទូរស័ព្ទ Telegram។",
+      unsupported:
+        "សូមបើកទំព័រនេះនៅក្នុង Telegram ដើម្បីផ្ទៀងផ្ទាត់លេខទូរស័ព្ទ។",
+    };
+  }
+  return {
+    verified: "Telegram phone number verified",
+    required: "Verify your phone number through Telegram before submitting.",
+    request: "Verify phone number with Telegram",
+    check: "Check phone verification",
+    refresh: "Refresh verification status",
+    sent: "Telegram received the request. Return here and refresh the verification status.",
+    cancelled: "You cancelled Telegram phone verification.",
+    unsupported: "Open this page in Telegram to verify your phone number.",
   };
 }
 
@@ -531,6 +576,10 @@ export function App(): JSX.Element {
     ApplicationListEntry[]
   >([]);
   const [applicantSession, setApplicantSession] = useState(false);
+  const [phoneVerification, setPhoneVerification] = useState<
+    TelegramPhoneVerification | undefined
+  >();
+  const [phoneVerificationNotice, setPhoneVerificationNotice] = useState("");
   const [recoveryEntryPoints, setRecoveryEntryPoints] = useState<string[]>([]);
   const [withdrawalConfirmationRequested, setWithdrawalConfirmationRequested] =
     useState(false);
@@ -548,6 +597,7 @@ export function App(): JSX.Element {
   const [loading, setLoading] = useState(false);
   const t = labels[language];
   const factoryCopy = factoryFormCopy(language);
+  const phoneCopy = phoneVerificationCopy(language);
   const amountInputError =
     t.amountInvalid ?? "Enter an amount from USD 10.00 to 500.00.";
   const phoneInputError = t.phoneInvalid ?? "Enter a valid mobile number.";
@@ -598,6 +648,28 @@ export function App(): JSX.Element {
     setServiceCaseNotice("");
     setSupplementMessage("");
     setSupplementNotice("");
+    setPhoneVerification(undefined);
+    setPhoneVerificationNotice("");
+  }
+
+  async function loadPhoneVerification(): Promise<void> {
+    const response = await applicantRequest(
+      "/api/v1/local/public/profile/telegram-phone-verification",
+    );
+    if (response.status === 401) {
+      await recoverApplicantSession();
+      return;
+    }
+    const payload = (await response.json().catch(() => undefined)) as
+      TelegramPhoneVerification | undefined;
+    if (
+      response.ok &&
+      payload &&
+      typeof payload.verified === "boolean" &&
+      typeof payload.required === "boolean"
+    ) {
+      setPhoneVerification(payload);
+    }
   }
 
   async function recoverApplicantSession() {
@@ -1388,6 +1460,61 @@ export function App(): JSX.Element {
                   maxLength={32}
                 />
               </label>
+              {phoneVerification ? (
+                <section
+                  className="next-payment"
+                  aria-label="Telegram phone verification"
+                >
+                  <strong>
+                    {phoneVerification.verified
+                      ? phoneCopy.verified
+                      : phoneVerification.required
+                        ? phoneCopy.required
+                        : phoneCopy.check}
+                  </strong>
+                  {phoneVerification.required && !phoneVerification.verified ? (
+                    <div className="term-choices">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          requestTelegramPhoneContact(window, (result) => {
+                            setPhoneVerificationNotice(
+                              result === "sent"
+                                ? phoneCopy.sent
+                                : result === "cancelled"
+                                  ? phoneCopy.cancelled
+                                  : phoneCopy.unsupported,
+                            );
+                          })
+                        }
+                      >
+                        {phoneCopy.request}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void loadPhoneVerification()}
+                      >
+                        {phoneCopy.refresh}
+                      </button>
+                    </div>
+                  ) : null}
+                  {phoneVerificationNotice ? (
+                    <small>{phoneVerificationNotice}</small>
+                  ) : null}
+                </section>
+              ) : (
+                <section
+                  className="next-payment"
+                  aria-label="Telegram phone verification"
+                >
+                  <button
+                    type="button"
+                    onClick={() => void loadPhoneVerification()}
+                  >
+                    {phoneCopy.check}
+                  </button>
+                </section>
+              )}
               <label>
                 {t.employer}
                 <input

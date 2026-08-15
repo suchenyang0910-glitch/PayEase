@@ -2763,8 +2763,14 @@ app.get("/v1/local/employer/verifications/open", async (request, reply) => {
       tenorDays: row.tenor_days,
       stage: row.status,
       createdAt: row.created_at.toISOString(),
-      identityDocumentType: row.identity_document_type,
-      identityMatchStatus: row.employment_identity_match_status,
+      // Finance verifies salary/settlement only.  Identity document metadata
+      // and the HR match outcome are not necessary for that responsibility.
+      ...(isHr
+        ? {
+            identityDocumentType: row.identity_document_type,
+            identityMatchStatus: row.employment_identity_match_status,
+          }
+        : {}),
       employerTenantId: row.employer_tenant_id,
     })),
   };

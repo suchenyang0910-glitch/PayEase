@@ -1958,6 +1958,8 @@ integration("public applicant access", () => {
     expect(financeQueue.json()).toMatchObject({
       items: [{ applicationNo, stage: "EMPLOYER_FINANCE_VERIFICATION" }],
     });
+    expect(JSON.stringify(financeQueue.json())).not.toContain("NATIONAL_ID");
+    expect(JSON.stringify(financeQueue.json())).not.toContain("MATCHED");
     await call(
       "employer-finance-verification",
       employerFinanceCookie,

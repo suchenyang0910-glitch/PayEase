@@ -25,7 +25,6 @@ type VerificationQueueItem = {
   currency: string;
   tenorDays: number;
   stage: string;
-  identityDocumentType: "NATIONAL_ID" | "PASSPORT" | null;
 };
 const layout = {
   maxWidth: 1000,
@@ -356,8 +355,7 @@ export function App(): JSX.Element {
                       }
                     >
                       {item.applicationNo} · {item.currency}{" "}
-                      {item.requestedAmountMinor} · {item.tenorDays}d ·{" "}
-                      {item.identityDocumentType ?? "—"}
+                      {item.requestedAmountMinor} · {item.tenorDays}d
                     </button>
                   </li>
                 ))}

@@ -1847,9 +1847,21 @@ integration("public applicant access", () => {
             origin: "https://payease-user.example.test",
             "x-csrf-token": applicantCsrfToken!,
           },
-          payload: { preferredLanguage: "en" },
+          payload: { preferredLanguage: "km" },
         });
         expect(acceptedApplicantCsrf.statusCode).toBe(200);
+        expect(acceptedApplicantCsrf.json()).toEqual({
+          preferredLanguage: "km",
+        });
+        const languageAfterRefresh = await brokerApi.app.inject({
+          method: "GET",
+          url: "/v1/local/public/applications",
+          headers: { cookie: secondCookie },
+        });
+        expect(languageAfterRefresh.statusCode).toBe(200);
+        expect(languageAfterRefresh.json()).toMatchObject({
+          preferredLanguage: "km",
+        });
       } finally {
         process.env.NODE_ENV = originalNodeEnvironment;
         if (originalApplicantOrigins === undefined)

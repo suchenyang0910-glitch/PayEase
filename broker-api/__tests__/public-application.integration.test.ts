@@ -1374,6 +1374,27 @@ integration("public applicant access", () => {
         code: "PERSONAL_PROFILE_REQUIRED",
       });
 
+      // A factory is the employer tenant boundary.  An authenticated
+      // applicant cannot create an unassigned application by bypassing the
+      // Mini App's factory selector.
+      const missingFactory = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: { cookie: firstCookie },
+        payload: {
+          preferredLanguage: "en",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+          identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
+          personalProfile,
+          personalDataAndPhoneConsent: true,
+        },
+      });
+      expect(missingFactory.statusCode).toBe(422);
+      expect(missingFactory.json()).toEqual({
+        code: "EMPLOYER_TENANT_REQUIRED",
+      });
+
       const created = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",

@@ -204,6 +204,51 @@ integration("public applicant access", () => {
     });
   });
 
+  it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
+    process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
+    const bootstrap = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/auth/bootstrap",
+      headers: { "x-bootstrap-password": "bootstrap-secret-not-real" },
+      payload: {
+        loginName: "initial-ops-admin",
+        password: "initial-ops-admin-password",
+        preferredLanguage: "en",
+      },
+    });
+
+    expect(bootstrap.statusCode).toBe(201);
+    expect(bootstrap.json()).toEqual({
+      loginName: "initial-ops-admin",
+      role: "OPS_ADMIN",
+    });
+    const complaintRole = await database.query<{
+      code: string;
+      domain: string;
+    }>(
+      "SELECT code, domain FROM roles WHERE code = 'LENDER_COMPLAINT_OFFICER'",
+    );
+    expect(complaintRole.rows).toEqual([
+      { code: "LENDER_COMPLAINT_OFFICER", domain: "LENDER" },
+    ]);
+    const defaultKhmerNames = await database.query<{
+      code: string;
+      display_name_km: string;
+    }>(
+      `SELECT code, display_name_km FROM roles
+        WHERE code IN ('OPS_ADMIN', 'BROKER_OFFICER', 'LENDER_COMPLAINT_OFFICER')
+        ORDER BY code`,
+    );
+    expect(defaultKhmerNames.rows).toEqual([
+      { code: "BROKER_OFFICER", display_name_km: "មន្ត្រីត្រួតពិនិត្យឯកសារ" },
+      {
+        code: "LENDER_COMPLAINT_OFFICER",
+        display_name_km: "មន្ត្រីដោះស្រាយបណ្តឹង",
+      },
+      { code: "OPS_ADMIN", display_name_km: "អ្នកគ្រប់គ្រងវេទិកា" },
+    ]);
+  });
+
   it("does not hand a broker-reviewed application to a deactivated factory", async () => {
     const tenant = await database.query<{ id: string }>(
       `INSERT INTO employer_tenants (external_ref, display_name, is_active)
@@ -251,51 +296,6 @@ integration("public applicant access", () => {
       [applicationNo],
     );
     expect(persisted.rows[0]?.status).toBe("BROKER_REVIEW");
-  });
-
-  it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
-    process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
-    const bootstrap = await brokerApi.app.inject({
-      method: "POST",
-      url: "/v1/local/auth/bootstrap",
-      headers: { "x-bootstrap-password": "bootstrap-secret-not-real" },
-      payload: {
-        loginName: "initial-ops-admin",
-        password: "initial-ops-admin-password",
-        preferredLanguage: "en",
-      },
-    });
-
-    expect(bootstrap.statusCode).toBe(201);
-    expect(bootstrap.json()).toEqual({
-      loginName: "initial-ops-admin",
-      role: "OPS_ADMIN",
-    });
-    const complaintRole = await database.query<{
-      code: string;
-      domain: string;
-    }>(
-      "SELECT code, domain FROM roles WHERE code = 'LENDER_COMPLAINT_OFFICER'",
-    );
-    expect(complaintRole.rows).toEqual([
-      { code: "LENDER_COMPLAINT_OFFICER", domain: "LENDER" },
-    ]);
-    const defaultKhmerNames = await database.query<{
-      code: string;
-      display_name_km: string;
-    }>(
-      `SELECT code, display_name_km FROM roles
-        WHERE code IN ('OPS_ADMIN', 'BROKER_OFFICER', 'LENDER_COMPLAINT_OFFICER')
-        ORDER BY code`,
-    );
-    expect(defaultKhmerNames.rows).toEqual([
-      { code: "BROKER_OFFICER", display_name_km: "មន្ត្រីត្រួតពិនិត្យឯកសារ" },
-      {
-        code: "LENDER_COMPLAINT_OFFICER",
-        display_name_km: "មន្ត្រីដោះស្រាយបណ្តឹង",
-      },
-      { code: "OPS_ADMIN", display_name_km: "អ្នកគ្រប់គ្រងវេទិកា" },
-    ]);
   });
 
   it("returns the same generic response for unknown and incorrect admin credentials", async () => {
@@ -2184,6 +2184,14 @@ integration("public applicant access", () => {
       status: "DISBURSEMENT_PENDING",
       approval: "MAKER_RECORDED",
     });
+    // Seed the checker role through the normal fixture helper before adding
+    // it to the maker. Otherwise this test would stop at role authorization
+    // (403) instead of exercising the intended maker/checker conflict (409).
+    const disbursementChecker = await adminCookieForRole(
+      database,
+      "LENDER_DISBURSEMENT_CHECKER",
+      "LENDER",
+    );
     // A misconfigured account can accidentally receive both operational
     // roles. The checker route must still reject that account: role-based
     // authorization alone is not sufficient for maker/checker separation.
@@ -2217,11 +2225,6 @@ integration("public applicant access", () => {
     expect(sameAccountConfirmation.json()).toEqual({
       code: "DUAL_CONTROL_CONFLICT",
     });
-    const disbursementChecker = await adminCookieForRole(
-      database,
-      "LENDER_DISBURSEMENT_CHECKER",
-      "LENDER",
-    );
     const confirmationWithoutKey = await brokerApi.app.inject({
       method: "POST",
       url: `/v1/local/applications/${applicationNo}/disbursement-confirmation`,

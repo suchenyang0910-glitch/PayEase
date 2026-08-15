@@ -298,6 +298,85 @@ integration("public applicant access", () => {
     expect(persisted.rows[0]?.status).toBe("BROKER_REVIEW");
   });
 
+  it("records NOT_MATCHED from an incorrect factory personnel record", async () => {
+    const tenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('IDENTITY_MISMATCH_FACTORY', 'Identity mismatch factory')
+       RETURNING id`,
+    );
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "identity-mismatch-user",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+        employerTenantId: tenant.rows[0]!.id,
+        identityDocument: { type: "PASSPORT", number: "P-100 001" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    const brokerCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+    const brokerApproved = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/broker-review`,
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "identity-mismatch-broker-review-001",
+      },
+      payload: { decision: "APPROVED", reasonCode: "DOCUMENTS_COMPLETE" },
+    });
+    expect(brokerApproved.statusCode).toBe(200);
+    expect(brokerApproved.json()).toMatchObject({
+      status: "EMPLOYER_VERIFICATION",
+    });
+
+    const hrCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_HR",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(database, tenant.rows[0]!.id, hrCookie);
+    const mismatched = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-identity-match`,
+      headers: {
+        cookie: hrCookie,
+        "idempotency-key": "identity-mismatch-record-001",
+      },
+      payload: {
+        identityDocumentNumber: "P-999 999",
+        reasonCode: "FACTORY_PERSONNEL_RECORD_COMPARISON",
+      },
+    });
+    expect(mismatched.statusCode).toBe(200);
+    expect(mismatched.json()).toEqual({
+      applicationNo,
+      identityMatchStatus: "NOT_MATCHED",
+    });
+
+    const blockedApproval = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-verification`,
+      headers: {
+        cookie: hrCookie,
+        "idempotency-key": "identity-mismatch-employment-approval-001",
+      },
+      payload: { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
+    });
+    expect(blockedApproval.statusCode).toBe(409);
+    expect(blockedApproval.json()).toEqual({
+      code: "EMPLOYMENT_IDENTITY_MATCH_REQUIRED",
+    });
+  });
+
   it("returns the same generic response for unknown and incorrect admin credentials", async () => {
     const department = await database.query<{ id: string }>(
       `INSERT INTO departments (domain, code, display_name_zh, display_name_en, display_name_km)

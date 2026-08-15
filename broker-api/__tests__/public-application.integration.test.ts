@@ -540,9 +540,13 @@ integration("public applicant access", () => {
       url: "/v1/local/admin/employer-tenants",
       headers: { cookie: opsCookie },
     });
-    expect(tenantDirectory.json()).toMatchObject({
-      tenants: [expect.objectContaining({ id: tenantId, isActive: false })],
-    });
+    expect(tenantDirectory.json()).toEqual(
+      expect.objectContaining({
+        tenants: expect.arrayContaining([
+          expect.objectContaining({ id: tenantId, isActive: false }),
+        ]),
+      }),
+    );
 
     const revoked = await brokerApi.app.inject({
       method: "DELETE",

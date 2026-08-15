@@ -4,8 +4,10 @@ import {
   configuredTelegramBots,
   enabledTelegramBotEntryUrls,
   isTelegramBotEnabled,
+  isTelegramWebhookSecretValid,
   requireEnabledTelegramBot,
   requireTelegramRecoveryTopology,
+  verifiedTelegramContactFromUpdate,
   verifyTelegramMiniAppInitData,
 } from "../src/telegram-auth.js";
 
@@ -243,5 +245,78 @@ describe("Telegram multi-bot Mini App verification", () => {
         ]),
       ),
     ).toThrow("entry URL is invalid");
+  });
+
+  it("authenticates an inbound Bot webhook with its per-Bot secret", () => {
+    const bots = configuredTelegramBots(
+      JSON.stringify([
+        {
+          botId: "711111111",
+          botToken: "q".repeat(24),
+          webhookSecret: "telegram_webhook_secret_001",
+        },
+      ]),
+    );
+    expect(
+      isTelegramWebhookSecretValid(
+        "711111111",
+        "telegram_webhook_secret_001",
+        bots,
+      ),
+    ).toBe(true);
+    expect(
+      isTelegramWebhookSecretValid("711111111", "wrong-secret", bots),
+    ).toBe(false);
+    expect(
+      isTelegramWebhookSecretValid(
+        "unknown-bot",
+        "telegram_webhook_secret_001",
+        bots,
+      ),
+    ).toBe(false);
+    expect(() =>
+      configuredTelegramBots(
+        JSON.stringify([
+          {
+            botId: "711111112",
+            botToken: "r".repeat(24),
+            webhookSecret: "too-short",
+          },
+        ]),
+      ),
+    ).toThrow("webhook secret is invalid");
+  });
+
+  it("accepts only a self-shared private-chat contact as Telegram phone proof", () => {
+    expect(
+      verifiedTelegramContactFromUpdate({
+        message: {
+          chat: { type: "private" },
+          from: { id: 123456789 },
+          contact: { user_id: 123456789, phone_number: "+855 12 345 678" },
+        },
+      }),
+    ).toEqual({
+      telegramUserRef: "telegram-123456789",
+      phoneNumber: "+855 12 345 678",
+    });
+    expect(
+      verifiedTelegramContactFromUpdate({
+        message: {
+          chat: { type: "private" },
+          from: { id: 123456789 },
+          contact: { user_id: 555555555, phone_number: "+85512345678" },
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      verifiedTelegramContactFromUpdate({
+        message: {
+          chat: { type: "group" },
+          from: { id: 123456789 },
+          contact: { user_id: 123456789, phone_number: "+85512345678" },
+        },
+      }),
+    ).toBeUndefined();
   });
 });

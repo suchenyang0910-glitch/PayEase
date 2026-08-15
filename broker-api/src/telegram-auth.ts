@@ -5,6 +5,12 @@ export type TelegramBotConfig = Readonly<{
   botToken: string;
   enabled: boolean;
   entryUrl?: string;
+  webhookSecret?: string;
+}>;
+
+export type VerifiedTelegramContact = Readonly<{
+  telegramUserRef: string;
+  phoneNumber: string;
 }>;
 
 export type VerifiedTelegramIdentity = Readonly<{
@@ -39,6 +45,14 @@ function configuredTelegramEntryUrl(value: unknown): string | undefined {
   return url.toString();
 }
 
+function configuredTelegramWebhookSecret(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(value)) {
+    throw new Error("Telegram bot webhook secret is invalid");
+  }
+  return value;
+}
+
 export function configuredTelegramBots(
   source = process.env.TELEGRAM_BOTS_JSON,
 ): TelegramBotConfig[] {
@@ -57,6 +71,7 @@ export function configuredTelegramBots(
     const botToken = typeof config.botToken === "string" ? config.botToken : "";
     const enabled = config.enabled;
     const entryUrl = configuredTelegramEntryUrl(config.entryUrl);
+    const webhookSecret = configuredTelegramWebhookSecret(config.webhookSecret);
     if (
       !/^\d{5,20}$/.test(botId) ||
       botToken.length < 20 ||
@@ -76,6 +91,7 @@ export function configuredTelegramBots(
       botToken,
       enabled: enabled ?? true,
       entryUrl,
+      webhookSecret,
     };
   });
 }
@@ -153,6 +169,63 @@ export function isTelegramBotEnabled(
   bots: readonly TelegramBotConfig[],
 ): boolean {
   return bots.some((bot) => bot.botId === botId && bot.enabled);
+}
+
+/**
+ * Authenticates the Bot API webhook secret configured through Telegram's
+ * setWebhook `secret_token` option. This protects the inbound contact update
+ * path without ever accepting a Bot token over HTTP.
+ */
+export function isTelegramWebhookSecretValid(
+  botId: string,
+  suppliedSecret: string | undefined,
+  bots: readonly TelegramBotConfig[],
+): boolean {
+  const expectedSecret = bots.find(
+    (bot) => bot.botId === botId && bot.enabled,
+  )?.webhookSecret;
+  if (!expectedSecret || !suppliedSecret) return false;
+  const expected = Buffer.from(expectedSecret, "utf8");
+  const supplied = Buffer.from(suppliedSecret, "utf8");
+  return (
+    expected.length === supplied.length && timingSafeEqual(expected, supplied)
+  );
+}
+
+/**
+ * Accept only a contact which Telegram identifies as belonging to the same
+ * person who sent the private-chat update. Forwarded contacts and group-chat
+ * contacts are deliberately ignored: they are not phone ownership proof.
+ */
+export function verifiedTelegramContactFromUpdate(
+  update: unknown,
+): VerifiedTelegramContact | undefined {
+  if (!update || typeof update !== "object") return undefined;
+  const message = (update as { message?: unknown }).message;
+  if (!message || typeof message !== "object") return undefined;
+  const record = message as {
+    chat?: { type?: unknown };
+    from?: { id?: unknown };
+    contact?: { user_id?: unknown; phone_number?: unknown };
+  };
+  const telegramUserId = record.from?.id;
+  const contactUserId = record.contact?.user_id;
+  const phoneNumber = record.contact?.phone_number;
+  if (
+    record.chat?.type !== "private" ||
+    typeof telegramUserId !== "number" ||
+    !Number.isSafeInteger(telegramUserId) ||
+    telegramUserId <= 0 ||
+    contactUserId !== telegramUserId ||
+    typeof phoneNumber !== "string" ||
+    !/^\+?[0-9][0-9 ()-]{5,31}$/.test(phoneNumber)
+  ) {
+    return undefined;
+  }
+  return {
+    telegramUserRef: `telegram-${telegramUserId}`,
+    phoneNumber: phoneNumber.trim(),
+  };
 }
 
 function safeEqual(left: string, right: string): boolean {

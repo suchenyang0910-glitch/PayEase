@@ -956,6 +956,49 @@ integration("public applicant access", () => {
     expect(audit.rows[0]!.count).toBe("1");
   });
 
+  it("blocks a second Telegram account from opening an active application with the same identity document", async () => {
+    const tenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('IDENTITY_COLLISION_FACTORY', 'Identity collision factory')
+       RETURNING id`,
+    );
+    const first = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "identity-collision-first-account",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+        employerTenantId: tenant.rows[0]!.id,
+        identityDocument: { type: "PASSPORT", number: "P-77 001" },
+      },
+    });
+    expect(first.statusCode).toBe(201);
+    const firstApplicationNo = (first.json() as { applicationNo: string })
+      .applicationNo;
+
+    const second = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: {
+        telegramUserRef: "identity-collision-second-account",
+        preferredLanguage: "en",
+        requestedAmount: { amountMinor: "10000", currency: "USD" },
+        tenorDays: 30,
+        employerTenantId: tenant.rows[0]!.id,
+        // Normalization must make spacing and case irrelevant to matching.
+        identityDocument: { type: "PASSPORT", number: "p-77001" },
+      },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({
+      code: "IDENTITY_DOCUMENT_ACTIVE_APPLICATION_EXISTS",
+    });
+    expect(JSON.stringify(second.json())).not.toContain(firstApplicationNo);
+    expect(JSON.stringify(second.json())).not.toContain("BROKER_REVIEW");
+  });
+
   it("allows the same broker account to decide again after a returned supplement request", async () => {
     const created = await brokerApi.app.inject({
       method: "POST",

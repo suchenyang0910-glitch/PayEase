@@ -2030,7 +2030,11 @@ app.post("/v1/local/applications", async (request, reply) => {
     const applicantAccessToken = requiresTelegramAuthentication()
       ? undefined
       : randomBytes(32).toString("base64url");
-    const user = await client.query<{ id: string }>(
+    const user = await client.query<{
+      id: string;
+      identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
+      identity_document_lookup_hash: string | null;
+    }>(
       `INSERT INTO users (
          telegram_user_ref, preferred_language, full_name_encrypted,
          phone_encrypted, employer_name_encrypted, personal_data_consent_version,
@@ -2059,7 +2063,7 @@ app.post("/v1/local/applications", async (request, reply) => {
          identity_document_number_encrypted = COALESCE(EXCLUDED.identity_document_number_encrypted, users.identity_document_number_encrypted),
          identity_document_lookup_hash = COALESCE(EXCLUDED.identity_document_lookup_hash, users.identity_document_lookup_hash),
          updated_at = now()
-       RETURNING id`,
+       RETURNING id, identity_document_type, identity_document_lookup_hash`,
       [
         telegramUserRef,
         input.preferredLanguage,
@@ -2073,26 +2077,62 @@ app.post("/v1/local/applications", async (request, reply) => {
         identityLookupHash,
       ],
     );
+    if (
+      user.rows[0]!.identity_document_type &&
+      user.rows[0]!.identity_document_lookup_hash
+    ) {
+      // Serialize submissions that represent the same identity before the
+      // active-application check. Without this transaction-scoped lock, two
+      // separate Telegram accounts could both observe an empty queue and
+      // create duplicate applications concurrently.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 4701))",
+        [
+          `${user.rows[0]!.identity_document_type}|${user.rows[0]!.identity_document_lookup_hash}`,
+        ],
+      );
+    }
     const existing = await client.query<{
       application_no: string;
       status: string;
       rejection_condition_resolved: boolean;
+      belongs_to_current_user: boolean;
     }>(
-      `SELECT application_no, status, rejection_condition_resolved
-         FROM applications
-        WHERE user_id = $1
-          AND (
-            status NOT IN ('REJECTED', 'SETTLED', 'CLOSED')
-            OR (status = 'REJECTED' AND rejection_condition_resolved = false)
+      `SELECT a.application_no, a.status, a.rejection_condition_resolved,
+              a.user_id = $1 AS belongs_to_current_user
+         FROM applications a
+         JOIN users existing_user ON existing_user.id = a.user_id
+        WHERE (
+            a.user_id = $1
+            OR (
+              $2::text IS NOT NULL AND $3::text IS NOT NULL
+              AND existing_user.identity_document_type = $2
+              AND existing_user.identity_document_lookup_hash = $3
+            )
           )
-        ORDER BY created_at DESC
+          AND (
+            a.status NOT IN ('REJECTED', 'SETTLED', 'CLOSED')
+            OR (a.status = 'REJECTED' AND a.rejection_condition_resolved = false)
+          )
+        ORDER BY a.created_at DESC
         LIMIT 1
         FOR UPDATE`,
-      [user.rows[0]!.id],
+      [
+        user.rows[0]!.id,
+        user.rows[0]!.identity_document_type,
+        user.rows[0]!.identity_document_lookup_hash,
+      ],
     );
     const blockingApplication = existing.rows[0];
     if (blockingApplication) {
       await client.query("ROLLBACK");
+      if (!blockingApplication.belongs_to_current_user) {
+        // A different Telegram account must never learn another applicant's
+        // application number or lifecycle state from an identity collision.
+        return reply.code(409).send({
+          code: "IDENTITY_DOCUMENT_ACTIVE_APPLICATION_EXISTS",
+        });
+      }
       return reply.code(409).send({
         code:
           blockingApplication.status === "REJECTED"

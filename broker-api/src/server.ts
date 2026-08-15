@@ -567,7 +567,9 @@ async function employerTenantAccess(
     `SELECT 1
        FROM employer_tenant_members m
        JOIN admin_accounts a ON a.id = m.account_id
-      WHERE m.employer_tenant_id = $1 AND a.login_name = $2 AND a.is_active = true`,
+       JOIN employer_tenants t ON t.id = m.employer_tenant_id
+      WHERE m.employer_tenant_id = $1 AND a.login_name = $2
+        AND a.is_active = true AND t.is_active = true`,
     [application.employer_tenant_id, loginName],
   );
   return membership.rowCount ? "GRANTED" : "DENIED";
@@ -1363,6 +1365,54 @@ app.post("/v1/local/admin/employer-tenants", async (request, reply) => {
     client.release();
   }
 });
+
+// Deactivation is a real access boundary: it stops new applicant selection
+// and freezes all employer-side verification work for that factory.
+app.patch(
+  "/v1/local/admin/employer-tenants/:tenantId/activity",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const params = z
+      .object({ tenantId: z.string().uuid() })
+      .parse(request.params);
+    const input = adminAccountActivitySchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const tenant = await client.query<{
+        id: string;
+        external_ref: string;
+        is_active: boolean;
+      }>(
+        `UPDATE employer_tenants SET is_active = $1, updated_at = now()
+          WHERE id = $2 RETURNING id, external_ref, is_active`,
+        [input.isActive, params.tenantId],
+      );
+      const row = tenant.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "EMPLOYER_TENANT_NOT_FOUND" });
+      }
+      await addAuditEvent(
+        client,
+        row.id,
+        row.is_active
+          ? "EMPLOYER_TENANT_REACTIVATED"
+          : "EMPLOYER_TENANT_DEACTIVATED",
+        request.adminIdentity!.loginName,
+        { externalRef: row.external_ref },
+        "EMPLOYER_TENANT",
+      );
+      await client.query("COMMIT");
+      return { id: row.id, isActive: row.is_active };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
 
 // This directory contains only back-office login names and role codes.  It
 // intentionally never joins applications, personal profiles or identity
@@ -2748,6 +2798,7 @@ app.get("/v1/local/employer/verifications/open", async (request, reply) => {
             a.employer_tenant_id
        FROM applications a
        JOIN users u ON u.id = a.user_id
+       JOIN employer_tenants tenant ON tenant.id = a.employer_tenant_id AND tenant.is_active = true
        JOIN employer_tenant_members m ON m.employer_tenant_id = a.employer_tenant_id
        JOIN admin_accounts account ON account.id = m.account_id
       WHERE account.login_name = $1 AND account.is_active = true

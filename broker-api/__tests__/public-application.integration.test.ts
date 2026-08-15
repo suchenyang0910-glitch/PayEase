@@ -527,6 +527,23 @@ integration("public applicant access", () => {
     });
     expect(denied.statusCode).toBe(403);
 
+    const deactivated = await brokerApi.app.inject({
+      method: "PATCH",
+      url: `/v1/local/admin/employer-tenants/${tenantId}/activity`,
+      headers: { cookie: opsCookie },
+      payload: { isActive: false },
+    });
+    expect(deactivated.statusCode).toBe(200);
+    expect(deactivated.json()).toEqual({ id: tenantId, isActive: false });
+    const tenantDirectory = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/admin/employer-tenants",
+      headers: { cookie: opsCookie },
+    });
+    expect(tenantDirectory.json()).toMatchObject({
+      tenants: [expect.objectContaining({ id: tenantId, isActive: false })],
+    });
+
     const revoked = await brokerApi.app.inject({
       method: "DELETE",
       url: `/v1/local/admin/employer-tenants/${tenantId}/members/${loginName}`,

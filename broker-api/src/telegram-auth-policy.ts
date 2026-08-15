@@ -3,6 +3,7 @@ type TelegramAuthEnvironment = Readonly<{
   PAYEASE_DEPLOYMENT_MODE?: string;
   PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW?: string;
   REQUIRE_TELEGRAM_AUTH?: string;
+  REQUIRE_TELEGRAM_PHONE_VERIFICATION?: string;
 }>;
 
 /** A preview marker is useful to prevent accidental use as a real service. */
@@ -45,5 +46,20 @@ export function isUnauthenticatedControlledPreview(
   return (
     isControlledPreview(environment) &&
     !requiresTelegramAuthentication(environment)
+  );
+}
+
+/**
+ * Contact sharing is an opt-in production gate. It remains disabled until
+ * every enabled Bot has a configured webhook secret and the operations team
+ * has verified delivery, so a deployment cannot accidentally lock applicants
+ * out by merely adding the database migration.
+ */
+export function requiresTelegramPhoneVerification(
+  environment: TelegramAuthEnvironment = process.env,
+): boolean {
+  return (
+    requiresTelegramAuthentication(environment) &&
+    environment.REQUIRE_TELEGRAM_PHONE_VERIFICATION === "true"
   );
 }

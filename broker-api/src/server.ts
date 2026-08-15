@@ -51,6 +51,7 @@ import {
   isControlledPreview,
   isUnauthenticatedControlledPreview,
   requiresTelegramAuthentication,
+  requiresTelegramPhoneVerification,
 } from "./telegram-auth-policy.js";
 import {
   isAllowedApplicantOrigin,
@@ -111,6 +112,10 @@ function traceIdForRequest(header: string | string[] | undefined): string {
 
 function currentTraceId(): string {
   return requestTraceContext.getStore()?.traceId ?? randomUUID();
+}
+
+function normalizedPhoneNumber(value: string): string {
+  return value.normalize("NFKC").replace(/[\s()-]/g, "");
 }
 
 // Schema failures are client input errors.  Never surface them as a 500, which
@@ -2047,6 +2052,32 @@ app.get("/v1/local/public/employer-tenants", async () => {
   };
 });
 
+// Never return the contact itself to the browser. The Mini App needs only the
+// boolean state to decide whether it should ask Telegram to share a contact.
+app.get(
+  "/v1/local/public/profile/telegram-phone-verification",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const user = await pool.query<{ verified_at: Date | null }>(
+      `SELECT telegram_phone_verified_at AS verified_at
+         FROM users WHERE telegram_user_ref = $1`,
+      [applicant.telegramUserRef],
+    );
+    const verifiedAt = user.rows[0]?.verified_at;
+    return {
+      verified: Boolean(verifiedAt),
+      ...(verifiedAt ? { verifiedAt: verifiedAt.toISOString() } : {}),
+      required: requiresTelegramPhoneVerification(),
+    };
+  },
+);
+
 app.post(
   "/v1/local/public/telegram-sessions/logout",
   async (request, reply) => {
@@ -2194,6 +2225,7 @@ app.post("/v1/local/applications", async (request, reply) => {
       id: string;
       identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
       identity_document_lookup_hash: string | null;
+      telegram_phone_encrypted: Buffer | null;
     }>(
       `INSERT INTO users (
          telegram_user_ref, preferred_language, full_name_encrypted,
@@ -2223,7 +2255,8 @@ app.post("/v1/local/applications", async (request, reply) => {
          identity_document_number_encrypted = COALESCE(EXCLUDED.identity_document_number_encrypted, users.identity_document_number_encrypted),
          identity_document_lookup_hash = COALESCE(EXCLUDED.identity_document_lookup_hash, users.identity_document_lookup_hash),
          updated_at = now()
-       RETURNING id, identity_document_type, identity_document_lookup_hash`,
+       RETURNING id, identity_document_type, identity_document_lookup_hash,
+                 telegram_phone_encrypted`,
       [
         telegramUserRef,
         input.preferredLanguage,
@@ -2237,6 +2270,34 @@ app.post("/v1/local/applications", async (request, reply) => {
         identityLookupHash,
       ],
     );
+    if (requiresTelegramPhoneVerification() && input.personalProfile) {
+      const verifiedPhone = user.rows[0]!.telegram_phone_encrypted;
+      if (!verifiedPhone) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(422)
+          .send({ code: "TELEGRAM_PHONE_VERIFICATION_REQUIRED" });
+      }
+      let matchingPhone = false;
+      try {
+        matchingPhone =
+          normalizedPhoneNumber(decryptPersonalValue(verifiedPhone)) ===
+          normalizedPhoneNumber(input.personalProfile.phone);
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          "telegram phone verification unavailable",
+        );
+        await client.query("ROLLBACK");
+        return reply
+          .code(503)
+          .send({ code: "TELEGRAM_PHONE_STORAGE_UNAVAILABLE" });
+      }
+      if (!matchingPhone) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({ code: "TELEGRAM_PHONE_MISMATCH" });
+      }
+    }
     if (
       user.rows[0]!.identity_document_type &&
       user.rows[0]!.identity_document_lookup_hash

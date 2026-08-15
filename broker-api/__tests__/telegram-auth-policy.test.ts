@@ -3,6 +3,7 @@ import {
   isControlledPreview,
   isUnauthenticatedControlledPreview,
   requiresTelegramAuthentication,
+  requiresTelegramPhoneVerification,
 } from "../src/telegram-auth-policy.js";
 
 describe("Telegram authentication deployment policy", () => {
@@ -69,5 +70,24 @@ describe("Telegram authentication deployment policy", () => {
         REQUIRE_TELEGRAM_AUTH: "true",
       }),
     ).toBe(true);
+  });
+
+  it("requires an explicit verified-contact rollout flag", () => {
+    expect(requiresTelegramPhoneVerification({ NODE_ENV: "production" })).toBe(
+      false,
+    );
+    expect(
+      requiresTelegramPhoneVerification({
+        NODE_ENV: "production",
+        REQUIRE_TELEGRAM_PHONE_VERIFICATION: "true",
+      }),
+    ).toBe(true);
+    expect(
+      requiresTelegramPhoneVerification({
+        NODE_ENV: "test",
+        REQUIRE_TELEGRAM_AUTH: "false",
+        REQUIRE_TELEGRAM_PHONE_VERIFICATION: "true",
+      }),
+    ).toBe(false);
   });
 });

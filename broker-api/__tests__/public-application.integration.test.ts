@@ -179,6 +179,9 @@ integration("public applicant access", () => {
 
   it("records only a secret-authenticated self-shared Telegram contact", async () => {
     const originalBotConfig = process.env.TELEGRAM_BOTS_JSON;
+    const originalRequireTelegramAuth = process.env.REQUIRE_TELEGRAM_AUTH;
+    const originalPhoneVerification =
+      process.env.REQUIRE_TELEGRAM_PHONE_VERIFICATION;
     process.env.TELEGRAM_BOTS_JSON = JSON.stringify([
       {
         botId: "444444444",
@@ -227,6 +230,76 @@ integration("public applicant access", () => {
         decryptPersonalValue(stored.rows[0]!.telegram_phone_encrypted),
       ).toBe("+855 12 345 678");
       expect(stored.rows[0]!.telegram_phone_verified_bot_id).toBe("444444444");
+      const applicantSessionToken = "telegram-phone-status-session";
+      await database.query(
+        `INSERT INTO telegram_auth_sessions
+          (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+         VALUES ($1, 'telegram-99112233', '444444444', now() + interval '15 minutes', now())`,
+        [createHash("sha256").update(applicantSessionToken).digest("hex")],
+      );
+      const status = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/profile/telegram-phone-verification",
+        headers: {
+          cookie: `__Host-payease_applicant_session=${applicantSessionToken}`,
+        },
+      });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toMatchObject({ verified: true, required: false });
+
+      process.env.REQUIRE_TELEGRAM_AUTH = "true";
+      process.env.REQUIRE_TELEGRAM_PHONE_VERIFICATION = "true";
+      const requiredStatus = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/profile/telegram-phone-verification",
+        headers: {
+          cookie: `__Host-payease_applicant_session=${applicantSessionToken}`,
+        },
+      });
+      expect(requiredStatus.json()).toMatchObject({
+        verified: true,
+        required: true,
+      });
+      const unverifiedUser = await database.query<{ id: string }>(
+        `INSERT INTO users (telegram_user_ref, preferred_language)
+         VALUES ('telegram-88776655', 'en') RETURNING id`,
+      );
+      const unverifiedSessionToken = "telegram-phone-gate-unverified";
+      await database.query(
+        `INSERT INTO telegram_auth_sessions
+          (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+         VALUES ($1, 'telegram-88776655', '444444444', now() + interval '15 minutes', now())`,
+        [createHash("sha256").update(unverifiedSessionToken).digest("hex")],
+      );
+      const tenant = await database.query<{ id: string }>(
+        `INSERT INTO employer_tenants (external_ref, display_name)
+         VALUES ('PHONE_GATE_FACTORY', 'Phone gate factory') RETURNING id`,
+      );
+      const blockedSubmission = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        headers: {
+          cookie: `__Host-payease_applicant_session=${unverifiedSessionToken}`,
+        },
+        payload: {
+          preferredLanguage: "en",
+          requestedAmount: { amountMinor: "10000", currency: "USD" },
+          tenorDays: 30,
+          employerTenantId: tenant.rows[0]!.id,
+          identityDocument: { type: "NATIONAL_ID", number: "ID-88776-655" },
+          personalProfile: {
+            fullName: "Unverified Phone Applicant",
+            phone: "+855 12 345 678",
+            employerName: "Phone gate factory",
+          },
+          personalDataAndPhoneConsent: true,
+        },
+      });
+      expect(unverifiedUser.rows[0]?.id).toBeTruthy();
+      expect(blockedSubmission.statusCode).toBe(422);
+      expect(blockedSubmission.json()).toEqual({
+        code: "TELEGRAM_PHONE_VERIFICATION_REQUIRED",
+      });
 
       const forwardedContact = await brokerApi.app.inject({
         method: "POST",
@@ -258,6 +331,14 @@ integration("public applicant access", () => {
       if (originalBotConfig === undefined)
         delete process.env.TELEGRAM_BOTS_JSON;
       else process.env.TELEGRAM_BOTS_JSON = originalBotConfig;
+      if (originalRequireTelegramAuth === undefined)
+        delete process.env.REQUIRE_TELEGRAM_AUTH;
+      else process.env.REQUIRE_TELEGRAM_AUTH = originalRequireTelegramAuth;
+      if (originalPhoneVerification === undefined)
+        delete process.env.REQUIRE_TELEGRAM_PHONE_VERIFICATION;
+      else
+        process.env.REQUIRE_TELEGRAM_PHONE_VERIFICATION =
+          originalPhoneVerification;
     }
   });
 

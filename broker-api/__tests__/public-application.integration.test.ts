@@ -136,6 +136,11 @@ integration("public applicant access", () => {
         botId: "444444444",
         botToken: "integration-test-token-not-real-0001",
         enabled: true,
+        // This mirrors production deployment: the Bot webhook secret is
+        // configured before the API process starts. Do not mutate a process
+        // security configuration mid-request test, because that obscures the
+        // actual per-Bot webhook contract we need to verify here.
+        webhookSecret: "integration_telegram_webhook_secret_001",
       },
     ]);
     brokerApi = await import("../src/server.js");
@@ -178,18 +183,9 @@ integration("public applicant access", () => {
   });
 
   it("records only a secret-authenticated self-shared Telegram contact", async () => {
-    const originalBotConfig = process.env.TELEGRAM_BOTS_JSON;
     const originalRequireTelegramAuth = process.env.REQUIRE_TELEGRAM_AUTH;
     const originalPhoneVerification =
       process.env.REQUIRE_TELEGRAM_PHONE_VERIFICATION;
-    process.env.TELEGRAM_BOTS_JSON = JSON.stringify([
-      {
-        botId: "444444444",
-        botToken: "integration-test-token-not-real-0001",
-        enabled: true,
-        webhookSecret: "integration_telegram_webhook_secret_001",
-      },
-    ]);
     const user = await database.query<{ id: string }>(
       `INSERT INTO users (telegram_user_ref, preferred_language)
        VALUES ('telegram-99112233', 'en') RETURNING id`,
@@ -328,9 +324,6 @@ integration("public applicant access", () => {
         ),
       ).toBe("+855 12 345 678");
     } finally {
-      if (originalBotConfig === undefined)
-        delete process.env.TELEGRAM_BOTS_JSON;
-      else process.env.TELEGRAM_BOTS_JSON = originalBotConfig;
       if (originalRequireTelegramAuth === undefined)
         delete process.env.REQUIRE_TELEGRAM_AUTH;
       else process.env.REQUIRE_TELEGRAM_AUTH = originalRequireTelegramAuth;

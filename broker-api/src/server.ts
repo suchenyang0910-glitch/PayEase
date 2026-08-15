@@ -1960,11 +1960,18 @@ app.post(
       .object({ botId: z.string().regex(/^\d{5,20}$/) })
       .parse(request.params);
     const suppliedSecret = request.headers["x-telegram-bot-api-secret-token"];
+    const suppliedSecretValue = Array.isArray(suppliedSecret)
+      ? suppliedSecret.length === 1
+        ? suppliedSecret[0]
+        : undefined
+      : suppliedSecret;
     const bots = configuredTelegramBots();
     if (
       !isTelegramWebhookSecretValid(
         params.botId,
-        typeof suppliedSecret === "string" ? suppliedSecret : undefined,
+        typeof suppliedSecretValue === "string"
+          ? suppliedSecretValue
+          : undefined,
         bots,
       )
     ) {

@@ -53,6 +53,56 @@ type EmployerTenantMember = Readonly<{
   roleCodes: string[];
 }>;
 
+function factoryTenantCopy(language: Language): Readonly<{
+  title: string;
+  status: string;
+  active: string;
+  inactive: string;
+  enable: string;
+  disable: string;
+  enableConfirm: string;
+  disableConfirm: string;
+}> {
+  if (language === "zh-CN") {
+    return {
+      title: "工厂租户管理",
+      status: "状态",
+      active: "已启用",
+      inactive: "已停用",
+      enable: "恢复工厂",
+      disable: "停用工厂",
+      enableConfirm: "确认恢复该工厂？其企业端账号可再次执行核验。",
+      disableConfirm: "确认停用该工厂？将立即冻结该工厂所有企业端核验操作。",
+    };
+  }
+  if (language === "km") {
+    return {
+      title: "ការគ្រប់គ្រងអ្នកជួលរោងចក្រ",
+      status: "ស្ថានភាព",
+      active: "សកម្ម",
+      inactive: "បានបិទ",
+      enable: "បើករោងចក្រវិញ",
+      disable: "បិទរោងចក្រ",
+      enableConfirm:
+        "បើករោងចក្រនេះវិញ? គណនី HR និងហិរញ្ញវត្ថុអាចបន្តការផ្ទៀងផ្ទាត់។",
+      disableConfirm:
+        "បិទរោងចក្រនេះ? ការផ្ទៀងផ្ទាត់របស់រោងចក្រនេះនឹងត្រូវផ្អាកភ្លាមៗ។",
+    };
+  }
+  return {
+    title: "Factory tenant management",
+    status: "Status",
+    active: "Active",
+    inactive: "Disabled",
+    enable: "Enable factory",
+    disable: "Disable factory",
+    enableConfirm:
+      "Enable this factory? Its HR and finance accounts can verify again.",
+    disableConfirm:
+      "Disable this factory? All employer-side verification for it will be frozen immediately.",
+  };
+}
+
 function isServiceCaseQueueResponse(
   payload: unknown,
 ): payload is { cases: ServiceCaseQueueEntry[] } {
@@ -401,6 +451,23 @@ export function App(): JSX.Element {
       return;
     await adminRequest(
       `/v1/local/admin/accounts/${encodeURIComponent(loginName)}/activity`,
+      "PATCH",
+      { isActive },
+    );
+  };
+  const setTenantActivity = async (
+    tenant: (typeof employerTenants)[number],
+    isActive: boolean,
+  ) => {
+    const tenantCopy = factoryTenantCopy(identity!.preferredLanguage);
+    if (
+      !window.confirm(
+        isActive ? tenantCopy.enableConfirm : tenantCopy.disableConfirm,
+      )
+    )
+      return;
+    await adminRequest(
+      `/v1/local/admin/employer-tenants/${encodeURIComponent(tenant.id)}/activity`,
       "PATCH",
       { isActive },
     );
@@ -996,6 +1063,53 @@ export function App(): JSX.Element {
                 {adminInProgress ? "…" : copy.createDepartment}
               </button>
             </form>
+            <section style={{ ...card, marginTop: 0 }}>
+              <h3>{factoryTenantCopy(identity.preferredLanguage).title}</h3>
+              {employerTenants.length === 0 ? (
+                <p>{copy.notRecorded}</p>
+              ) : (
+                employerTenants.map((tenant) => {
+                  const tenantCopy = factoryTenantCopy(
+                    identity.preferredLanguage,
+                  );
+                  return (
+                    <div
+                      key={tenant.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(180px, 1fr) auto auto",
+                        gap: 12,
+                        alignItems: "center",
+                        borderTop: "1px solid #e2e8f0",
+                        padding: "10px 0",
+                      }}
+                    >
+                      <span>
+                        <strong>{tenant.displayName}</strong> (
+                        {tenant.externalRef})
+                      </span>
+                      <span>
+                        {tenantCopy.status}:{" "}
+                        {tenant.isActive
+                          ? tenantCopy.active
+                          : tenantCopy.inactive}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={adminInProgress}
+                        onClick={() =>
+                          void setTenantActivity(tenant, !tenant.isActive)
+                        }
+                      >
+                        {tenant.isActive
+                          ? tenantCopy.disable
+                          : tenantCopy.enable}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </section>
             <form
               style={form}
               onSubmit={(e) => {

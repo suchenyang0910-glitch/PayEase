@@ -19,6 +19,7 @@ const validRecoveryBots = JSON.stringify([
   },
 ]);
 const validPiiKey = Buffer.alloc(32, 4).toString("base64");
+const validIdentityLookupKey = Buffer.alloc(32, 6).toString("base64");
 
 describe("Telegram deployment preflight", () => {
   it("reports safe Bot identifiers for a valid recovery topology", () => {
@@ -27,6 +28,7 @@ describe("Telegram deployment preflight", () => {
         PAYEASE_DEPLOYMENT_MODE: "production",
         TELEGRAM_BOTS_JSON: validRecoveryBots,
         PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+        PAYEASE_IDENTITY_LOOKUP_KEY: validIdentityLookupKey,
       }),
     ).toEqual({
       ready: true,
@@ -52,6 +54,7 @@ describe("Telegram deployment preflight", () => {
         },
       ]),
       PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+      PAYEASE_IDENTITY_LOOKUP_KEY: validIdentityLookupKey,
     });
     expect(result.ready).toBe(false);
     expect(result.error).toContain(
@@ -79,6 +82,7 @@ describe("Telegram deployment preflight", () => {
         },
       ]),
       PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+      PAYEASE_IDENTITY_LOOKUP_KEY: validIdentityLookupKey,
     });
     expect(result.ready).toBe(false);
     expect(result.enabledBotCount).toBe(1);
@@ -121,6 +125,7 @@ describe("Telegram deployment preflight", () => {
       PAYEASE_DEPLOYMENT_MODE: "production",
       TELEGRAM_BOTS_JSON: validRecoveryBots,
       PAYEASE_PII_ENCRYPTION_KEY: validPiiKey,
+      PAYEASE_IDENTITY_LOOKUP_KEY: validIdentityLookupKey,
     });
 
     expect(JSON.parse(output)).toMatchObject({
@@ -131,5 +136,6 @@ describe("Telegram deployment preflight", () => {
     expect(output).not.toContain("preflight-token-one-not-real-00001");
     expect(output).not.toContain("preflight-token-two-not-real-00002");
     expect(output).not.toContain(validPiiKey);
+    expect(output).not.toContain(validIdentityLookupKey);
   });
 });

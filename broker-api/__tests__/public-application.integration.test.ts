@@ -108,6 +108,9 @@ integration("public applicant access", () => {
     process.env.PAYEASE_PII_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString(
       "base64",
     );
+    process.env.PAYEASE_IDENTITY_LOOKUP_KEY = Buffer.alloc(32, 6).toString(
+      "base64",
+    );
     // Lifecycle fixtures mint a server-side test session.  Keep its Bot in the
     // same allowlist that production requests enforce, rather than relying on
     // an untrusted session row that could never exist in production.
@@ -749,6 +752,11 @@ integration("public applicant access", () => {
       fields: ["personalDataAndPhoneConsent"],
     });
 
+    const tenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('PROFILE_FACTORY', 'Profile factory') RETURNING id`,
+    );
+    const identityDocument = { type: "PASSPORT" as const, number: "P-123 456" };
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
@@ -757,6 +765,8 @@ integration("public applicant access", () => {
         preferredLanguage: "en",
         requestedAmount: { amountMinor: "10000", currency: "USD" },
         tenorDays: 30,
+        employerTenantId: tenant.rows[0]!.id,
+        identityDocument,
         personalProfile: profile,
         personalDataAndPhoneConsent: true,
       },
@@ -772,10 +782,16 @@ integration("public applicant access", () => {
       personal_data_key_version: string;
       phone_consent_version: string;
       phone_consented_at: Date;
+      identity_document_type: string;
+      identity_document_number_encrypted: Buffer;
+      identity_document_lookup_hash: string;
+      employer_tenant_id: string;
     }>(
       `SELECT u.full_name_encrypted, u.phone_encrypted, u.employer_name_encrypted,
               u.personal_data_consent_version, u.personal_data_key_version
-              , u.phone_consent_version, u.phone_consented_at
+              , u.phone_consent_version, u.phone_consented_at,
+              u.identity_document_type, u.identity_document_number_encrypted,
+              u.identity_document_lookup_hash, p.employer_tenant_id
          FROM users u
          JOIN applications p ON p.user_id = u.id
         WHERE p.application_no = $1`,
@@ -789,6 +805,12 @@ integration("public applicant access", () => {
     expect(row.employer_name_encrypted.toString("utf8")).not.toContain(
       profile.employerName,
     );
+    expect(
+      row.identity_document_number_encrypted.toString("utf8"),
+    ).not.toContain(identityDocument.number);
+    expect(row.identity_document_type).toBe("PASSPORT");
+    expect(row.identity_document_lookup_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(row.employer_tenant_id).toBe(tenant.rows[0]!.id);
     expect(
       decryptPersonalProfile({
         fullName: row.full_name_encrypted,

@@ -57,6 +57,7 @@ import {
   decryptPersonalValue,
   encryptPersonalProfile,
   encryptPersonalValue,
+  identityDocumentLookupHash,
   personalDataEncryptionPreflight,
   personalDataKeyVersion,
 } from "./personal-profile.js";
@@ -423,6 +424,7 @@ type ApplicationRow = Readonly<{
   id: string;
   status: string;
   review_round: number;
+  employer_tenant_id: string | null;
 }>;
 
 type SingleApproval = Readonly<{
@@ -542,7 +544,7 @@ async function lockApplication(
   applicationNo: string,
 ): Promise<ApplicationRow | undefined> {
   const result = await client.query<ApplicationRow>(
-    "SELECT id, status, review_round FROM applications WHERE application_no = $1 FOR UPDATE",
+    "SELECT id, status, review_round, employer_tenant_id FROM applications WHERE application_no = $1 FOR UPDATE",
     [applicationNo],
   );
   return result.rows[0];
@@ -1688,6 +1690,12 @@ app.post("/v1/local/applications", async (request, reply) => {
   if (requiresTelegramAuthentication() && !input.personalProfile) {
     return reply.code(422).send({ code: "PERSONAL_PROFILE_REQUIRED" });
   }
+  if (requiresTelegramAuthentication() && !input.employerTenantId) {
+    return reply.code(422).send({ code: "EMPLOYER_TENANT_REQUIRED" });
+  }
+  if (requiresTelegramAuthentication() && !input.identityDocument) {
+    return reply.code(422).send({ code: "IDENTITY_DOCUMENT_REQUIRED" });
+  }
   const telegramUserRef = applicant?.telegramUserRef ?? input.telegramUserRef;
   if (!telegramUserRef) {
     return reply.code(400).send({ code: "TELEGRAM_USER_REFERENCE_REQUIRED" });
@@ -1729,10 +1737,41 @@ app.post("/v1/local/applications", async (request, reply) => {
         .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
     }
   }
+  let identityLookupHash: string | undefined;
+  let encryptedIdentityDocumentNumber: Buffer | undefined;
+  if (input.identityDocument) {
+    try {
+      identityLookupHash = identityDocumentLookupHash(input.identityDocument);
+      encryptedIdentityDocumentNumber = encryptPersonalValue(
+        input.identityDocument.number
+          .normalize("NFKC")
+          .toUpperCase()
+          .replace(/[ -]/g, ""),
+      );
+    } catch (error) {
+      request.log.error(
+        { err: error },
+        "identity document storage unavailable",
+      );
+      return reply
+        .code(503)
+        .send({ code: "IDENTITY_DOCUMENT_STORAGE_UNAVAILABLE" });
+    }
+  }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    if (input.employerTenantId) {
+      const tenant = await client.query(
+        "SELECT 1 FROM employer_tenants WHERE id = $1 AND is_active = true FOR KEY SHARE",
+        [input.employerTenantId],
+      );
+      if (!tenant.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({ code: "EMPLOYER_TENANT_UNAVAILABLE" });
+      }
+    }
     // The opaque per-application cookie is useful only for the controlled
     // preview, which deliberately has no Telegram container. Production
     // access must remain bound to the short-lived, revocable Telegram session.
@@ -1744,14 +1783,15 @@ app.post("/v1/local/applications", async (request, reply) => {
          telegram_user_ref, preferred_language, full_name_encrypted,
          phone_encrypted, employer_name_encrypted, personal_data_consent_version,
          personal_data_consented_at, personal_data_key_version,
-         phone_consent_version, phone_consented_at
+         phone_consent_version, phone_consented_at, identity_document_type,
+         identity_document_number_encrypted, identity_document_lookup_hash
        )
        VALUES (
          $1, $2, $3::bytea, $4::bytea, $5::bytea, $6,
          CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END,
          CASE WHEN $3::bytea IS NULL THEN NULL ELSE $7 END,
          CASE WHEN $4::bytea IS NULL THEN NULL ELSE $6 END,
-         CASE WHEN $4::bytea IS NULL THEN NULL ELSE now() END
+         CASE WHEN $4::bytea IS NULL THEN NULL ELSE now() END, $8, $9::bytea, $10
        )
        ON CONFLICT (telegram_user_ref) DO UPDATE SET
          preferred_language = EXCLUDED.preferred_language,
@@ -1763,6 +1803,9 @@ app.post("/v1/local/applications", async (request, reply) => {
          personal_data_key_version = COALESCE(EXCLUDED.personal_data_key_version, users.personal_data_key_version),
          phone_consent_version = COALESCE(EXCLUDED.phone_consent_version, users.phone_consent_version),
          phone_consented_at = COALESCE(EXCLUDED.phone_consented_at, users.phone_consented_at),
+         identity_document_type = COALESCE(EXCLUDED.identity_document_type, users.identity_document_type),
+         identity_document_number_encrypted = COALESCE(EXCLUDED.identity_document_number_encrypted, users.identity_document_number_encrypted),
+         identity_document_lookup_hash = COALESCE(EXCLUDED.identity_document_lookup_hash, users.identity_document_lookup_hash),
          updated_at = now()
        RETURNING id`,
       [
@@ -1773,6 +1816,9 @@ app.post("/v1/local/applications", async (request, reply) => {
         encryptedPersonalProfile?.employerName,
         "PAYEASE-PERSONAL-DATA-v1",
         activePersonalDataKeyVersion,
+        input.identityDocument?.type,
+        encryptedIdentityDocumentNumber,
+        identityLookupHash,
       ],
     );
     const existing = await client.query<{
@@ -1810,8 +1856,8 @@ app.post("/v1/local/applications", async (request, reply) => {
       application_no: string;
       status: string;
     }>(
-      `INSERT INTO applications (application_no, user_id, requested_amount_minor, currency, tenor_days, status, applicant_access_token_hash)
-       VALUES ($1, $2, $3, 'USD', $4, 'BROKER_REVIEW', $5)
+      `INSERT INTO applications (application_no, user_id, requested_amount_minor, currency, tenor_days, status, applicant_access_token_hash, employer_tenant_id)
+       VALUES ($1, $2, $3, 'USD', $4, 'BROKER_REVIEW', $5, $6)
        RETURNING id, application_no, status`,
       [
         applicationNo,
@@ -1819,6 +1865,7 @@ app.post("/v1/local/applications", async (request, reply) => {
         amountMinor.toString(),
         input.tenorDays,
         applicantAccessToken ? eventHash([applicantAccessToken]) : null,
+        input.employerTenantId ?? null,
       ],
     );
     const application = created.rows[0]!;
@@ -1838,6 +1885,8 @@ app.post("/v1/local/applications", async (request, reply) => {
         amountMinor: input.requestedAmount.amountMinor,
         currency: "USD",
         tenorDays: input.tenorDays,
+        employerTenantSelected: Boolean(input.employerTenantId),
+        identityDocumentProvided: Boolean(input.identityDocument),
         // This is deliberately recorded separately from profile encryption:
         // reviewers can prove that the applicant affirmatively authorized the
         // two data categories without decrypting the applicant's values.

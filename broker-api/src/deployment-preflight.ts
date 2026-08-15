@@ -7,7 +7,10 @@ import {
   isControlledPreview,
   requiresTelegramAuthentication,
 } from "./telegram-auth-policy.js";
-import { personalDataEncryptionPreflight } from "./personal-profile.js";
+import {
+  identityDocumentLookupPreflight,
+  personalDataEncryptionPreflight,
+} from "./personal-profile.js";
 
 type AuthenticationEnvironment = Readonly<{
   PAYEASE_DEPLOYMENT_MODE?: string;
@@ -17,6 +20,7 @@ type AuthenticationEnvironment = Readonly<{
   PAYEASE_PII_ENCRYPTION_KEY?: string;
   PAYEASE_PII_ENCRYPTION_KEY_VERSION?: string;
   PAYEASE_PII_ENCRYPTION_KEYS_JSON?: string;
+  PAYEASE_IDENTITY_LOOKUP_KEY?: string;
 }>;
 
 export type TelegramAuthenticationPreflight = Readonly<{
@@ -59,6 +63,7 @@ export function telegramAuthenticationPreflight(
     try {
       piiActiveKeyVersion =
         personalDataEncryptionPreflight(environment).activeKeyVersion;
+      identityDocumentLookupPreflight(environment.PAYEASE_IDENTITY_LOOKUP_KEY);
       piiEncryptionReady = true;
     } catch (error) {
       piiError =

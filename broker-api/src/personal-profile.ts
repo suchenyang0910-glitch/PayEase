@@ -1,4 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+} from "node:crypto";
 
 const algorithm = "aes-256-gcm";
 const defaultKeyVersion = "v1";
@@ -7,6 +12,11 @@ export type PersonalProfile = {
   fullName: string;
   phone: string;
   employerName: string;
+};
+
+export type IdentityDocument = {
+  type: "NATIONAL_ID" | "PASSPORT";
+  number: string;
 };
 
 export type PersonalDataEncryptionEnvironment = Readonly<{
@@ -171,4 +181,42 @@ export function decryptPersonalProfile(ciphertext: {
     phone: decryptPersonalValue(ciphertext.phone),
     employerName: decryptPersonalValue(ciphertext.employerName),
   };
+}
+
+// The identity number is encrypted at rest.  Matching uses a separately
+// keyed HMAC so a copied database cannot be used to brute-force national IDs
+// or passport numbers with a plain SHA-256 dictionary.
+export function identityDocumentLookupHash(
+  document: IdentityDocument,
+  lookupKey: string | undefined = process.env.PAYEASE_IDENTITY_LOOKUP_KEY,
+): string {
+  if (!lookupKey) {
+    throw new Error(
+      "PAYEASE_IDENTITY_LOOKUP_KEY is required before storing identity documents.",
+    );
+  }
+  const key = Buffer.from(lookupKey, "base64");
+  if (key.length !== 32) {
+    throw new Error(
+      "PAYEASE_IDENTITY_LOOKUP_KEY must be a base64-encoded 32-byte key.",
+    );
+  }
+  const normalizedNumber = document.number
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[ -]/g, "");
+  return createHmac("sha256", key)
+    .update(`${document.type}|${normalizedNumber}`, "utf8")
+    .digest("hex");
+}
+
+export function identityDocumentLookupPreflight(
+  lookupKey: string | undefined = process.env.PAYEASE_IDENTITY_LOOKUP_KEY,
+): void {
+  // A fixed sample is safe: this validates configuration only and never logs
+  // either the key or an applicant identifier.
+  identityDocumentLookupHash(
+    { type: "NATIONAL_ID", number: "PREFLIGHT000" },
+    lookupKey,
+  );
 }

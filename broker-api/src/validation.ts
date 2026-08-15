@@ -13,6 +13,16 @@ export const createApplicationSchema = z
       currency: z.literal("USD"),
     }),
     tenorDays: z.number().int().min(7).max(180),
+    employerTenantId: z.string().uuid().optional(),
+    identityDocument: z
+      .object({
+        type: z.enum(["NATIONAL_ID", "PASSPORT"]),
+        number: z
+          .string()
+          .trim()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9 -]{4,63}$/),
+      })
+      .optional(),
     personalProfile: z
       .object({
         fullName: z.string().trim().min(1).max(120),

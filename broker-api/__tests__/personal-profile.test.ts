@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   decryptPersonalProfile,
   encryptPersonalProfile,
+  identityDocumentLookupHash,
   personalDataEncryptionPreflight,
 } from "../src/personal-profile.js";
 
 const originalKey = process.env.PAYEASE_PII_ENCRYPTION_KEY;
 const originalKeyVersion = process.env.PAYEASE_PII_ENCRYPTION_KEY_VERSION;
 const originalKeyring = process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON;
+const originalIdentityLookupKey = process.env.PAYEASE_IDENTITY_LOOKUP_KEY;
 
 afterEach(() => {
   if (originalKey === undefined) delete process.env.PAYEASE_PII_ENCRYPTION_KEY;
@@ -18,6 +20,9 @@ afterEach(() => {
   if (originalKeyring === undefined)
     delete process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON;
   else process.env.PAYEASE_PII_ENCRYPTION_KEYS_JSON = originalKeyring;
+  if (originalIdentityLookupKey === undefined)
+    delete process.env.PAYEASE_IDENTITY_LOOKUP_KEY;
+  else process.env.PAYEASE_IDENTITY_LOOKUP_KEY = originalIdentityLookupKey;
 });
 
 describe("personal profile encryption", () => {
@@ -102,5 +107,25 @@ describe("personal profile encryption", () => {
         PAYEASE_PII_ENCRYPTION_KEY_VERSION: "v1",
       }),
     ).toThrow("base64-encoded 32-byte key");
+  });
+
+  it("uses a separate keyed, normalized lookup value for an identity document", () => {
+    const key = Buffer.alloc(32, 8).toString("base64");
+    const first = identityDocumentLookupHash(
+      { type: "NATIONAL_ID", number: "ab- 12345" },
+      key,
+    );
+    const normalized = identityDocumentLookupHash(
+      { type: "NATIONAL_ID", number: "AB12345" },
+      key,
+    );
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(first).toBe(normalized);
+    expect(() =>
+      identityDocumentLookupHash(
+        { type: "PASSPORT", number: "P12345" },
+        undefined,
+      ),
+    ).toThrow("PAYEASE_IDENTITY_LOOKUP_KEY is required");
   });
 });

@@ -27,6 +27,13 @@ import {
   applicantServiceCaseLabel,
   type ApplicantServiceCase,
 } from "./service-case-list.ts";
+import { BottomNavigation } from "./components/BottomNavigation.tsx";
+import { HomePage } from "./pages/HomePage.tsx";
+import { OrdersPage } from "./pages/OrdersPage.tsx";
+import { OrderDetailPage } from "./pages/OrderDetailPage.tsx";
+import { RepaymentPage } from "./pages/RepaymentPage.tsx";
+import { ProfilePage } from "./pages/ProfilePage.tsx";
+import type { UserTab } from "./copy/user-copy.ts";
 import "./app.css";
 
 type Stage = "welcome" | "details" | "submitted" | "offer";
@@ -595,6 +602,7 @@ export function App(): JSX.Element {
   const [supplementNotice, setSupplementNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState<UserTab>("home");
   const t = labels[language];
   const factoryCopy = factoryFormCopy(language);
   const phoneCopy = phoneVerificationCopy(language);
@@ -1292,6 +1300,13 @@ export function App(): JSX.Element {
     }
   }
 
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("page") === "order-detail" && query.get("application")) {
+      setCurrentPage("order-detail");
+    }
+  }, []);
+
   const currentStep = visiblePhase
     ? progressStepForPhase(visiblePhase)
     : stage === "welcome" || stage === "details"
@@ -1339,978 +1354,1074 @@ export function App(): JSX.Element {
           </select>
         </div>
       </header>
-      <section className="hero">
-        <div className="telegram-chip">
-          <span>✦</span>
-          {t.telegram}
-        </div>
-        <h1>{t.welcome}</h1>
-        <p>{t.intro}</p>
-      </section>
-
-      {(stage === "welcome" || stage === "details") && (
-        <section className="application-card">
-          {stage === "welcome" ? (
-            <>
-              <div className="card-heading">
-                <span>{t.amount}</span>
-                <b>{t.usd}</b>
+      {(() => {
+        const pageBody = (
+          <>
+            <section className="hero">
+              <div className="telegram-chip">
+                <span>✦</span>
+                {t.telegram}
               </div>
-              <div className="amount-display">
-                {requestedAmountMinor
-                  ? formatUsdMinor(requestedAmountMinor)
-                  : "—"}
-              </div>
-              <div className="choices">
-                {amountOptions.map((value) => (
-                  <button
-                    key={value}
-                    className={amountInput === String(value) ? "selected" : ""}
-                    onClick={() => setAmountInput(String(value))}
-                  >
-                    ${value}
-                  </button>
-                ))}
-              </div>
-              <label className="field-label" htmlFor="requested-amount">
-                {t.customAmount}
-              </label>
-              <input
-                id="requested-amount"
-                className="amount-input"
-                value={amountInput}
-                onChange={(event) => setAmountInput(event.target.value)}
-                inputMode="decimal"
-                autoComplete="off"
-                aria-describedby="requested-amount-hint"
-              />
-              <p id="requested-amount-hint" className="amount-hint">
-                USD 10.00–500.00
-              </p>
-              <label className="field-label">{t.term}</label>
-              <div className="term-choices">
-                {terms.map((value) => (
-                  <button
-                    key={value}
-                    className={term === value ? "selected" : ""}
-                    onClick={() => setTerm(value)}
-                  >
-                    {value === 7
-                      ? "7d"
-                      : value === 30
-                        ? "1m"
-                        : `${value / 30}m`}
-                  </button>
-                ))}
-              </div>
-              <p className="estimate-note">{t.noOffer}</p>
-              {showPreviewBadge ? (
-                <p className="response-note" role="status">
-                  {t.previewReadOnly}
-                </p>
-              ) : null}
-              {error && (
-                <ApplicantError
-                  message={error}
-                  entryPoints={recoveryEntryPoints}
-                  language={language}
-                />
-              )}
-              <button
-                className="primary"
-                disabled={showPreviewBadge}
-                onClick={() => {
-                  const amountMinor = requestedAmountMinor;
-                  if (!amountMinor) {
-                    setError(amountInputError);
-                    return;
-                  }
-                  setError("");
-                  setStage("details");
-                }}
-              >
-                {t.start}
-                <span>→</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="back-link" onClick={() => setStage("welcome")}>
-                ← {t.back}
-              </button>
-              <h2>{t.details}</h2>
-              <p className="form-intro">{t.formIntro}</p>
-              <label>
-                {t.name}
-                <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder={t.name}
-                  autoComplete="name"
-                />
-              </label>
-              <label>
-                {t.phone}
-                <input
-                  value={phone}
-                  onChange={(event) => setPhone(event.target.value)}
-                  placeholder="+855 …"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  maxLength={32}
-                />
-              </label>
-              {phoneVerification ? (
-                <section
-                  className="next-payment"
-                  aria-label="Telegram phone verification"
-                >
-                  <strong>
-                    {phoneVerification.verified
-                      ? phoneCopy.verified
-                      : phoneVerification.required
-                        ? phoneCopy.required
-                        : phoneCopy.check}
-                  </strong>
-                  {phoneVerification.required && !phoneVerification.verified ? (
+              <h1>{t.welcome}</h1>
+              <p>{t.intro}</p>
+            </section>
+            {(stage === "welcome" || stage === "details") && (
+              <section className="application-card">
+                {stage === "welcome" ? (
+                  <>
+                    <div className="card-heading">
+                      <span>{t.amount}</span>
+                      <b>{t.usd}</b>
+                    </div>
+                    <div className="amount-display">
+                      {requestedAmountMinor
+                        ? formatUsdMinor(requestedAmountMinor)
+                        : "—"}
+                    </div>
+                    <div className="choices">
+                      {amountOptions.map((value) => (
+                        <button
+                          key={value}
+                          className={
+                            amountInput === String(value) ? "selected" : ""
+                          }
+                          onClick={() => setAmountInput(String(value))}
+                        >
+                          ${value}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="field-label" htmlFor="requested-amount">
+                      {t.customAmount}
+                    </label>
+                    <input
+                      id="requested-amount"
+                      className="amount-input"
+                      value={amountInput}
+                      onChange={(event) => setAmountInput(event.target.value)}
+                      inputMode="decimal"
+                      autoComplete="off"
+                      aria-describedby="requested-amount-hint"
+                    />
+                    <p id="requested-amount-hint" className="amount-hint">
+                      USD 10.00–500.00
+                    </p>
+                    <label className="field-label">{t.term}</label>
                     <div className="term-choices">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          requestTelegramPhoneContact(window, (result) => {
-                            setPhoneVerificationNotice(
-                              result === "sent"
-                                ? phoneCopy.sent
-                                : result === "cancelled"
-                                  ? phoneCopy.cancelled
-                                  : phoneCopy.unsupported,
-                            );
-                          })
+                      {terms.map((value) => (
+                        <button
+                          key={value}
+                          className={term === value ? "selected" : ""}
+                          onClick={() => setTerm(value)}
+                        >
+                          {value === 7
+                            ? "7d"
+                            : value === 30
+                              ? "1m"
+                              : `${value / 30}m`}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="estimate-note">{t.noOffer}</p>
+                    {showPreviewBadge ? (
+                      <p className="response-note" role="status">
+                        {t.previewReadOnly}
+                      </p>
+                    ) : null}
+                    {error && (
+                      <ApplicantError
+                        message={error}
+                        entryPoints={recoveryEntryPoints}
+                        language={language}
+                      />
+                    )}
+                    <button
+                      className="primary"
+                      disabled={showPreviewBadge}
+                      onClick={() => {
+                        const amountMinor = requestedAmountMinor;
+                        if (!amountMinor) {
+                          setError(amountInputError);
+                          return;
+                        }
+                        setError("");
+                        setStage("details");
+                      }}
+                    >
+                      {t.start}
+                      <span>→</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="back-link"
+                      onClick={() => setStage("welcome")}
+                    >
+                      ← {t.back}
+                    </button>
+                    <h2>{t.details}</h2>
+                    <p className="form-intro">{t.formIntro}</p>
+                    <label>
+                      {t.name}
+                      <input
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        placeholder={t.name}
+                        autoComplete="name"
+                      />
+                    </label>
+                    <label>
+                      {t.phone}
+                      <input
+                        value={phone}
+                        onChange={(event) => setPhone(event.target.value)}
+                        placeholder="+855 …"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        maxLength={32}
+                      />
+                    </label>
+                    {phoneVerification ? (
+                      <section
+                        className="next-payment"
+                        aria-label="Telegram phone verification"
+                      >
+                        <strong>
+                          {phoneVerification.verified
+                            ? phoneCopy.verified
+                            : phoneVerification.required
+                              ? phoneCopy.required
+                              : phoneCopy.check}
+                        </strong>
+                        {phoneVerification.required &&
+                        !phoneVerification.verified ? (
+                          <div className="term-choices">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                requestTelegramPhoneContact(
+                                  window,
+                                  (result) => {
+                                    setPhoneVerificationNotice(
+                                      result === "sent"
+                                        ? phoneCopy.sent
+                                        : result === "cancelled"
+                                          ? phoneCopy.cancelled
+                                          : phoneCopy.unsupported,
+                                    );
+                                  },
+                                )
+                              }
+                            >
+                              {phoneCopy.request}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void loadPhoneVerification()}
+                            >
+                              {phoneCopy.refresh}
+                            </button>
+                          </div>
+                        ) : null}
+                        {phoneVerificationNotice ? (
+                          <small>{phoneVerificationNotice}</small>
+                        ) : null}
+                      </section>
+                    ) : (
+                      <section
+                        className="next-payment"
+                        aria-label="Telegram phone verification"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => void loadPhoneVerification()}
+                        >
+                          {phoneCopy.check}
+                        </button>
+                      </section>
+                    )}
+                    <label>
+                      {t.employer}
+                      <input
+                        value={employer}
+                        onChange={(event) => setEmployer(event.target.value)}
+                        placeholder={t.employer}
+                      />
+                    </label>
+                    <label>
+                      {factoryCopy.factory}
+                      <select
+                        aria-label={factoryCopy.factory}
+                        value={employerTenantId}
+                        onChange={(event) =>
+                          setEmployerTenantId(event.target.value)
                         }
                       >
-                        {phoneCopy.request}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void loadPhoneVerification()}
+                        <option value="">
+                          {factoryCopy.factoryPlaceholder}
+                        </option>
+                        {employerTenants.map((tenant) => (
+                          <option key={tenant.id} value={tenant.id}>
+                            {tenant.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      {factoryCopy.identityType}
+                      <select
+                        aria-label={factoryCopy.identityType}
+                        value={identityDocumentType}
+                        onChange={(event) =>
+                          setIdentityDocumentType(
+                            event.target.value as "NATIONAL_ID" | "PASSPORT",
+                          )
+                        }
                       >
-                        {phoneCopy.refresh}
-                      </button>
-                    </div>
-                  ) : null}
-                  {phoneVerificationNotice ? (
-                    <small>{phoneVerificationNotice}</small>
-                  ) : null}
-                </section>
-              ) : (
-                <section
-                  className="next-payment"
-                  aria-label="Telegram phone verification"
-                >
-                  <button
-                    type="button"
-                    onClick={() => void loadPhoneVerification()}
-                  >
-                    {phoneCopy.check}
-                  </button>
-                </section>
-              )}
-              <label>
-                {t.employer}
-                <input
-                  value={employer}
-                  onChange={(event) => setEmployer(event.target.value)}
-                  placeholder={t.employer}
-                />
-              </label>
-              <label>
-                {factoryCopy.factory}
-                <select
-                  aria-label={factoryCopy.factory}
-                  value={employerTenantId}
-                  onChange={(event) => setEmployerTenantId(event.target.value)}
-                >
-                  <option value="">{factoryCopy.factoryPlaceholder}</option>
-                  {employerTenants.map((tenant) => (
-                    <option key={tenant.id} value={tenant.id}>
-                      {tenant.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {factoryCopy.identityType}
-                <select
-                  aria-label={factoryCopy.identityType}
-                  value={identityDocumentType}
-                  onChange={(event) =>
-                    setIdentityDocumentType(
-                      event.target.value as "NATIONAL_ID" | "PASSPORT",
-                    )
-                  }
-                >
-                  <option value="NATIONAL_ID">{factoryCopy.nationalId}</option>
-                  <option value="PASSPORT">{factoryCopy.passport}</option>
-                </select>
-              </label>
-              <label>
-                {factoryCopy.identityNumber}
-                <input
-                  value={identityDocumentNumber}
-                  onChange={(event) =>
-                    setIdentityDocumentNumber(event.target.value)
-                  }
-                  placeholder={factoryCopy.identityNumber}
-                  autoComplete="off"
-                  maxLength={64}
-                />
-              </label>
-              <label className="consent">
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  onChange={(event) => setConsent(event.target.checked)}
-                />
-                <span>{t.consent}</span>
-              </label>
-              {error && (
-                <ApplicantError
-                  message={error}
-                  entryPoints={recoveryEntryPoints}
-                  language={language}
-                />
-              )}
-              <button
-                className="primary"
-                disabled={loading}
-                onClick={() => void submit()}
-              >
-                {loading ? "…" : t.send}
-                <span>→</span>
-              </button>
-            </>
-          )}
-        </section>
-      )}
+                        <option value="NATIONAL_ID">
+                          {factoryCopy.nationalId}
+                        </option>
+                        <option value="PASSPORT">{factoryCopy.passport}</option>
+                      </select>
+                    </label>
+                    <label>
+                      {factoryCopy.identityNumber}
+                      <input
+                        value={identityDocumentNumber}
+                        onChange={(event) =>
+                          setIdentityDocumentNumber(event.target.value)
+                        }
+                        placeholder={factoryCopy.identityNumber}
+                        autoComplete="off"
+                        maxLength={64}
+                      />
+                    </label>
+                    <label className="consent">
+                      <input
+                        type="checkbox"
+                        checked={consent}
+                        onChange={(event) => setConsent(event.target.checked)}
+                      />
+                      <span>{t.consent}</span>
+                    </label>
+                    {error && (
+                      <ApplicantError
+                        message={error}
+                        entryPoints={recoveryEntryPoints}
+                        language={language}
+                      />
+                    )}
+                    <button
+                      className="primary"
+                      disabled={loading}
+                      onClick={() => void submit()}
+                    >
+                      {loading ? "…" : t.send}
+                      <span>→</span>
+                    </button>
+                  </>
+                )}
+              </section>
+            )}
 
-      {stage === "submitted" && (
-        <section className="result-card">
-          <div className="success-icon">✓</div>
-          <h2>{t.submitted}</h2>
-          <p>{t.submittedNote}</p>
-          <div className="application-number">
-            <span>{t.status}</span>
-            <strong>{applicationNo}</strong>
-          </div>
-          <div className="reviewing">
-            <span className="pulse" />
-            {t.review}: {t.reviewing}
-          </div>
-          {error ? (
-            <ApplicantError
-              message={error}
-              entryPoints={recoveryEntryPoints}
-              language={language}
-            />
-          ) : null}
-          <button
-            className="primary"
-            disabled={loading}
-            onClick={() => void checkStatus()}
-          >
-            {loading ? "…" : t.check}
-            <span>→</span>
-          </button>
-        </section>
-      )}
-      {stage === "offer" && (
-        <section className="result-card">
-          <div className="review-icon">⌛</div>
-          <h2>
-            {lifecycleCopy?.title ??
-              (result === "withdrawn"
-                ? language === "en"
-                  ? "Application withdrawn"
-                  : language === "zh-CN"
-                    ? "申请已撤回"
-                    : "ពាក្យសុំត្រូវបានដកវិញ"
-                : result === "approved"
-                  ? t.offer
-                  : result.startsWith("rejected")
-                    ? language === "en"
-                      ? "Application not approved"
-                      : language === "zh-CN"
-                        ? "申请未获批准"
-                        : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
-                    : result === "supplement-requested"
-                      ? language === "en"
-                        ? "Additional information needed"
-                        : language === "zh-CN"
-                          ? "需要补充资料"
-                          : "ត្រូវការព័ត៌មានបន្ថែម"
-                      : t.reviewing)}
-          </h2>
-          {error ? (
-            <ApplicantError
-              message={error}
-              entryPoints={recoveryEntryPoints}
-              language={language}
-            />
-          ) : null}
-          <p>
-            {lifecycleCopy?.message ??
-              (result === "withdrawn"
-                ? language === "en"
-                  ? "This application is closed and will not continue to review or contract processing."
-                  : language === "zh-CN"
-                    ? "该申请已关闭，不会继续进入审核或合同处理。"
-                    : "ពាក្យសុំនេះត្រូវបានបិទ ហើយនឹងមិនបន្តទៅការពិនិត្យ ឬដំណើរការកិច្ចសន្យាទេ។"
-                : result === "approved"
-                  ? language === "en"
-                    ? "The licensed lender has returned your approved limit."
-                    : language === "km"
-                      ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
-                      : "持牌机构已返回你的审核额度。"
-                  : result === "rejected-resolved"
-                    ? language === "en"
-                      ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
-                      : language === "zh-CN"
-                        ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
-                        : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
-                    : result === "rejected-pending"
-                      ? language === "en"
-                        ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
-                        : language === "zh-CN"
-                          ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
-                          : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
-                      : result === "supplement-requested"
-                        ? language === "en"
-                          ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
-                          : language === "zh-CN"
-                            ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
-                            : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
-                        : t.noOffer)}
-          </p>
-          {result.startsWith("rejected") ? (
-            <p className="response-note" aria-label="Reapplication guidance">
-              {applicantRejectionNotice(
-                summary?.application.rejectionNoticeCode ?? null,
-                language,
-              ) ??
-                (language === "en"
-                  ? "The licensed lender can provide the next-step guidance for this application."
-                  : language === "zh-CN"
-                    ? "持牌机构可为本次申请提供下一步指引。"
-                    : "ស្ថាប័នផ្តល់កម្ចីអាចផ្តល់ការណែនាំសម្រាប់ជំហានបន្ទាប់នៃពាក្យសុំនេះ។")}
-            </p>
-          ) : null}
-          {result === "supplement-requested" ? (
-            <section
-              className="next-payment supplement-response"
-              aria-label="Supplementary response"
-            >
-              <strong>
-                {language === "en"
-                  ? "Send a supplementary response"
-                  : language === "zh-CN"
-                    ? "提交补充说明"
-                    : "ផ្ញើការឆ្លើយតបបន្ថែម"}
-              </strong>
-              <small>
-                {language === "en"
-                  ? "Explain what you have corrected or when you can provide the requested item. Do not include passwords, full card numbers, one-time codes, ID images or bank documents here."
-                  : language === "zh-CN"
-                    ? "请说明已更正的内容，或何时可提供所需材料。请勿在此填写密码、完整银行卡号、一次性验证码、证件照片或银行文件。"
-                    : "សូមពន្យល់អំពីអ្វីដែលអ្នកបានកែតម្រូវ ឬពេលវេលាដែលអាចផ្តល់ឯកសារបាន។ កុំបញ្ចូលពាក្យសម្ងាត់ លេខកាតពេញ លេខកូដម្តង រូបថតអត្តសញ្ញាណប័ណ្ណ ឬឯកសារធនាគារនៅទីនេះ។"}
-              </small>
-              <label className="field-label">
-                {language === "en"
-                  ? "Your response"
-                  : language === "zh-CN"
-                    ? "你的补充说明"
-                    : "ការឆ្លើយតបរបស់អ្នក"}
-                <textarea
-                  value={supplementMessage}
-                  onChange={(event) => setSupplementMessage(event.target.value)}
-                  maxLength={2000}
-                  rows={4}
-                />
-              </label>
-              <button
-                className="primary"
-                disabled={loading || supplementMessage.trim().length < 10}
-                onClick={() => void submitSupplementResponse()}
-              >
-                {language === "en"
-                  ? "Send response"
-                  : language === "zh-CN"
-                    ? "发送说明"
-                    : "ផ្ញើការឆ្លើយតប"}
-              </button>
-              {supplementNotice ? (
-                <p className="response-note">{supplementNotice}</p>
-              ) : null}
-            </section>
-          ) : null}
-          <div className="application-number">
-            <span>{t.status}</span>
-            <strong>{applicationNo}</strong>
-          </div>
-          <button
-            className="back-link refresh-status"
-            aria-label={t.refresh}
-            disabled={loading}
-            onClick={() => void checkStatus()}
-          >
-            {t.refresh}
-          </button>
-          {canWithdraw ? (
-            <section className="next-payment" aria-label="Withdraw application">
-              <strong>
-                {language === "en"
-                  ? "Need to stop this application?"
-                  : language === "zh-CN"
-                    ? "需要撤回申请吗？"
-                    : "ត្រូវការដកពាក្យសុំនេះវិញឬ?"}
-              </strong>
-              <small>
-                {language === "en"
-                  ? "You can withdraw before you confirm the loan contract."
-                  : language === "zh-CN"
-                    ? "在确认贷款合同前，你可以撤回申请。"
-                    : "អ្នកអាចដកពាក្យសុំវិញ មុនពេលអ្នកបញ្ជាក់កិច្ចសន្យាប្រាក់កម្ចី។"}
-              </small>
-              {withdrawalConfirmationRequested ? (
+            {stage === "submitted" && (
+              <section className="result-card">
+                <div className="success-icon">✓</div>
+                <h2>{t.submitted}</h2>
+                <p>{t.submittedNote}</p>
+                <div className="application-number">
+                  <span>{t.status}</span>
+                  <strong>{applicationNo}</strong>
+                </div>
+                <div className="reviewing">
+                  <span className="pulse" />
+                  {t.review}: {t.reviewing}
+                </div>
+                {error ? (
+                  <ApplicantError
+                    message={error}
+                    entryPoints={recoveryEntryPoints}
+                    language={language}
+                  />
+                ) : null}
                 <button
                   className="primary"
                   disabled={loading}
-                  onClick={() => void withdrawApplication()}
+                  onClick={() => void checkStatus()}
                 >
-                  {language === "en"
-                    ? "Confirm withdrawal"
-                    : language === "zh-CN"
-                      ? "确认撤回"
-                      : "បញ្ជាក់ការដកវិញ"}
+                  {loading ? "…" : t.check}
+                  <span>→</span>
                 </button>
-              ) : (
-                <button
-                  className="back-link"
-                  disabled={loading}
-                  onClick={() => setWithdrawalConfirmationRequested(true)}
-                >
-                  {language === "en"
-                    ? "Withdraw application"
-                    : language === "zh-CN"
-                      ? "撤回申请"
-                      : "ដកពាក្យសុំវិញ"}
-                </button>
-              )}
-            </section>
-          ) : null}
-          {result === "withdrawn" ? (
-            <p className="response-note">
-              {language === "en"
-                ? "No further action is required for this withdrawn application."
-                : language === "zh-CN"
-                  ? "该已撤回申请无需进一步操作。"
-                  : "មិនត្រូវការសកម្មភាពបន្ថែមសម្រាប់ពាក្យសុំដែលបានដកវិញនេះទេ។"}
-            </p>
-          ) : result === "approved" ? (
-            <p className="response-note">
-              {language === "en"
-                ? "Approved limit: "
-                : language === "km"
-                  ? "ទំហំបានអនុម័ត៖ "
-                  : "审核额度："}
-              <strong>{formatUsdMinor(approvedAmountMinor)}</strong>
-            </p>
-          ) : result === "rejected-resolved" ? (
-            <button className="primary" onClick={startNewApplication}>
-              {language === "en"
-                ? "Start a new application"
-                : language === "zh-CN"
-                  ? "发起新的申请"
-                  : "ចាប់ផ្តើមពាក្យសុំថ្មី"}
-            </button>
-          ) : (
-            <p className="response-note">{t.expected}</p>
-          )}
-          {result === "withdrawn" ? (
-            <button className="primary" onClick={startNewApplication}>
-              {t.start}
-            </button>
-          ) : null}
-          {summary ? (
-            <section className="loan-dashboard" aria-label="Loan dashboard">
-              <div className="dashboard-heading">
-                <strong>
-                  {language === "en"
-                    ? "Your loan information"
-                    : language === "km"
-                      ? "ព័ត៌មានឥណទានរបស់អ្នក"
-                      : "我的贷款信息"}
-                </strong>
-                <span>
-                  {applicantPhaseLabel(
-                    applicantPhase(summary.application.status),
-                    language,
-                  )}
-                </span>
-              </div>
-              <div className="metric-grid">
-                <div>
-                  <span>
-                    {language === "en"
-                      ? "Requested"
-                      : language === "km"
-                        ? "បានស្នើ"
-                        : "申请金额"}
-                  </span>
-                  <b>
-                    {formatUsdMinor(summary.application.requestedAmountMinor)}
-                  </b>
-                </div>
-                <div>
-                  <span>{t.installments}</span>
-                  <b>{summary.terms?.installmentCount ?? "—"}</b>
-                </div>
-                <div>
-                  <span>{t.firstDueDate}</span>
-                  <b>{summary.terms?.firstDueDate ?? "—"}</b>
-                </div>
-                <div>
-                  <span>
-                    {language === "en"
-                      ? "Approved"
-                      : language === "km"
-                        ? "បានអនុម័ត"
-                        : "审核额度"}
-                  </span>
-                  <b>
-                    {summary.terms
-                      ? formatUsdMinor(summary.terms.approvedAmountMinor)
-                      : "—"}
-                  </b>
-                </div>
-                <div>
-                  <span>
-                    {language === "en"
-                      ? "Service fee"
-                      : language === "km"
-                        ? "ថ្លៃសេវា"
-                        : "服务费"}
-                  </span>
-                  <b>
-                    {summary.terms
-                      ? formatUsdMinor(summary.terms.serviceFeeMinor)
-                      : "—"}
-                  </b>
-                </div>
-                <div>
-                  <span>
-                    {language === "en"
-                      ? "Total repayable"
-                      : language === "km"
-                        ? "សរុបត្រូវសង"
-                        : "应还总额"}
-                  </span>
-                  <b>
-                    {summary.terms
-                      ? formatUsdMinor(summary.terms.totalRepayableMinor)
-                      : "—"}
-                  </b>
-                </div>
-                <div>
-                  <span>
-                    {language === "en"
-                      ? "Loan term"
-                      : language === "km"
-                        ? "រយៈពេលកម្ចី"
-                        : "贷款期限"}
-                  </span>
-                  <b>
-                    {summary.application.tenorDays}{" "}
-                    {language === "en"
-                      ? "days"
-                      : language === "km"
-                        ? "ថ្ងៃ"
-                        : "天"}
-                  </b>
-                </div>
-                {summary.application.employerTenantDisplayName ? (
-                  <div>
-                    <span>{factoryCopy.factory}</span>
-                    <b>{summary.application.employerTenantDisplayName}</b>
-                  </div>
+              </section>
+            )}
+            {stage === "offer" && (
+              <section className="result-card">
+                <div className="review-icon">⌛</div>
+                <h2>
+                  {lifecycleCopy?.title ??
+                    (result === "withdrawn"
+                      ? language === "en"
+                        ? "Application withdrawn"
+                        : language === "zh-CN"
+                          ? "申请已撤回"
+                          : "ពាក្យសុំត្រូវបានដកវិញ"
+                      : result === "approved"
+                        ? t.offer
+                        : result.startsWith("rejected")
+                          ? language === "en"
+                            ? "Application not approved"
+                            : language === "zh-CN"
+                              ? "申请未获批准"
+                              : "ពាក្យសុំមិនត្រូវបានអនុម័ត"
+                          : result === "supplement-requested"
+                            ? language === "en"
+                              ? "Additional information needed"
+                              : language === "zh-CN"
+                                ? "需要补充资料"
+                                : "ត្រូវការព័ត៌មានបន្ថែម"
+                            : t.reviewing)}
+                </h2>
+                {error ? (
+                  <ApplicantError
+                    message={error}
+                    entryPoints={recoveryEntryPoints}
+                    language={language}
+                  />
                 ) : null}
-              </div>
-              {summary.application.status === "CONTRACT_PENDING" ? (
-                <section
-                  className="next-payment"
-                  aria-label="Contract confirmation"
-                >
-                  <strong>
-                    {language === "en"
-                      ? "Confirm the displayed loan terms"
-                      : language === "km"
-                        ? "បញ្ជាក់លក្ខខណ្ឌកម្ចីដែលបានបង្ហាញ"
-                        : "确认已展示的贷款条款"}
-                  </strong>
-                  <small>
-                    {language === "en"
-                      ? "This records your Telegram confirmation. Legal electronic-signature validation remains subject to local legal review."
-                      : language === "km"
-                        ? "វាកត់ត្រាការបញ្ជាក់តាម Telegram របស់អ្នក។ សុពលភាពហត្ថលេខាអេឡិចត្រូនិកនៅត្រូវពិនិត្យតាមច្បាប់មូលដ្ឋាន។"
-                        : "此操作记录你的 Telegram 确认；电子签约法律效力仍以当地法务审查为准。"}
-                  </small>
-                  <button
-                    className="primary"
-                    disabled={loading}
-                    onClick={() => void confirmDisplayedContract()}
-                  >
-                    {language === "en"
-                      ? "Confirm terms"
-                      : language === "km"
-                        ? "បញ្ជាក់លក្ខខណ្ឌ"
-                        : "确认条款"}
-                  </button>
-                </section>
-              ) : summary.application.status === "USER_CONTRACT_CONFIRMED" ? (
-                <p className="response-note">
-                  {language === "en"
-                    ? "Your confirmation is recorded. The lender is completing its contract record."
-                    : language === "km"
-                      ? "ការបញ្ជាក់របស់អ្នកត្រូវបានកត់ត្រា។ ស្ថាប័នផ្តល់កម្ចីកំពុងបំពេញកំណត់ត្រាកិច្ចសន្យា។"
-                      : "你的确认已记录，持牌机构正在完成合同记录。"}
+                <p>
+                  {lifecycleCopy?.message ??
+                    (result === "withdrawn"
+                      ? language === "en"
+                        ? "This application is closed and will not continue to review or contract processing."
+                        : language === "zh-CN"
+                          ? "该申请已关闭，不会继续进入审核或合同处理。"
+                          : "ពាក្យសុំនេះត្រូវបានបិទ ហើយនឹងមិនបន្តទៅការពិនិត្យ ឬដំណើរការកិច្ចសន្យាទេ។"
+                      : result === "approved"
+                        ? language === "en"
+                          ? "The licensed lender has returned your approved limit."
+                          : language === "km"
+                            ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណបានផ្តល់ទំហំដែលបានអនុម័ត។"
+                            : "持牌机构已返回你的审核额度。"
+                        : result === "rejected-resolved"
+                          ? language === "en"
+                            ? "The lender has marked the reapplication condition as resolved. You may submit a new application."
+                            : language === "zh-CN"
+                              ? "持牌机构已确认再次申请条件已解除，你可以提交新的申请。"
+                              : "ស្ថាប័នផ្តល់កម្ចីបានបញ្ជាក់ថាលក្ខខណ្ឌដាក់ពាក្យសុំឡើងវិញត្រូវបានដោះស្រាយ។"
+                          : result === "rejected-pending"
+                            ? language === "en"
+                              ? "The lender has not approved this application. Reapplication is unavailable until the stated condition is resolved."
+                              : language === "zh-CN"
+                                ? "持牌机构未批准本次申请。在说明的条件解除前，暂不可再次申请。"
+                                : "ស្ថាប័នផ្តល់កម្ចីមិនបានអនុម័តពាក្យសុំនេះទេ។ មិនអាចដាក់ពាក្យសុំឡើងវិញបានទេ រហូតដល់លក្ខខណ្ឌត្រូវបានដោះស្រាយ។"
+                            : result === "supplement-requested"
+                              ? language === "en"
+                                ? "The review team needs supplementary information. Please follow the broker's instructions; your application remains open."
+                                : language === "zh-CN"
+                                  ? "审核团队需要补充资料。请按助贷人员指引补充；你的申请仍保持有效。"
+                                  : "ក្រុមពិនិត្យត្រូវការព័ត៌មានបន្ថែម។ សូមអនុវត្តតាមការណែនាំរបស់ក្រុមជំនួយឥណទាន; ពាក្យសុំរបស់អ្នកនៅតែមានសុពលភាព។"
+                              : t.noOffer)}
                 </p>
-              ) : null}
-              {summary.repayment.periodCount > 0 ? (
-                <>
-                  <div className="repayment-summary">
-                    <div>
-                      <span>
-                        {language === "en"
-                          ? "Paid periods"
-                          : language === "km"
-                            ? "បង់រួច"
-                            : "已还期数"}
-                      </span>
-                      <b>
-                        {summary.repayment.paidPeriods} /{" "}
-                        {summary.repayment.periodCount}
-                      </b>
-                    </div>
-                    <div>
-                      <span>
-                        {language === "en"
-                          ? "Unpaid periods"
-                          : language === "km"
-                            ? "មិនទាន់បង់"
-                            : "未还期数"}
-                      </span>
-                      <b>{summary.repayment.unpaidPeriods}</b>
-                    </div>
-                    <div>
-                      <span>
-                        {language === "en"
-                          ? "Outstanding"
-                          : language === "km"
-                            ? "នៅសល់ត្រូវសង"
-                            : "待还金额"}
-                      </span>
-                      <b>
-                        {formatUsdMinor(summary.repayment.outstandingMinor)}
-                      </b>
-                    </div>
-                    <div>
-                      <span>
-                        {language === "en"
-                          ? "Total paid"
-                          : language === "km"
-                            ? "សរុបបានបង់"
-                            : "已还金额"}
-                      </span>
-                      <b>{formatUsdMinor(summary.repayment.totalPaidMinor)}</b>
-                    </div>
-                    <div>
-                      <span>
-                        {language === "en"
-                          ? "Past due"
-                          : language === "km"
-                            ? "ហួសកាលកំណត់"
-                            : "逾期期数 / 金额"}
-                      </span>
-                      <b>
-                        {summary.repayment.overduePeriods} ·{" "}
-                        {formatUsdMinor(
-                          summary.repayment.overdueOutstandingMinor,
-                        )}
-                      </b>
-                    </div>
-                  </div>
-                  {summary.repayment.nextInstallment ? (
-                    <div className="next-payment">
-                      <span>
-                        {language === "en"
-                          ? "Next payment"
-                          : language === "km"
-                            ? "ការបង់បន្ទាប់"
-                            : "下一期还款"}
-                      </span>
-                      <strong>
-                        {formatUsdMinor(
-                          summary.repayment.nextInstallment.amountDueMinor,
-                        )}
-                      </strong>
-                      <small>
-                        #{summary.repayment.nextInstallment.installmentNo} ·{" "}
-                        {summary.repayment.nextInstallment.dueDate}
-                      </small>
-                    </div>
-                  ) : (
-                    <div className="next-payment settled">
-                      <span>
-                        {language === "en"
-                          ? "All installments are recorded as paid"
-                          : language === "km"
-                            ? "បានកត់ត្រាការបង់គ្រប់កំណត់"
-                            : "全部期次已记录为已还"}
-                      </span>
-                    </div>
-                  )}
+                {result.startsWith("rejected") ? (
+                  <p
+                    className="response-note"
+                    aria-label="Reapplication guidance"
+                  >
+                    {applicantRejectionNotice(
+                      summary?.application.rejectionNoticeCode ?? null,
+                      language,
+                    ) ??
+                      (language === "en"
+                        ? "The licensed lender can provide the next-step guidance for this application."
+                        : language === "zh-CN"
+                          ? "持牌机构可为本次申请提供下一步指引。"
+                          : "ស្ថាប័នផ្តល់កម្ចីអាចផ្តល់ការណែនាំសម្រាប់ជំហានបន្ទាប់នៃពាក្យសុំនេះ។")}
+                  </p>
+                ) : null}
+                {result === "supplement-requested" ? (
                   <section
-                    className="next-payment"
-                    aria-label="Manual payment safety"
+                    className="next-payment supplement-response"
+                    aria-label="Supplementary response"
                   >
                     <strong>
                       {language === "en"
-                        ? "Manual payment safety"
-                        : language === "km"
-                          ? "សុវត្ថិភាពការទូទាត់ដោយដៃ"
-                          : "人工还款安全提示"}
+                        ? "Send a supplementary response"
+                        : language === "zh-CN"
+                          ? "提交补充说明"
+                          : "ផ្ញើការឆ្លើយតបបន្ថែម"}
                     </strong>
                     <small>
                       {language === "en"
-                        ? "Confirm payment instructions with the licensed lender's operations team before paying. Do not transfer funds to account details sent through unverified messages."
-                        : language === "km"
-                          ? "សូមបញ្ជាក់ការណែនាំទូទាត់ជាមួយក្រុមប្រតិបត្តិរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណមុនពេលបង់ប្រាក់។ កុំផ្ទេរប្រាក់ទៅគណនីដែលផ្ញើតាមសារមិនបានផ្ទៀងផ្ទាត់។"
-                          : "付款前请向持牌机构运营团队确认还款指引；请勿向未经核验的消息中提供的账户转账。"}
+                        ? "Explain what you have corrected or when you can provide the requested item. Do not include passwords, full card numbers, one-time codes, ID images or bank documents here."
+                        : language === "zh-CN"
+                          ? "请说明已更正的内容，或何时可提供所需材料。请勿在此填写密码、完整银行卡号、一次性验证码、证件照片或银行文件。"
+                          : "សូមពន្យល់អំពីអ្វីដែលអ្នកបានកែតម្រូវ ឬពេលវេលាដែលអាចផ្តល់ឯកសារបាន។ កុំបញ្ចូលពាក្យសម្ងាត់ លេខកាតពេញ លេខកូដម្តង រូបថតអត្តសញ្ញាណប័ណ្ណ ឬឯកសារធនាគារនៅទីនេះ។"}
                     </small>
+                    <label className="field-label">
+                      {language === "en"
+                        ? "Your response"
+                        : language === "zh-CN"
+                          ? "你的补充说明"
+                          : "ការឆ្លើយតបរបស់អ្នក"}
+                      <textarea
+                        value={supplementMessage}
+                        onChange={(event) =>
+                          setSupplementMessage(event.target.value)
+                        }
+                        maxLength={2000}
+                        rows={4}
+                      />
+                    </label>
+                    <button
+                      className="primary"
+                      disabled={loading || supplementMessage.trim().length < 10}
+                      onClick={() => void submitSupplementResponse()}
+                    >
+                      {language === "en"
+                        ? "Send response"
+                        : language === "zh-CN"
+                          ? "发送说明"
+                          : "ផ្ញើការឆ្លើយតប"}
+                    </button>
+                    {supplementNotice ? (
+                      <p className="response-note">{supplementNotice}</p>
+                    ) : null}
                   </section>
-                  <div className="installments">
-                    {summary.repayment.installments.map((item) => (
-                      <div key={item.installmentNo}>
+                ) : null}
+                <div className="application-number">
+                  <span>{t.status}</span>
+                  <strong>{applicationNo}</strong>
+                </div>
+                <button
+                  className="back-link refresh-status"
+                  aria-label={t.refresh}
+                  disabled={loading}
+                  onClick={() => void checkStatus()}
+                >
+                  {t.refresh}
+                </button>
+                {canWithdraw ? (
+                  <section
+                    className="next-payment"
+                    aria-label="Withdraw application"
+                  >
+                    <strong>
+                      {language === "en"
+                        ? "Need to stop this application?"
+                        : language === "zh-CN"
+                          ? "需要撤回申请吗？"
+                          : "ត្រូវការដកពាក្យសុំនេះវិញឬ?"}
+                    </strong>
+                    <small>
+                      {language === "en"
+                        ? "You can withdraw before you confirm the loan contract."
+                        : language === "zh-CN"
+                          ? "在确认贷款合同前，你可以撤回申请。"
+                          : "អ្នកអាចដកពាក្យសុំវិញ មុនពេលអ្នកបញ្ជាក់កិច្ចសន្យាប្រាក់កម្ចី។"}
+                    </small>
+                    {withdrawalConfirmationRequested ? (
+                      <button
+                        className="primary"
+                        disabled={loading}
+                        onClick={() => void withdrawApplication()}
+                      >
+                        {language === "en"
+                          ? "Confirm withdrawal"
+                          : language === "zh-CN"
+                            ? "确认撤回"
+                            : "បញ្ជាក់ការដកវិញ"}
+                      </button>
+                    ) : (
+                      <button
+                        className="back-link"
+                        disabled={loading}
+                        onClick={() => setWithdrawalConfirmationRequested(true)}
+                      >
+                        {language === "en"
+                          ? "Withdraw application"
+                          : language === "zh-CN"
+                            ? "撤回申请"
+                            : "ដកពាក្យសុំវិញ"}
+                      </button>
+                    )}
+                  </section>
+                ) : null}
+                {result === "withdrawn" ? (
+                  <p className="response-note">
+                    {language === "en"
+                      ? "No further action is required for this withdrawn application."
+                      : language === "zh-CN"
+                        ? "该已撤回申请无需进一步操作。"
+                        : "មិនត្រូវការសកម្មភាពបន្ថែមសម្រាប់ពាក្យសុំដែលបានដកវិញនេះទេ។"}
+                  </p>
+                ) : result === "approved" ? (
+                  <p className="response-note">
+                    {language === "en"
+                      ? "Approved limit: "
+                      : language === "km"
+                        ? "ទំហំបានអនុម័ត៖ "
+                        : "审核额度："}
+                    <strong>{formatUsdMinor(approvedAmountMinor)}</strong>
+                  </p>
+                ) : result === "rejected-resolved" ? (
+                  <button className="primary" onClick={startNewApplication}>
+                    {language === "en"
+                      ? "Start a new application"
+                      : language === "zh-CN"
+                        ? "发起新的申请"
+                        : "ចាប់ផ្តើមពាក្យសុំថ្មី"}
+                  </button>
+                ) : (
+                  <p className="response-note">{t.expected}</p>
+                )}
+                {result === "withdrawn" ? (
+                  <button className="primary" onClick={startNewApplication}>
+                    {t.start}
+                  </button>
+                ) : null}
+                {summary ? (
+                  <section
+                    className="loan-dashboard"
+                    aria-label="Loan dashboard"
+                  >
+                    <div className="dashboard-heading">
+                      <strong>
+                        {language === "en"
+                          ? "Your loan information"
+                          : language === "km"
+                            ? "ព័ត៌មានឥណទានរបស់អ្នក"
+                            : "我的贷款信息"}
+                      </strong>
+                      <span>
+                        {applicantPhaseLabel(
+                          applicantPhase(summary.application.status),
+                          language,
+                        )}
+                      </span>
+                    </div>
+                    <div className="metric-grid">
+                      <div>
                         <span>
-                          #{item.installmentNo} · {item.dueDate}
+                          {language === "en"
+                            ? "Requested"
+                            : language === "km"
+                              ? "បានស្នើ"
+                              : "申请金额"}
                         </span>
-                        <b>{formatUsdMinor(item.amountDueMinor)}</b>
-                        <em
-                          className={
-                            item.status === "PAID" ? "paid" : "pending"
+                        <b>
+                          {formatUsdMinor(
+                            summary.application.requestedAmountMinor,
+                          )}
+                        </b>
+                      </div>
+                      <div>
+                        <span>{t.installments}</span>
+                        <b>{summary.terms?.installmentCount ?? "—"}</b>
+                      </div>
+                      <div>
+                        <span>{t.firstDueDate}</span>
+                        <b>{summary.terms?.firstDueDate ?? "—"}</b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Approved"
+                            : language === "km"
+                              ? "បានអនុម័ត"
+                              : "审核额度"}
+                        </span>
+                        <b>
+                          {summary.terms
+                            ? formatUsdMinor(summary.terms.approvedAmountMinor)
+                            : "—"}
+                        </b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Service fee"
+                            : language === "km"
+                              ? "ថ្លៃសេវា"
+                              : "服务费"}
+                        </span>
+                        <b>
+                          {summary.terms
+                            ? formatUsdMinor(summary.terms.serviceFeeMinor)
+                            : "—"}
+                        </b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Total repayable"
+                            : language === "km"
+                              ? "សរុបត្រូវសង"
+                              : "应还总额"}
+                        </span>
+                        <b>
+                          {summary.terms
+                            ? formatUsdMinor(summary.terms.totalRepayableMinor)
+                            : "—"}
+                        </b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Loan term"
+                            : language === "km"
+                              ? "រយៈពេលកម្ចី"
+                              : "贷款期限"}
+                        </span>
+                        <b>
+                          {summary.application.tenorDays}{" "}
+                          {language === "en"
+                            ? "days"
+                            : language === "km"
+                              ? "ថ្ងៃ"
+                              : "天"}
+                        </b>
+                      </div>
+                      {summary.application.employerTenantDisplayName ? (
+                        <div>
+                          <span>{factoryCopy.factory}</span>
+                          <b>{summary.application.employerTenantDisplayName}</b>
+                        </div>
+                      ) : null}
+                    </div>
+                    {summary.application.status === "CONTRACT_PENDING" ? (
+                      <section
+                        className="next-payment"
+                        aria-label="Contract confirmation"
+                      >
+                        <strong>
+                          {language === "en"
+                            ? "Confirm the displayed loan terms"
+                            : language === "km"
+                              ? "បញ្ជាក់លក្ខខណ្ឌកម្ចីដែលបានបង្ហាញ"
+                              : "确认已展示的贷款条款"}
+                        </strong>
+                        <small>
+                          {language === "en"
+                            ? "This records your Telegram confirmation. Legal electronic-signature validation remains subject to local legal review."
+                            : language === "km"
+                              ? "វាកត់ត្រាការបញ្ជាក់តាម Telegram របស់អ្នក។ សុពលភាពហត្ថលេខាអេឡិចត្រូនិកនៅត្រូវពិនិត្យតាមច្បាប់មូលដ្ឋាន។"
+                              : "此操作记录你的 Telegram 确认；电子签约法律效力仍以当地法务审查为准。"}
+                        </small>
+                        <button
+                          className="primary"
+                          disabled={loading}
+                          onClick={() => void confirmDisplayedContract()}
+                        >
+                          {language === "en"
+                            ? "Confirm terms"
+                            : language === "km"
+                              ? "បញ្ជាក់លក្ខខណ្ឌ"
+                              : "确认条款"}
+                        </button>
+                      </section>
+                    ) : summary.application.status ===
+                      "USER_CONTRACT_CONFIRMED" ? (
+                      <p className="response-note">
+                        {language === "en"
+                          ? "Your confirmation is recorded. The lender is completing its contract record."
+                          : language === "km"
+                            ? "ការបញ្ជាក់របស់អ្នកត្រូវបានកត់ត្រា។ ស្ថាប័នផ្តល់កម្ចីកំពុងបំពេញកំណត់ត្រាកិច្ចសន្យា។"
+                            : "你的确认已记录，持牌机构正在完成合同记录。"}
+                      </p>
+                    ) : null}
+                    {summary.repayment.periodCount > 0 ? (
+                      <>
+                        <div className="repayment-summary">
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Paid periods"
+                                : language === "km"
+                                  ? "បង់រួច"
+                                  : "已还期数"}
+                            </span>
+                            <b>
+                              {summary.repayment.paidPeriods} /{" "}
+                              {summary.repayment.periodCount}
+                            </b>
+                          </div>
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Unpaid periods"
+                                : language === "km"
+                                  ? "មិនទាន់បង់"
+                                  : "未还期数"}
+                            </span>
+                            <b>{summary.repayment.unpaidPeriods}</b>
+                          </div>
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Outstanding"
+                                : language === "km"
+                                  ? "នៅសល់ត្រូវសង"
+                                  : "待还金额"}
+                            </span>
+                            <b>
+                              {formatUsdMinor(
+                                summary.repayment.outstandingMinor,
+                              )}
+                            </b>
+                          </div>
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Total paid"
+                                : language === "km"
+                                  ? "សរុបបានបង់"
+                                  : "已还金额"}
+                            </span>
+                            <b>
+                              {formatUsdMinor(summary.repayment.totalPaidMinor)}
+                            </b>
+                          </div>
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Past due"
+                                : language === "km"
+                                  ? "ហួសកាលកំណត់"
+                                  : "逾期期数 / 金额"}
+                            </span>
+                            <b>
+                              {summary.repayment.overduePeriods} ·{" "}
+                              {formatUsdMinor(
+                                summary.repayment.overdueOutstandingMinor,
+                              )}
+                            </b>
+                          </div>
+                        </div>
+                        {summary.repayment.nextInstallment ? (
+                          <div className="next-payment">
+                            <span>
+                              {language === "en"
+                                ? "Next payment"
+                                : language === "km"
+                                  ? "ការបង់បន្ទាប់"
+                                  : "下一期还款"}
+                            </span>
+                            <strong>
+                              {formatUsdMinor(
+                                summary.repayment.nextInstallment
+                                  .amountDueMinor,
+                              )}
+                            </strong>
+                            <small>
+                              #{summary.repayment.nextInstallment.installmentNo}{" "}
+                              · {summary.repayment.nextInstallment.dueDate}
+                            </small>
+                          </div>
+                        ) : (
+                          <div className="next-payment settled">
+                            <span>
+                              {language === "en"
+                                ? "All installments are recorded as paid"
+                                : language === "km"
+                                  ? "បានកត់ត្រាការបង់គ្រប់កំណត់"
+                                  : "全部期次已记录为已还"}
+                            </span>
+                          </div>
+                        )}
+                        <section
+                          className="next-payment"
+                          aria-label="Manual payment safety"
+                        >
+                          <strong>
+                            {language === "en"
+                              ? "Manual payment safety"
+                              : language === "km"
+                                ? "សុវត្ថិភាពការទូទាត់ដោយដៃ"
+                                : "人工还款安全提示"}
+                          </strong>
+                          <small>
+                            {language === "en"
+                              ? "Confirm payment instructions with the licensed lender's operations team before paying. Do not transfer funds to account details sent through unverified messages."
+                              : language === "km"
+                                ? "សូមបញ្ជាក់ការណែនាំទូទាត់ជាមួយក្រុមប្រតិបត្តិរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណមុនពេលបង់ប្រាក់។ កុំផ្ទេរប្រាក់ទៅគណនីដែលផ្ញើតាមសារមិនបានផ្ទៀងផ្ទាត់។"
+                                : "付款前请向持牌机构运营团队确认还款指引；请勿向未经核验的消息中提供的账户转账。"}
+                          </small>
+                        </section>
+                        <div className="installments">
+                          {summary.repayment.installments.map((item) => (
+                            <div key={item.installmentNo}>
+                              <span>
+                                #{item.installmentNo} · {item.dueDate}
+                              </span>
+                              <b>{formatUsdMinor(item.amountDueMinor)}</b>
+                              <em
+                                className={
+                                  item.status === "PAID" ? "paid" : "pending"
+                                }
+                              >
+                                {item.status === "PAID"
+                                  ? language === "en"
+                                    ? "Paid"
+                                    : language === "km"
+                                      ? "បានបង់"
+                                      : "已还"
+                                  : language === "en"
+                                    ? "Pending"
+                                    : language === "km"
+                                      ? "មិនទាន់បង់"
+                                      : "待还"}
+                              </em>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <p className="response-note">
+                        {language === "en"
+                          ? "Repayment periods and payment fees will be generated after the licensed lender confirms disbursement."
+                          : language === "km"
+                            ? "កាលវិភាគបង់ និងថ្លៃបង់នឹងបង្កើតបន្ទាប់ពីស្ថាប័នមានអាជ្ញាប័ណ្ណបញ្ជាក់ការបើកប្រាក់។"
+                            : "持牌机构确认放款后，系统将生成还款期次、费用及账单。"}
+                      </p>
+                    )}
+                    <section
+                      className="next-payment"
+                      aria-label="Customer support and complaints"
+                    >
+                      <strong>
+                        {language === "en"
+                          ? "Customer support and complaints"
+                          : language === "zh-CN"
+                            ? "客服与投诉"
+                            : "សេវាអតិថិជន និងបណ្តឹង"}
+                      </strong>
+                      <small>
+                        {language === "en"
+                          ? "For a complaint, the licensed lender is responsible for the final outcome. Do not include passwords, card numbers or one-time codes."
+                          : language === "zh-CN"
+                            ? "投诉的最终处理由持牌机构负责。请勿填写密码、银行卡完整号码或一次性验证码。"
+                            : "សម្រាប់បណ្តឹង ស្ថាប័នមានអាជ្ញាប័ណ្ណទទួលខុសត្រូវលើលទ្ធផលចុងក្រោយ។ សូមកុំបញ្ចូលពាក្យសម្ងាត់ លេខកាតពេញលេញ ឬលេខកូដម្តងទៀត។"}
+                      </small>
+                      <label className="field-label">
+                        {language === "en"
+                          ? "Request type"
+                          : language === "zh-CN"
+                            ? "问题类型"
+                            : "ប្រភេទសំណើ"}
+                        <select
+                          value={serviceCaseType}
+                          onChange={(event) =>
+                            setServiceCaseType(
+                              event.target.value as
+                                "SERVICE_QUERY" | "COMPLAINT",
+                            )
                           }
                         >
-                          {item.status === "PAID"
-                            ? language === "en"
-                              ? "Paid"
-                              : language === "km"
-                                ? "បានបង់"
-                                : "已还"
-                            : language === "en"
-                              ? "Pending"
-                              : language === "km"
-                                ? "មិនទាន់បង់"
-                                : "待还"}
-                        </em>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <p className="response-note">
-                  {language === "en"
-                    ? "Repayment periods and payment fees will be generated after the licensed lender confirms disbursement."
-                    : language === "km"
-                      ? "កាលវិភាគបង់ និងថ្លៃបង់នឹងបង្កើតបន្ទាប់ពីស្ថាប័នមានអាជ្ញាប័ណ្ណបញ្ជាក់ការបើកប្រាក់។"
-                      : "持牌机构确认放款后，系统将生成还款期次、费用及账单。"}
-                </p>
-              )}
-              <section
-                className="next-payment"
-                aria-label="Customer support and complaints"
-              >
-                <strong>
-                  {language === "en"
-                    ? "Customer support and complaints"
-                    : language === "zh-CN"
-                      ? "客服与投诉"
-                      : "សេវាអតិថិជន និងបណ្តឹង"}
-                </strong>
-                <small>
-                  {language === "en"
-                    ? "For a complaint, the licensed lender is responsible for the final outcome. Do not include passwords, card numbers or one-time codes."
-                    : language === "zh-CN"
-                      ? "投诉的最终处理由持牌机构负责。请勿填写密码、银行卡完整号码或一次性验证码。"
-                      : "សម្រាប់បណ្តឹង ស្ថាប័នមានអាជ្ញាប័ណ្ណទទួលខុសត្រូវលើលទ្ធផលចុងក្រោយ។ សូមកុំបញ្ចូលពាក្យសម្ងាត់ លេខកាតពេញលេញ ឬលេខកូដម្តងទៀត។"}
-                </small>
-                <label className="field-label">
-                  {language === "en"
-                    ? "Request type"
-                    : language === "zh-CN"
-                      ? "问题类型"
-                      : "ប្រភេទសំណើ"}
-                  <select
-                    value={serviceCaseType}
-                    onChange={(event) =>
-                      setServiceCaseType(
-                        event.target.value as "SERVICE_QUERY" | "COMPLAINT",
-                      )
-                    }
-                  >
-                    <option value="SERVICE_QUERY">
-                      {language === "en"
-                        ? "Service question"
-                        : language === "zh-CN"
-                          ? "客服咨询"
-                          : "សំណួរសេវាកម្ម"}
-                    </option>
-                    <option value="COMPLAINT">
-                      {language === "en"
-                        ? "Complaint"
-                        : language === "zh-CN"
-                          ? "投诉"
-                          : "បណ្តឹង"}
-                    </option>
-                  </select>
-                </label>
-                <label className="field-label">
-                  {language === "en"
-                    ? "Tell us what happened"
-                    : language === "zh-CN"
-                      ? "请说明情况"
-                      : "សូមពិពណ៌នាអំពីបញ្ហា"}
-                  <textarea
-                    value={serviceCaseMessage}
-                    onChange={(event) =>
-                      setServiceCaseMessage(event.target.value)
-                    }
-                    maxLength={2000}
-                    rows={4}
-                  />
-                </label>
-                <button
-                  className="primary"
-                  disabled={loading || serviceCaseMessage.trim().length < 10}
-                  onClick={() => void submitServiceCase()}
-                >
-                  {language === "en"
-                    ? "Submit support case"
-                    : language === "zh-CN"
-                      ? "提交客服工单"
-                      : "ដាក់សំណើសេវាកម្ម"}
-                </button>
-                <button
-                  className="secondary"
-                  disabled={loading || serviceCasesLoading}
-                  onClick={() => void loadServiceCases()}
-                >
-                  {serviceCasesLoading
-                    ? "…"
-                    : language === "en"
-                      ? "View my case history"
-                      : language === "zh-CN"
-                        ? "查看我的工单记录"
-                        : "មើលប្រវត្តិសំណើរបស់ខ្ញុំ"}
-                </button>
-                {serviceCaseNotice ? (
-                  <p className="response-note">{serviceCaseNotice}</p>
-                ) : null}
-                {serviceCasesLoaded ? (
-                  serviceCases.length === 0 ? (
-                    <p className="response-note">
-                      {language === "en"
-                        ? "No support cases have been recorded for this application."
-                        : language === "zh-CN"
-                          ? "该申请暂无客服或投诉工单。"
-                          : "មិនទាន់មានសំណើសេវាកម្ម ឬបណ្តឹងសម្រាប់ពាក្យស្នើសុំនេះទេ។"}
-                    </p>
-                  ) : (
-                    <ul className="application-history">
-                      {serviceCases.map((serviceCase) => (
-                        <li key={serviceCase.caseNo}>
-                          <strong>{serviceCase.caseNo}</strong>
-                          <span>
-                            {applicantServiceCaseLabel(serviceCase, language)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )
+                          <option value="SERVICE_QUERY">
+                            {language === "en"
+                              ? "Service question"
+                              : language === "zh-CN"
+                                ? "客服咨询"
+                                : "សំណួរសេវាកម្ម"}
+                          </option>
+                          <option value="COMPLAINT">
+                            {language === "en"
+                              ? "Complaint"
+                              : language === "zh-CN"
+                                ? "投诉"
+                                : "បណ្តឹង"}
+                          </option>
+                        </select>
+                      </label>
+                      <label className="field-label">
+                        {language === "en"
+                          ? "Tell us what happened"
+                          : language === "zh-CN"
+                            ? "请说明情况"
+                            : "សូមពិពណ៌នាអំពីបញ្ហា"}
+                        <textarea
+                          value={serviceCaseMessage}
+                          onChange={(event) =>
+                            setServiceCaseMessage(event.target.value)
+                          }
+                          maxLength={2000}
+                          rows={4}
+                        />
+                      </label>
+                      <button
+                        className="primary"
+                        disabled={
+                          loading || serviceCaseMessage.trim().length < 10
+                        }
+                        onClick={() => void submitServiceCase()}
+                      >
+                        {language === "en"
+                          ? "Submit support case"
+                          : language === "zh-CN"
+                            ? "提交客服工单"
+                            : "ដាក់សំណើសេវាកម្ម"}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={loading || serviceCasesLoading}
+                        onClick={() => void loadServiceCases()}
+                      >
+                        {serviceCasesLoading
+                          ? "…"
+                          : language === "en"
+                            ? "View my case history"
+                            : language === "zh-CN"
+                              ? "查看我的工单记录"
+                              : "មើលប្រវត្តិសំណើរបស់ខ្ញុំ"}
+                      </button>
+                      {serviceCaseNotice ? (
+                        <p className="response-note">{serviceCaseNotice}</p>
+                      ) : null}
+                      {serviceCasesLoaded ? (
+                        serviceCases.length === 0 ? (
+                          <p className="response-note">
+                            {language === "en"
+                              ? "No support cases have been recorded for this application."
+                              : language === "zh-CN"
+                                ? "该申请暂无客服或投诉工单。"
+                                : "មិនទាន់មានសំណើសេវាកម្ម ឬបណ្តឹងសម្រាប់ពាក្យស្នើសុំនេះទេ។"}
+                          </p>
+                        ) : (
+                          <ul className="application-history">
+                            {serviceCases.map((serviceCase) => (
+                              <li key={serviceCase.caseNo}>
+                                <strong>{serviceCase.caseNo}</strong>
+                                <span>
+                                  {applicantServiceCaseLabel(
+                                    serviceCase,
+                                    language,
+                                  )}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )
+                      ) : null}
+                    </section>
+                  </section>
                 ) : null}
               </section>
-            </section>
-          ) : null}
-        </section>
-      )}
+            )}
 
-      <section className="progress-card">
-        <div className="progress-title">
-          <span>{t.review}</span>
-          <small>{t.secured}</small>
-        </div>
-        <div className="progress">
-          {[t.apply, t.broker, t.lender, t.offer].map((label, index) => (
-            <div
-              className={`progress-step ${index < currentStep ? "done" : index === currentStep ? "active" : ""}`}
-              key={label}
-            >
-              <i>{index < currentStep ? "✓" : index + 1}</i>
-              <span>{label}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-      {applicationHistory.length > 0 ? (
-        <section className="history-card" aria-label="Application history">
-          <div className="progress-title">
-            <span>
-              {language === "en"
-                ? "Your applications"
-                : language === "zh-CN"
-                  ? "我的申请记录"
-                  : "ពាក្យសុំរបស់អ្នក"}
-            </span>
-            <small>{applicationHistory.length}</small>
-          </div>
-          <div className="history-list">
-            {applicationHistory.map((item) => {
-              const phase = applicantPhase(item.status);
-              return (
-                <button
-                  className="history-item"
-                  key={item.applicationNo}
-                  onClick={() => void checkStatus(item.applicationNo)}
-                  disabled={loading}
-                >
+            <section className="progress-card">
+              <div className="progress-title">
+                <span>{t.review}</span>
+                <small>{t.secured}</small>
+              </div>
+              <div className="progress">
+                {[t.apply, t.broker, t.lender, t.offer].map((label, index) => (
+                  <div
+                    className={`progress-step ${index < currentStep ? "done" : index === currentStep ? "active" : ""}`}
+                    key={label}
+                  >
+                    <i>{index < currentStep ? "✓" : index + 1}</i>
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+            {applicationHistory.length > 0 ? (
+              <section
+                className="history-card"
+                aria-label="Application history"
+              >
+                <div className="progress-title">
                   <span>
-                    <strong>{formatUsdMinor(item.requestedAmountMinor)}</strong>
-                    <small>{item.applicationNo}</small>
-                    {item.employerTenantDisplayName ? (
-                      <small>
-                        {factoryCopy.factory}: {item.employerTenantDisplayName}
-                      </small>
-                    ) : null}
+                    {language === "en"
+                      ? "Your applications"
+                      : language === "zh-CN"
+                        ? "我的申请记录"
+                        : "ពាក្យសុំរបស់អ្នក"}
                   </span>
-                  <em>{applicantPhaseLabel(phase, language)}</em>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
+                  <small>{applicationHistory.length}</small>
+                </div>
+                <div className="history-list">
+                  {applicationHistory.map((item) => {
+                    const phase = applicantPhase(item.status);
+                    return (
+                      <button
+                        className="history-item"
+                        key={item.applicationNo}
+                        onClick={() => void checkStatus(item.applicationNo)}
+                        disabled={loading}
+                      >
+                        <span>
+                          <strong>
+                            {formatUsdMinor(item.requestedAmountMinor)}
+                          </strong>
+                          <small>{item.applicationNo}</small>
+                          {item.employerTenantDisplayName ? (
+                            <small>
+                              {factoryCopy.factory}:{" "}
+                              {item.employerTenantDisplayName}
+                            </small>
+                          ) : null}
+                        </span>
+                        <em>{applicantPhaseLabel(phase, language)}</em>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+          </>
+        );
+        switch (currentPage) {
+          case "orders":
+            return (
+              <OrdersPage
+                language={language}
+                empty={applicationHistory.length === 0}
+                onOpenFirst={() => {
+                  if (!applicationHistory[0]) return;
+                  setApplicationNo(applicationHistory[0].applicationNo);
+                  setCurrentPage("order-detail");
+                }}
+              />
+            );
+          case "order-detail":
+            return (
+              <OrderDetailPage
+                language={language}
+                applicationNo={applicationNo || null}
+                onBack={() => setCurrentPage("orders")}
+              />
+            );
+          case "repayment":
+            return (
+              <RepaymentPage
+                language={language}
+                empty={!summary || summary.repayment.periodCount === 0}
+                onContactSupport={() => setCurrentPage("profile")}
+              />
+            );
+          case "profile":
+            return (
+              <ProfilePage
+                language={language}
+                onLogout={() => void logoutApplicant()}
+              />
+            );
+          case "home":
+          default:
+            return <HomePage language={language}>{pageBody}</HomePage>;
+        }
+      })()}
       <footer>
         <span>🔒 {t.secured}</span>
         <span>USD 10–500 · 7–180 days</span>
       </footer>
+      <BottomNavigation
+        current={currentPage}
+        language={language}
+        onChange={setCurrentPage}
+      />
     </main>
   );
 }

@@ -12,6 +12,7 @@ describe("applicant submission", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, "Telegram");
     Reflect.deleteProperty(document, "cookie");
@@ -79,6 +80,24 @@ describe("applicant submission", () => {
       },
       personalDataAndPhoneConsent: true,
     });
+  });
+
+  it("keeps a controlled preview read-only before personal-data entry", () => {
+    vi.stubEnv("VITE_PAYEASE_DEPLOYMENT_MODE", "controlled-preview");
+
+    render(<App />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "en" },
+    });
+
+    expect(
+      screen.getByText(
+        "This preview is view-only. Applications and personal data entry are disabled.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /start application/i }),
+    ).toBeDisabled();
   });
 
   it("requires a signed-in applicant to choose a factory and submit an identity document", async () => {

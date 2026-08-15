@@ -379,6 +379,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     reviewing: "审核中",
     noOffer: "持牌机构将独立决定额度和费用。",
     demo: "受控预览环境",
+    previewReadOnly: "此预览仅供查看，不能提交申请或填写个人资料。",
     secured: "信息仅用于本次申请处理",
     usd: "USD",
     expected: "预计处理：工作时段 0–1.5 小时响应",
@@ -422,6 +423,8 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     reviewing: "Under review",
     noOffer: "The licensed lender independently decides the limit and fees.",
     demo: "Controlled preview",
+    previewReadOnly:
+      "This preview is view-only. Applications and personal data entry are disabled.",
     secured: "Used only for this application",
     usd: "USD",
     expected: "Expected response during business hours: 0–1.5 hours",
@@ -465,6 +468,8 @@ const labels: Record<LanguageCode, Record<string, string>> = {
     reviewing: "កំពុងពិនិត្យ",
     noOffer: "ស្ថាប័នមានអាជ្ញាប័ណ្ណសម្រេចទំហំ និងថ្លៃសេវាដោយឯករាជ្យ។",
     demo: "បរិស្ថានសាកល្បងគ្រប់គ្រង",
+    previewReadOnly:
+      "ការមើលជាមុននេះសម្រាប់មើលតែប៉ុណ្ណោះ។ ការដាក់ពាក្យ និងការបញ្ចូលព័ត៌មានផ្ទាល់ខ្លួនត្រូវបានបិទ។",
     secured: "ប្រើសម្រាប់ពាក្យនេះតែប៉ុណ្ណោះ",
     usd: "USD",
     expected: "ពេលឆ្លើយតបក្នុងម៉ោងធ្វើការ៖ 0–1.5 ម៉ោង",
@@ -1327,6 +1332,11 @@ export function App(): JSX.Element {
                 ))}
               </div>
               <p className="estimate-note">{t.noOffer}</p>
+              {showPreviewBadge ? (
+                <p className="response-note" role="status">
+                  {t.previewReadOnly}
+                </p>
+              ) : null}
               {error && (
                 <ApplicantError
                   message={error}
@@ -1336,6 +1346,7 @@ export function App(): JSX.Element {
               )}
               <button
                 className="primary"
+                disabled={showPreviewBadge}
                 onClick={() => {
                   const amountMinor = requestedAmountMinor;
                   if (!amountMinor) {

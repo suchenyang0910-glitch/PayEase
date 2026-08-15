@@ -204,6 +204,43 @@ integration("public applicant access", () => {
     });
   });
 
+  it("does not collect an application from an unauthenticated controlled preview", async () => {
+    const originalDeploymentMode = process.env.PAYEASE_DEPLOYMENT_MODE;
+    const originalPreviewOptOut =
+      process.env.PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW;
+    const originalRequireTelegramAuth = process.env.REQUIRE_TELEGRAM_AUTH;
+    const originalNodeEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    process.env.PAYEASE_DEPLOYMENT_MODE = "controlled-preview";
+    process.env.PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW = "true";
+    process.env.REQUIRE_TELEGRAM_AUTH = "false";
+    try {
+      const blocked = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/applications",
+        payload: {},
+      });
+
+      expect(blocked.statusCode).toBe(403);
+      expect(blocked.json()).toEqual({
+        code: "CONTROLLED_PREVIEW_APPLICATIONS_DISABLED",
+      });
+    } finally {
+      if (originalDeploymentMode === undefined)
+        delete process.env.PAYEASE_DEPLOYMENT_MODE;
+      else process.env.PAYEASE_DEPLOYMENT_MODE = originalDeploymentMode;
+      if (originalPreviewOptOut === undefined)
+        delete process.env.PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW;
+      else
+        process.env.PAYEASE_ALLOW_UNAUTHENTICATED_PREVIEW =
+          originalPreviewOptOut;
+      if (originalRequireTelegramAuth === undefined)
+        delete process.env.REQUIRE_TELEGRAM_AUTH;
+      else process.env.REQUIRE_TELEGRAM_AUTH = originalRequireTelegramAuth;
+      process.env.NODE_ENV = originalNodeEnvironment;
+    }
+  });
+
   it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
     process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
     const bootstrap = await brokerApi.app.inject({

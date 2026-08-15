@@ -33,3 +33,17 @@ export function requiresTelegramAuthentication(
   }
   return true;
 }
+
+/**
+ * A deliberately unauthenticated preview may show static UX only. It must
+ * never accept applications or other applicant data, even if a deployment
+ * accidentally supplies otherwise valid storage credentials.
+ */
+export function isUnauthenticatedControlledPreview(
+  environment: TelegramAuthEnvironment = process.env,
+): boolean {
+  return (
+    isControlledPreview(environment) &&
+    !requiresTelegramAuthentication(environment)
+  );
+}

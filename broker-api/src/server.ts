@@ -47,6 +47,7 @@ import {
 } from "./telegram-auth.js";
 import {
   isControlledPreview,
+  isUnauthenticatedControlledPreview,
   requiresTelegramAuthentication,
 } from "./telegram-auth-policy.js";
 import {
@@ -2003,6 +2004,11 @@ app.post(
 );
 
 app.post("/v1/local/applications", async (request, reply) => {
+  if (isUnauthenticatedControlledPreview()) {
+    return reply
+      .code(403)
+      .send({ code: "CONTROLLED_PREVIEW_APPLICATIONS_DISABLED" });
+  }
   const input = createApplicationSchema.parse(request.body);
   const applicant = await authenticatedApplicant(
     request.headers.cookie,

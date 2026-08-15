@@ -589,6 +589,111 @@ footer {
   color: #7a8a7f;
   font-size: 10px;
 }
+.page {
+  margin-top: 18px;
+}
+.page__header {
+  margin-bottom: 14px;
+}
+.page__title {
+  margin: 0;
+  color: #173325;
+  font-size: 23px;
+}
+.page__subtitle,
+.page__hint {
+  margin: 7px 0 0;
+  color: #66786b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.page__body {
+  min-height: 250px;
+}
+.empty-state,
+.profile-list {
+  border: 1px solid #dce6dd;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 32px rgba(20, 57, 34, 0.06);
+}
+.empty-state {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  color: #64766a;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.secondary {
+  width: fit-content;
+  border: 1px solid #15965a;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #fff;
+  color: #096d3e;
+  font-size: 13px;
+  font-weight: 700;
+}
+.profile-list {
+  display: grid;
+  margin: 0;
+  overflow: hidden;
+}
+.profile-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 15px;
+  border-bottom: 1px solid #e8efea;
+}
+.profile-list > div:last-child {
+  border-bottom: 0;
+}
+.profile-list dt,
+.profile-list dd {
+  margin: 0;
+  font-size: 13px;
+}
+.profile-list dt {
+  color: #64766a;
+}
+.profile-list dd {
+  color: #254233;
+  font-weight: 700;
+}
+.bottom-nav {
+  position: fixed;
+  z-index: 10;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 108px));
+  justify-content: center;
+  border-top: 1px solid #dce6dd;
+  padding: 8px max(12px, calc((100vw - 430px) / 2 + 12px));
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+}
+.bottom-nav--detail {
+  display: flex;
+}
+.bottom-nav__item,
+.bottom-nav__back {
+  border: 0;
+  border-radius: 9px;
+  padding: 9px 4px;
+  background: transparent;
+  color: #74857a;
+  font-size: 11px;
+  font-weight: 700;
+}
+.bottom-nav__item--active,
+.bottom-nav__back {
+  background: #e6f6eb;
+  color: #08703d;
+}
 @media (min-width: 431px) {
   .shell {
     box-shadow: 0 0 40px rgba(20, 40, 28, 0.09);

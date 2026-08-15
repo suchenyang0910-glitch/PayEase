@@ -157,6 +157,33 @@ integration("public applicant access", () => {
     });
   });
 
+  it("lists only active factory tenants for an unauthenticated applicant selector", async () => {
+    const active = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name, is_active)
+       VALUES ('LANHAI_FACTORY_A', 'Lanhai Factory A', true)
+       RETURNING id`,
+    );
+    await database.query(
+      `INSERT INTO employer_tenants (external_ref, display_name, is_active)
+       VALUES ('LANHAI_FACTORY_ARCHIVE', 'Archived factory', false)`,
+    );
+
+    const response = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/employer-tenants",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      tenants: [
+        {
+          id: active.rows[0]!.id,
+          displayName: "Lanhai Factory A",
+        },
+      ],
+    });
+  });
+
   it("bootstraps an administrator when the complaint role was pre-seeded by migrations", async () => {
     process.env.ADMIN_BOOTSTRAP_PASSWORD = "bootstrap-secret-not-real";
     const bootstrap = await brokerApi.app.inject({

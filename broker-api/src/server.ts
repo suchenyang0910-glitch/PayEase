@@ -255,6 +255,9 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicTelegramEntryPoints =
     request.method === "GET" &&
     requestPath === "/v1/local/public/telegram-entrypoints";
+  const isPublicEmployerTenantList =
+    request.method === "GET" &&
+    requestPath === "/v1/local/public/employer-tenants";
   const isApplicantStateChange =
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
@@ -325,7 +328,8 @@ app.addHook("onRequest", async (request, reply) => {
     isPublicTelegramSession ||
     isPublicApplicantLanguagePreference ||
     isPublicUserApplicationView ||
-    isPublicTelegramEntryPoints
+    isPublicTelegramEntryPoints ||
+    isPublicEmployerTenantList
   )
     return;
   const token = sessionToken(request.headers.cookie);
@@ -1611,6 +1615,27 @@ app.get("/v1/local/public/telegram-entrypoints", async (_request, reply) => {
     return reply.code(503).send({ code: "TELEGRAM_RECOVERY_UNAVAILABLE" });
   }
   return { entrypoints };
+});
+
+// The applicant selects a factory before submitting. This directory is
+// intentionally minimal: it never reveals tenant staff, volumes, or any
+// application data.
+app.get("/v1/local/public/employer-tenants", async () => {
+  const result = await pool.query<{
+    id: string;
+    display_name: string;
+  }>(
+    `SELECT id, display_name
+       FROM employer_tenants
+      WHERE is_active = true
+      ORDER BY display_name ASC`,
+  );
+  return {
+    tenants: result.rows.map((tenant) => ({
+      id: tenant.id,
+      displayName: tenant.display_name,
+    })),
+  };
 });
 
 app.post(

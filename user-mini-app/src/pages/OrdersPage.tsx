@@ -1,14 +1,17 @@
+import type { ReactNode } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
 import { USER_SKELETON_COPY } from "../copy/user-copy.ts";
 
 type Props = Readonly<{
   language: LanguageCode;
+  children?: ReactNode;
   empty?: boolean;
   onOpenFirst?: () => void;
 }>;
 
 export function OrdersPage({
   language,
+  children,
   empty = false,
   onOpenFirst,
 }: Props): JSX.Element {
@@ -22,6 +25,7 @@ export function OrdersPage({
         <p className="page__hint">{copy.listHint}</p>
       </header>
       <div className="page__body" data-page-anchor="orders">
+        {children}
         {empty ? (
           <div className="empty-state" role="status" aria-live="polite">
             {copy.empty}

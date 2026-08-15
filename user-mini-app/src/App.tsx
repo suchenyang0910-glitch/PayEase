@@ -2381,9 +2381,62 @@ export function App(): JSX.Element {
                 onOpenFirst={() => {
                   if (!applicationHistory[0]) return;
                   setApplicationNo(applicationHistory[0].applicationNo);
+                  void checkStatus(applicationHistory[0].applicationNo);
                   setCurrentPage("order-detail");
                 }}
-              />
+              >
+                {applicationHistory.length > 0 ? (
+                  <section
+                    className="history-card"
+                    aria-label="Application history"
+                  >
+                    <div className="progress-title">
+                      <span>
+                        {language === "en"
+                          ? "Your applications"
+                          : language === "zh-CN"
+                            ? "我的申请记录"
+                            : "ពាក្យសុំរបស់អ្នក"}
+                      </span>
+                      <small>{applicationHistory.length}</small>
+                    </div>
+                    <div className="history-list">
+                      {applicationHistory.map((item) => {
+                        const phase = applicantPhase(item.status);
+                        return (
+                          <button
+                            className="history-item"
+                            key={item.applicationNo}
+                            onClick={async () => {
+                              if (item.applicationNo !== applicationNo) {
+                                setServiceCases([]);
+                                setServiceCasesLoaded(false);
+                              }
+                              await checkStatus(item.applicationNo);
+                              setCurrentPage("order-detail");
+                            }}
+                            disabled={loading}
+                          >
+                            <span>
+                              <strong>
+                                {formatUsdMinor(item.requestedAmountMinor)}
+                              </strong>
+                              <small>{item.applicationNo}</small>
+                              {item.employerTenantDisplayName ? (
+                                <small>
+                                  {factoryCopy.factory}:{" "}
+                                  {item.employerTenantDisplayName}
+                                </small>
+                              ) : null}
+                            </span>
+                            <em>{applicantPhaseLabel(phase, language)}</em>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
+              </OrdersPage>
             );
           case "order-detail":
             return (

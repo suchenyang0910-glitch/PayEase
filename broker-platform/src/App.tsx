@@ -48,6 +48,10 @@ type ServiceCaseDetail = Readonly<
     message: string;
   }
 >;
+type EmployerTenantMember = Readonly<{
+  loginName: string;
+  roleCodes: string[];
+}>;
 
 function isServiceCaseQueueResponse(
   payload: unknown,
@@ -278,6 +282,9 @@ export function App(): JSX.Element {
     tenantId: "",
     loginName: "",
   });
+  const [tenantMembers, setTenantMembers] = useState<EmployerTenantMember[]>(
+    [],
+  );
   useEffect(() => {
     request("/v1/local/auth/me")
       .then(async (response) => {
@@ -310,6 +317,24 @@ export function App(): JSX.Element {
       );
     else if (response.status === 401) expireSession();
   };
+  const refreshTenantMembers = async (tenantId = tenantMember.tenantId) => {
+    if (!tenantId) {
+      setTenantMembers([]);
+      return;
+    }
+    const response = await request(
+      `/v1/local/admin/employer-tenants/${encodeURIComponent(tenantId)}/members`,
+    );
+    if (response.status === 401) {
+      expireSession();
+      return;
+    }
+    if (!response.ok) return;
+    const payload = (await response.json()) as {
+      members?: EmployerTenantMember[];
+    };
+    setTenantMembers(Array.isArray(payload.members) ? payload.members : []);
+  };
   const refreshDirectory = async () => {
     const [d, r, a, tenants] = await Promise.all([
       request("/v1/local/admin/departments"),
@@ -337,8 +362,8 @@ export function App(): JSX.Element {
   };
   const adminRequest = async (
     path: string,
-    method: "POST" | "PATCH" | "PUT",
-    body: object,
+    method: "POST" | "PATCH" | "PUT" | "DELETE",
+    body: object = {},
   ) => {
     setAdminInProgress(true);
     setNotice("");
@@ -356,7 +381,10 @@ export function App(): JSX.Element {
         return;
       }
       setNotice(result.notice);
-      if (result.ok) await refreshDirectory().catch(() => undefined);
+      if (result.ok) {
+        await refreshDirectory().catch(() => undefined);
+        await refreshTenantMembers().catch(() => undefined);
+      }
     } finally {
       setAdminInProgress(false);
     }
@@ -1210,10 +1238,14 @@ export function App(): JSX.Element {
                 <select
                   value={tenantMember.tenantId}
                   onChange={(event) =>
-                    setTenantMember({
-                      ...tenantMember,
-                      tenantId: event.target.value,
-                    })
+                    (() => {
+                      const tenantId = event.target.value;
+                      setTenantMember({
+                        ...tenantMember,
+                        tenantId,
+                      });
+                      void refreshTenantMembers(tenantId);
+                    })()
                   }
                   required
                 >
@@ -1252,6 +1284,75 @@ export function App(): JSX.Element {
                     : "Grant access"}
               </button>
             </form>
+            {tenantMember.tenantId ? (
+              <section style={{ ...card, marginTop: 0 }}>
+                <h3>
+                  {identity.preferredLanguage === "zh-CN"
+                    ? "已授权工厂账号"
+                    : identity.preferredLanguage === "km"
+                      ? "គណនីដែលបានអនុញ្ញាតសម្រាប់រោងចក្រ"
+                      : "Authorized factory accounts"}
+                </h3>
+                <p>
+                  {identity.preferredLanguage === "zh-CN"
+                    ? "仅显示后台账号和角色；不显示员工申请或证件资料。"
+                    : identity.preferredLanguage === "km"
+                      ? "បង្ហាញតែគណនីផ្ទៃក្នុង និងតួនាទី មិនបង្ហាញព័ត៌មានស្នើសុំ ឬឯកសារអត្តសញ្ញាណទេ។"
+                      : "Only back-office accounts and roles are shown; applicant and identity data are never displayed."}
+                </p>
+                {tenantMembers.length === 0 ? (
+                  <p>
+                    {identity.preferredLanguage === "zh-CN"
+                      ? "暂无授权账号"
+                      : identity.preferredLanguage === "km"
+                        ? "មិនទាន់មានគណនីដែលបានអនុញ្ញាត"
+                        : "No authorized accounts."}
+                  </p>
+                ) : (
+                  tenantMembers.map((member) => (
+                    <div
+                      key={member.loginName}
+                      style={{
+                        display: "flex",
+                        gap: 12,
+                        alignItems: "center",
+                        marginTop: 8,
+                      }}
+                    >
+                      <span>
+                        {member.loginName} ({member.roleCodes.join(", ")})
+                      </span>
+                      <button
+                        type="button"
+                        disabled={adminInProgress}
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              identity.preferredLanguage === "zh-CN"
+                                ? `撤销 ${member.loginName} 的工厂访问权限？`
+                                : identity.preferredLanguage === "km"
+                                  ? `ដកសិទ្ធិចូលរោងចក្ររបស់ ${member.loginName}?`
+                                  : `Revoke factory access for ${member.loginName}?`,
+                            )
+                          )
+                            return;
+                          void adminRequest(
+                            `/v1/local/admin/employer-tenants/${encodeURIComponent(tenantMember.tenantId)}/members/${encodeURIComponent(member.loginName)}`,
+                            "DELETE",
+                          );
+                        }}
+                      >
+                        {identity.preferredLanguage === "zh-CN"
+                          ? "撤销访问"
+                          : identity.preferredLanguage === "km"
+                            ? "ដកសិទ្ធិចូល"
+                            : "Revoke access"}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </section>
+            ) : null}
           </div>
           <details style={{ marginTop: 18 }}>
             <summary>{copy.directoryData}</summary>

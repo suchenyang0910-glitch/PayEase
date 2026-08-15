@@ -475,6 +475,72 @@ integration("public applicant access", () => {
     }
   });
 
+  it("lets an operations administrator review and revoke a factory account assignment", async () => {
+    const opsCookie = await adminCookieForRole(database, "OPS_ADMIN", "OPS");
+    const employerCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_HR",
+      "EMPLOYER",
+    );
+    const employerMe = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/auth/me",
+      headers: { cookie: employerCookie },
+    });
+    const loginName = (employerMe.json() as { loginName: string }).loginName;
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/employer-tenants",
+      headers: { cookie: opsCookie },
+      payload: {
+        externalRef: "MEMBER_DIRECTORY_FACTORY",
+        displayName: "Member directory factory",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const tenantId = (created.json() as { id: string }).id;
+    const granted = await brokerApi.app.inject({
+      method: "PUT",
+      url: `/v1/local/admin/employer-tenants/${tenantId}/members/${loginName}`,
+      headers: { cookie: opsCookie },
+    });
+    expect(granted.statusCode).toBe(204);
+
+    const members = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/admin/employer-tenants/${tenantId}/members`,
+      headers: { cookie: opsCookie },
+    });
+    expect(members.statusCode).toBe(200);
+    expect(members.json()).toEqual({
+      members: [
+        expect.objectContaining({
+          loginName,
+          roleCodes: ["EMPLOYER_HR"],
+        }),
+      ],
+    });
+    const denied = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/admin/employer-tenants/${tenantId}/members`,
+      headers: { cookie: employerCookie },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    const revoked = await brokerApi.app.inject({
+      method: "DELETE",
+      url: `/v1/local/admin/employer-tenants/${tenantId}/members/${loginName}`,
+      headers: { cookie: opsCookie },
+    });
+    expect(revoked.statusCode).toBe(204);
+    const afterRevocation = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/admin/employer-tenants/${tenantId}/members`,
+      headers: { cookie: opsCookie },
+    });
+    expect(afterRevocation.json()).toEqual({ members: [] });
+  });
+
   it("lets a different platform administrator disable an account and revoke its sessions", async () => {
     const opsCookie = await adminCookieForRole(database, "OPS_ADMIN", "OPS");
     const opsMe = await brokerApi.app.inject({

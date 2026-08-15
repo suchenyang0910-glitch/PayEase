@@ -1358,6 +1358,43 @@ app.post("/v1/local/admin/employer-tenants", async (request, reply) => {
   }
 });
 
+// This directory contains only back-office login names and role codes.  It
+// intentionally never joins applications, personal profiles or identity
+// documents: a tenant administrator needs to review access, not applicant
+// data, in order to revoke a mistaken factory assignment.
+app.get(
+  "/v1/local/admin/employer-tenants/:tenantId/members",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const params = z
+      .object({ tenantId: z.string().uuid() })
+      .parse(request.params);
+    const tenant = await pool.query(
+      "SELECT 1 FROM employer_tenants WHERE id = $1",
+      [params.tenantId],
+    );
+    if (!tenant.rowCount) {
+      return reply.code(404).send({ code: "EMPLOYER_TENANT_NOT_FOUND" });
+    }
+    const members = await pool.query<{
+      loginName: string;
+      roleCodes: string[];
+    }>(
+      `SELECT a.login_name AS "loginName",
+              COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS "roleCodes"
+         FROM employer_tenant_members m
+         JOIN admin_accounts a ON a.id = m.account_id
+         LEFT JOIN admin_account_roles ar ON ar.account_id = a.id
+         LEFT JOIN roles r ON r.id = ar.role_id
+        WHERE m.employer_tenant_id = $1
+        GROUP BY a.id, a.login_name
+        ORDER BY a.login_name`,
+      [params.tenantId],
+    );
+    return { members: members.rows };
+  },
+);
+
 app.put(
   "/v1/local/admin/employer-tenants/:tenantId/members/:loginName",
   async (request, reply) => {

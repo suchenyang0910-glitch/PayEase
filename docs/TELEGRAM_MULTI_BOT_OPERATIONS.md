@@ -102,6 +102,7 @@ PII 活跃密钥版本与 `ready` 状态，**不会**输出 Token 或加密密�
 - 至少两个不同且同时启用的 Bot，且每个已启用 Bot 都有合法的公开 `entryUrl`；
 - `PAYEASE_PII_ENCRYPTION_KEY`，或当前
   `PAYEASE_PII_ENCRYPTION_KEY_VERSION` 在 `PAYEASE_PII_ENCRYPTION_KEYS_JSON`
+- `PAYEASE_IDENTITY_LOOKUP_KEY`：独立的 base64 编码 32 字节 HMAC 密钥；用于将规范化的身份证号/护照号生成不可逆匹配索引。不得复用 PII 加密密钥，且不得写入 Git、浏览器或前端环境变量。
   中对应的有效 Base64 32-byte AES-256-GCM 密钥。
 
 唯一例外是显式的、无认证的受控预览环境（同时设置

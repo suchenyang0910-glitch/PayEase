@@ -54,6 +54,9 @@ services:
       # PAYEASE_PII_ENCRYPTION_KEY_VERSION the active encryption key.
       PAYEASE_PII_ENCRYPTION_KEYS_JSON: ${PAYEASE_PII_ENCRYPTION_KEYS_JSON:-}
       PAYEASE_PII_ENCRYPTION_KEY_VERSION: ${PAYEASE_PII_ENCRYPTION_KEY_VERSION:-v1}
+      # A distinct base64-encoded 32-byte HMAC key for normalized
+      # ID/passport matching. Never reuse the PII encryption key.
+      PAYEASE_IDENTITY_LOOKUP_KEY: ${PAYEASE_IDENTITY_LOOKUP_KEY:-}
     ports:
       - "127.0.0.1:3100:3100"
     # Node 22 provides fetch natively, so the runtime image needs neither curl

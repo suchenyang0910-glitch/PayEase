@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
 import { USER_SKELETON_COPY } from "../copy/user-copy.ts";
 
@@ -5,12 +6,14 @@ type Props = Readonly<{
   language: LanguageCode;
   applicationNo?: string | null;
   onBack?: () => void;
+  children?: ReactNode;
 }>;
 
 export function OrderDetailPage({
   language,
   applicationNo,
   onBack,
+  children,
 }: Props): JSX.Element {
   const copy = USER_SKELETON_COPY[language].orderDetail;
   return (
@@ -38,9 +41,11 @@ export function OrderDetailPage({
         ) : null}
       </header>
       <div className="page__body" data-page-anchor="order-detail">
-        <div className="empty-state" role="status" aria-live="polite">
-          {copy.empty}
-        </div>
+        {children ?? (
+          <div className="empty-state" role="status" aria-live="polite">
+            {copy.empty}
+          </div>
+        )}
       </div>
     </section>
   );

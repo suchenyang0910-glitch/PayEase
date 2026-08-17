@@ -699,3 +699,495 @@ footer {
     box-shadow: 0 0 40px rgba(20, 40, 28, 0.09);
   }
 }
+
+/* ============================================================
+ * KhmerX × PayEase UI Refresh — Design Tokens (doc §4.1)
+ * ============================================================ */
+:root {
+  --kx-primary: #4096ff;
+  --kx-card-start: #57a8ff;
+  --kx-card-end: #4096ff;
+  --kx-bg: #f5f7fa;
+  --kx-text: #1d2129;
+  --kx-muted: #86909c;
+  --kx-divider: #eeeeee;
+  --kx-surface: #ffffff;
+  --kx-card-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --kx-radius-card: 16px;
+  --kx-radius-button: 12px;
+  --kx-radius-widget: 8px;
+  --kx-page-x: 16px;
+  --kx-module-gap: 20px;
+  --kx-hit-min: 44px;
+}
+
+html[data-theme="dark"],
+:root[data-theme="dark"] {
+  --kx-primary: #5fa6ff;
+  --kx-card-start: #2a6bd1;
+  --kx-card-end: #1e4fa8;
+  --kx-bg: #0f1419;
+  --kx-text: #e5e7eb;
+  --kx-muted: #9ca3af;
+  --kx-divider: #2d3748;
+  --kx-surface: #1a202c;
+  --kx-card-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* ---- App shell (Telegram WebView safe, 375 baseline, fluid up to 430) */
+.kx-shell {
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--kx-bg);
+  color: var(--kx-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Source Han Sans SC", "Noto Sans Khmer", Inter,
+    ui-sans-serif, system-ui, sans-serif;
+  padding: 0 0 calc(112px + env(safe-area-inset-bottom, 0));
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+.kx-theme-toggle {
+  position: fixed;
+  right: max(8px, calc((100vw - 430px) / 2 + 8px));
+  bottom: calc(72px + env(safe-area-inset-bottom, 0));
+  z-index: 20;
+  border: 0;
+  background: var(--kx-surface);
+  color: var(--kx-muted);
+  box-shadow: var(--kx-card-shadow);
+  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  min-width: var(--kx-hit-min);
+  min-height: var(--kx-hit-min);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* ===== Module 1: Top Nav (44px + Telegram top safe area) ===== */
+.kx-topnav {
+  min-height: 44px;
+  padding: calc(env(safe-area-inset-top, 0) + 6px) var(--kx-page-x) 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--kx-surface);
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  border-bottom: 1px solid var(--kx-divider);
+}
+
+.kx-topnav__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kx-topnav__logo {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--kx-radius-widget);
+  background: var(--kx-surface);
+  border: 1px solid var(--kx-divider);
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.kx-topnav__logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 42%;
+  display: block;
+}
+
+.kx-topnav__titles {
+  display: grid;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.kx-topnav__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--kx-text);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.kx-topnav__subtitle {
+  font-size: 11px;
+  color: var(--kx-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55vw;
+}
+
+@media (max-width: 320px) {
+  .kx-topnav__subtitle {
+    display: none;
+  }
+}
+
+.kx-topnav__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.kx-icon-btn {
+  width: var(--kx-hit-min);
+  height: var(--kx-hit-min);
+  border: 0;
+  background: transparent;
+  color: var(--kx-text);
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.kx-icon-btn:active {
+  background: var(--kx-bg);
+}
+
+.kx-icon-btn svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.6;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ===== Module 2: Credit Card (unique visual focus) ===== */
+.kx-credit {
+  margin: 16px var(--kx-page-x) 0;
+  padding: 20px 18px 18px;
+  border-radius: var(--kx-radius-card);
+  background: linear-gradient(
+    135deg,
+    var(--kx-card-start) 0%,
+    var(--kx-card-end) 100%
+  );
+  color: #ffffff;
+  box-shadow: var(--kx-card-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.kx-credit::after {
+  content: "";
+  position: absolute;
+  right: -40px;
+  top: -60px;
+  width: 180px;
+  height: 180px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.kx-credit__label {
+  font-size: 14px;
+  opacity: 0.82;
+  margin: 0;
+  font-weight: 500;
+}
+
+.kx-credit__amount {
+  margin: 10px 0 4px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  line-height: 1.05;
+}
+
+.kx-credit__amount > span:nth-child(2) {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.kx-credit__currency {
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 0.92;
+  margin-bottom: 4px;
+}
+
+.kx-credit__unit {
+  font-size: 13px;
+  opacity: 0.78;
+  margin-bottom: 6px;
+  padding-left: 4px;
+}
+
+.kx-credit__hint {
+  margin: 0 0 18px;
+  font-size: 12px;
+  opacity: 0.82;
+  line-height: 1.55;
+  max-width: 310px;
+}
+
+.kx-credit__cta {
+  width: 80%;
+  display: block;
+  margin: 0 auto 14px;
+  border: 0;
+  padding: 13px 0;
+  background: #ffffff;
+  color: var(--kx-primary);
+  border-radius: var(--kx-radius-button);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: var(--kx-hit-min);
+  transition: transform 120ms ease;
+}
+
+.kx-credit__cta:active {
+  transform: scale(0.96);
+}
+
+.kx-credit__disclaimer {
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.76;
+  margin: 0;
+}
+
+/* ===== Module 3: Four-grid shortcuts ===== */
+.kx-grid {
+  margin: var(--kx-module-gap) var(--kx-page-x) 0;
+  background: var(--kx-surface);
+  border-radius: var(--kx-radius-card);
+  box-shadow: var(--kx-card-shadow);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 16px 4px;
+}
+
+.kx-grid__item {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  padding: 10px 4px;
+  border-radius: var(--kx-radius-widget);
+  cursor: pointer;
+  min-width: var(--kx-hit-min);
+  min-height: var(--kx-hit-min);
+  transition: background-color 120ms ease;
+}
+
+.kx-grid__item:active {
+  background: var(--kx-bg);
+}
+
+.kx-grid__icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--kx-primary);
+  background: rgba(64, 150, 255, 0.1);
+  border-radius: var(--kx-radius-widget);
+}
+
+html[data-theme="dark"] .kx-grid__icon,
+:root[data-theme="dark"] .kx-grid__icon {
+  background: rgba(95, 166, 255, 0.14);
+}
+
+.kx-grid__icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.6;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kx-grid__label {
+  font-size: 12px;
+  color: var(--kx-text);
+}
+
+/* ===== Module 4: Single product card ===== */
+.kx-product {
+  margin: var(--kx-module-gap) var(--kx-page-x) 0;
+  background: var(--kx-surface);
+  border-radius: var(--kx-radius-card);
+  box-shadow: var(--kx-card-shadow);
+  padding: 18px 18px 16px;
+}
+
+.kx-product__title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.kx-product__summary {
+  font-size: 14px;
+  color: var(--kx-muted);
+  margin: 0 0 16px;
+}
+
+.kx-product__cta {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 13px 0;
+  border-radius: var(--kx-radius-button);
+  background: var(--kx-primary);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: var(--kx-hit-min);
+  transition: transform 120ms ease;
+}
+
+.kx-product__cta:active {
+  transform: scale(0.96);
+}
+
+.kx-product__disclaimer {
+  text-align: center;
+  font-size: 11px;
+  color: var(--kx-muted);
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
+
+/* ===== Module 5: Help links ===== */
+.kx-help {
+  margin: var(--kx-module-gap) var(--kx-page-x) 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kx-help__link {
+  border: 0;
+  background: var(--kx-surface);
+  color: var(--kx-text);
+  border-radius: var(--kx-radius-card);
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--kx-card-shadow);
+  min-height: var(--kx-hit-min);
+}
+
+.kx-help__link::after {
+  content: "›";
+  color: var(--kx-muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* ===== Licensed notice (doc §3.3) ===== */
+.kx-licensed {
+  margin: var(--kx-module-gap) var(--kx-page-x) 0;
+  padding: 12px 14px;
+  background: var(--kx-surface);
+  border-radius: var(--kx-radius-widget);
+  border: 1px dashed var(--kx-divider);
+  color: var(--kx-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+/* ===== Module 6: Compliance ===== */
+.kx-compliance {
+  margin: calc(var(--kx-module-gap) + 4px) var(--kx-page-x) 0;
+  padding: 0 4px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--kx-muted);
+  line-height: 1.8;
+}
+
+/* ===== Module 7: Bottom Tab Bar ===== */
+.kx-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 16;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.kx-tabs__inner {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 430px;
+  border-top: 1px solid var(--kx-divider);
+  background: var(--kx-surface);
+  backdrop-filter: saturate(1.1) blur(8px);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 6px 0 calc(env(safe-area-inset-bottom, 0px) + 6px);
+}
+
+.kx-tab {
+  border: 0;
+  background: transparent;
+  color: var(--kx-muted);
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  align-content: start;
+  padding: 4px 4px 2px;
+  font-size: 11px;
+  cursor: pointer;
+  min-width: var(--kx-hit-min);
+  min-height: calc(var(--kx-hit-min) - 4px);
+  transition: color 140ms ease;
+}
+
+.kx-tab svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.6;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.kx-tab--active {
+  color: var(--kx-primary);
+  font-weight: 700;
+}

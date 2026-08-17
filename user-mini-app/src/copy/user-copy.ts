@@ -66,9 +66,9 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
   "zh-CN": {
     tabs: {
       home: "首页",
-      orders: "我的订单",
+      orders: "借款",
       repayment: "账单",
-      profile: "个人中心",
+      profile: "我的",
     },
     backToOrders: "返回订单",
     home: {
@@ -119,9 +119,9 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
   en: {
     tabs: {
       home: "Home",
-      orders: "My orders",
-      repayment: "Repayment",
-      profile: "Profile",
+      orders: "Borrow",
+      repayment: "Bill",
+      profile: "Me",
     },
     backToOrders: "Back to orders",
     home: {
@@ -174,9 +174,9 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
   km: {
     tabs: {
       home: "ទំព័រដើម",
-      orders: "ពាក្យរបស់ខ្ញុំ",
-      repayment: "ការសងប្រាក់",
-      profile: "គណនី",
+      orders: "ខ្ចីប្រាក់",
+      repayment: "វិក្កយបត្រ",
+      profile: "របស់ខ្ញុំ",
     },
     backToOrders: "ត្រឡប់ទៅបញ្ជីពាក្យ",
     home: {

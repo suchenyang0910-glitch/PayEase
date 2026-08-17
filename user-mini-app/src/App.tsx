@@ -536,7 +536,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
 };
 
 const amountOptions = [10, 50, 100, 200, 500];
-const terms = [7, 30, 90, 180];
+const terms = [15, 30];
 
 type TelegramWebApp = Readonly<{
   initData?: string;
@@ -570,6 +570,7 @@ function telegramInitData(): string | undefined {
 
 export function App(): JSX.Element {
   const [language, setLanguage] = useState<LanguageCode>("km");
+  const currentLanguage = useRef<LanguageCode>("km");
   const languageChangedByApplicant = useRef(false);
   const lastApplicantKeepaliveAt = useRef(0);
   const [stage, setStage] = useState<Stage>("welcome");
@@ -630,6 +631,10 @@ export function App(): JSX.Element {
     ? applicantPhase(summary.application.status)
     : undefined;
 
+  useEffect(() => {
+    currentLanguage.current = language;
+  }, [language]);
+
   function applicantRequest(input: RequestInfo | URL, init?: RequestInit) {
     const existingHeaders = init?.headers as Record<string, string> | undefined;
     let headers = existingHeaders;
@@ -672,6 +677,16 @@ export function App(): JSX.Element {
   }
 
   async function loadPhoneVerification(): Promise<void> {
+    if (!applicantSession) {
+      setError(
+        language === "zh-CN"
+          ? "Telegram 登录正在建立，请稍候再检查手机号验证。"
+          : language === "en"
+            ? "Telegram sign-in is still being established. Please check phone verification again shortly."
+            : "ការចូល Telegram កំពុងត្រូវបានបង្កើត។ សូមពិនិត្យការផ្ទៀងផ្ទាត់លេខទូរស័ព្ទម្តងទៀតបន្តិចទៀត។",
+      );
+      return;
+    }
     const response = await applicantRequest(
       "/api/v1/local/public/profile/telegram-phone-verification",
     );
@@ -697,7 +712,7 @@ export function App(): JSX.Element {
     // Do not keep a link from an earlier recovery lookup: a Bot may have been
     // disabled between requests, and only the latest directory is trustworthy.
     setRecoveryEntryPoints([]);
-    setError(applicantSessionRecoveryMessage(language));
+    setError(applicantSessionRecoveryMessage(currentLanguage.current));
     try {
       const response = await applicantRequest(
         "/api/v1/local/public/telegram-entrypoints",
@@ -773,6 +788,8 @@ export function App(): JSX.Element {
       }
       const payload = (await applications.json()) as ApplicationList;
       setApplicantSession(true);
+      setError("");
+      setRecoveryEntryPoints([]);
       if (payload.preferredLanguage && !languageChangedByApplicant.current) {
         setLanguage(payload.preferredLanguage);
       }
@@ -1445,11 +1462,7 @@ export function App(): JSX.Element {
                           className={term === value ? "selected" : ""}
                           onClick={() => setTerm(value)}
                         >
-                          {value === 7
-                            ? "7d"
-                            : value === 30
-                              ? "1m"
-                              : `${value / 30}m`}
+                          {value}d
                         </button>
                       ))}
                     </div>
@@ -1468,6 +1481,7 @@ export function App(): JSX.Element {
                     )}
                     <button
                       className="primary"
+                      data-testid="applicant-entry-submit-button"
                       disabled={showPreviewBadge}
                       onClick={() => {
                         const amountMinor = requestedAmountMinor;
@@ -1567,6 +1581,7 @@ export function App(): JSX.Element {
                         <button
                           type="button"
                           onClick={() => void loadPhoneVerification()}
+                          disabled={!applicantSession}
                         >
                           {phoneCopy.check}
                         </button>
@@ -3570,18 +3585,30 @@ export function App(): JSX.Element {
           }
           case "home":
           default:
-            return <HomePage language={language}>{pageBody}</HomePage>;
+            return (
+              <HomePage
+                language={language}
+                current={currentPage}
+                onChange={setCurrentPage}
+              >
+                {pageBody}
+              </HomePage>
+            );
         }
       })()}
-      <footer>
-        <span>🔒 {t.secured}</span>
-        <span>USD 10–500 · 7–180 days</span>
-      </footer>
-      <BottomNavigation
-        current={currentPage}
-        language={language}
-        onChange={setCurrentPage}
-      />
+      {currentPage !== "home" ? (
+        <>
+          <footer>
+            <span>🔒 {t.secured}</span>
+            <span>USD 10–500 · 15 / 30 days</span>
+          </footer>
+          <BottomNavigation
+            current={currentPage}
+            language={language}
+            onChange={setCurrentPage}
+          />
+        </>
+      ) : null}
     </main>
   );
 }

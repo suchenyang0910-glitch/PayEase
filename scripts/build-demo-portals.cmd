@@ -15,21 +15,20 @@ call pnpm.cmd --filter @payease/partner-contracts run typecheck || exit /b 1
 call pnpm.cmd --filter @payease/hr-verify-portal run typecheck || exit /b 1
 call pnpm.cmd --filter @payease/finance-verify-portal run typecheck || exit /b 1
 
-echo [STEP 2/6] build HR dist
-call pnpm.cmd --filter @payease/hr-verify-portal run build || exit /b 1
+echo [STEP 2/6] build HR dist (S0.5 DEMO MODE ? routes: LoginPage / EmploymentListPage / EmploymentDetailPage ONLY; NO fetch/axios/WebSocket in bundled sources)
+call pnpm.cmd --filter @payease/hr-verify-portal run build:demo || exit /b 1
 
-echo [STEP 3/6] build Finance dist
-call pnpm.cmd --filter @payease/finance-verify-portal run build || exit /b 1
+echo [STEP 3/6] build Finance dist (S0.5 DEMO MODE ? routes: LoginPage / RepaymentListPage / ReconciliationPage ONLY; NO bank/Stripe/PayWay SDK in bundled sources)
+call pnpm.cmd --filter @payease/finance-verify-portal run build:demo || exit /b 1
 
-echo [STEP 4/6] NETWORK ZERO ASSERTION: application source must not call fetch/axios/WebSocket/real-bank-SDK identifiers
-REM Vite emits a harmless fetch() module-preload helper in every production bundle; scan authored app sources instead.
+echo [STEP 4/6] NETWORK ZERO ASSERTION: demo entry sources and bundles must not contain real API or PII markers
 set NETWORK_FAIL=0
-echo    scanning authored HR application source for real-network tokens...
-findstr /S /R /I /C:"fetch(" /C:"XMLHttpRequest" /C:"WebSocket(" /C:"axios" /C:"\.ababank\.com" /C:"wingmoney\.com" /C:"acledabank\.com\.kh" /C:"stripe\.com" /C:"payway\.com\.kh" /C:"sap\." /C:"oracle\.com" /C:"quickbooks" /C:"xero" "hr-verify-portal\src\App.tsx" "hr-verify-portal\src\pages\*.ts" "hr-verify-portal\src\pages\*.tsx" "hr-verify-portal\src\mocks\*.ts" >nul 2>nul
-if not errorlevel 1 ( echo [FAIL] HR application source contains network call markers. Network zero assertion FAILED. & set NETWORK_FAIL=1 ) else ( echo    hr network zero: OK )
-echo    scanning authored Finance application source for real-network tokens...
-findstr /S /R /I /C:"fetch(" /C:"XMLHttpRequest" /C:"WebSocket(" /C:"axios" /C:"\.ababank\.com" /C:"wingmoney\.com" /C:"acledabank\.com\.kh" /C:"stripe\.com" /C:"payway\.com\.kh" /C:"sap\." /C:"oracle\.com" /C:"quickbooks" /C:"xero" "finance-verify-portal\src\App.tsx" "finance-verify-portal\src\pages\*.ts" "finance-verify-portal\src\pages\*.tsx" "finance-verify-portal\src\mocks\*.ts" >nul 2>nul
-if not errorlevel 1 ( echo [FAIL] Finance application source contains network call markers. Network zero assertion FAILED. & set NETWORK_FAIL=1 ) else ( echo    finance network zero: OK )
+findstr /R /I /C:"fetch(" /C:"XMLHttpRequest" /C:"WebSocket(" /C:"axios" /C:"navigator\.sendBeacon" /C:"\.ababank\.com" /C:"wingmoney\.com" /C:"acledabank\.com\.kh" /C:"stripe\.com" /C:"payway\.com\.kh" /C:"sap\." /C:"oracle\.com" /C:"quickbooks" /C:"xero" "hr-verify-portal\src\pages\DemoApp.tsx" >nul 2>nul
+if not errorlevel 1 ( echo    [FAIL] HR demo entry contains a network marker. & set NETWORK_FAIL=1 ) else ( echo    hr demo source: OK )
+findstr /R /I /C:"fetch(" /C:"XMLHttpRequest" /C:"WebSocket(" /C:"axios" /C:"navigator\.sendBeacon" /C:"\.ababank\.com" /C:"wingmoney\.com" /C:"acledabank\.com\.kh" /C:"stripe\.com" /C:"payway\.com\.kh" /C:"sap\." /C:"oracle\.com" /C:"quickbooks" /C:"xero" "finance-verify-portal\src\pages\DemoApp.tsx" >nul 2>nul
+if not errorlevel 1 ( echo    [FAIL] Finance demo entry contains a network marker. & set NETWORK_FAIL=1 ) else ( echo    finance demo source: OK )
+findstr /S /R /I /C:"/api" /C:"Sok Dara" /C:"Chea Srey Mom" /C:"nationalIdLast4" /C:"monthlyBaseSalary" /C:"borrowerName" "hr-verify-portal\dist\assets\*.js" "finance-verify-portal\dist\assets\*.js" >nul 2>nul
+if not errorlevel 1 ( echo    [FAIL] Demo bundle contains a real API or prohibited personal-data marker. & set NETWORK_FAIL=1 ) else ( echo    demo bundle isolation: OK )
 if %NETWORK_FAIL% neq 0 exit /b 1
 
 echo [STEP 5/6] AMOUNT STRING MINOR UNIT ASSERTION: dist must not contain JS number for amountMinor

@@ -1,0 +1,149 @@
+# =============================================================================
+# PayEase User Mini App  Production Caddy Site Template
+# Domain: app.payease-example.kh  (REPLACE with your real Mini App domain)
+#
+# SECURITY BOUNDARY (read before deploying):
+#   1. CSP is enforced via HTTP Response Headers ONLY  meta CSP in index.html
+#      does NOT protect frame-ancestors.  Remove any CSP <meta> from index.html
+#      so there is no policy conflict.
+#   2. X-Frame-Options is EXPLICITLY REMOVED. Mini App runs inside a Telegram
+#      iframe; XFO=DENY would break rendering on all three clients.
+#   3. frame-ancestors does NOT include 'self'. The Mini App is never framed
+#      by itself.  Values below must be re-verified against Android / iOS /
+#      Telegram Web (web.telegram.org) BEFORE going live  if the origin list
+#      is too strict the Mini App will refuse to load inside Telegram.
+#   4. img-src is locked to t.me / www.t.me only.  cdn-telegram.org and any
+#      other Telegram-owned subdomains are DENIED per project policy.
+#   5. All path_regexp use Go/RE2 syntax ONLY (no Perl (?!) lookarounds  Go
+#      regexp does not support them and would cause Caddy startup abort).
+# =============================================================================
+
+app.payease-example.kh {
+# ---------------------------------------------------------------------
+# Hardened Production Security Headers
+# header directives are OUTSIDE route so they apply to every response
+# including route-generated 404s for dotfiles / secret extensions.
+# ---------------------------------------------------------------------
+header {
+# Server banner leak suppression (defense-in-depth, not a control)
+-Server
+
+# WEB-04  prevent MIME sniffing from overriding declared types
+X-Content-Type-Options "nosniff"
+
+# WEB-06  cross-origin navigations leak the minimum
+Referrer-Policy "strict-origin-when-cross-origin"
+
+# WEB-07  high-risk browser APIs disabled by default
+Permissions-Policy "camera=(self), geolocation=(), microphone=(self), payment=(), usb=(), clipboard-write=(self), clipboard-read=(self), idle-detection=(), screen-wake-lock=(), serial=(), storage-access=()"
+
+# WEB-01  force HTTPS for 2 years, include subdomains, opt in to preload
+Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+
+# Cross-origin isolation primitives
+Cross-Origin-Opener-Policy "same-origin-allow-popups"
+Cross-Origin-Resource-Policy "cross-origin"
+Cross-Origin-Embedder-Policy "unsafe-none"
+
+# Search crawlers: Mini App is not indexable public web content
+X-Robots-Tag "noindex, nofollow, noarchive, nosnippet, noimageindex"
+
+# -----------------------------------------------------------------
+# CRITICAL: X-Frame-Options MUST NOT be present on Mini App.
+# It is a legacy header that would block Telegram iframe embedding
+# on clients that enforce XFO instead of (or in addition to) CSP.
+# Frame-embedding authority is SOLELY governed by CSP frame-ancestors
+# declared below.
+# -----------------------------------------------------------------
+-X-Frame-Options
+
+# -----------------------------------------------------------------
+# Content-Security-Policy  Production Mini App Policy
+#
+# IMPORTANT: VALUE IS A SINGLE PHYSICAL LINE with no backslash, no
+# newline.  Caddy does NOT interpret backslash line-continuation
+# inside quoted header values; it would emit literal '\' and CR/LF
+# into the HTTP response, producing a broken/unparseable CSP.
+#
+# img-src   : 'self' + data: (inline SVG placeholders) +
+#             https://t.me https://www.t.me
+#             AVATAR WHITELIST IS TIGHT.  NO cdn-telegram.org.
+#             ACCEPTANCE: all four tokens must be present and no
+#             other tokens.
+#
+# frame-ancestors :
+#   NO 'self'   Mini App is never self-framed.
+#   NO wildcard origins.
+#   The values below are placeholders.  YOU MUST run the three-client
+#   Telegram iframe compatibility probe (Android native, iOS native,
+#   https://web.telegram.org Mini App launcher) and record the
+#   EXACT ancestor origins before flipping production traffic here.
+#   Known candidates after manual verification:
+#     https://web.telegram.org        (Telegram Web K / Z)
+#     https://t.me                    (t.me deep-link launcher)
+#   Keep this list sorted alphabetically and trimmed to exact origins
+#   with no trailing slashes or paths.
+# -----------------------------------------------------------------
+Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; worker-src 'self'; manifest-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org/js/telegram-web-app.js; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https://t.me https://www.t.me; connect-src 'self' https://t.me https://api.telegram.org; frame-ancestors https://t.me https://web.telegram.org; upgrade-insecure-requests"
+}
+
+# ---------------------------------------------------------------------
+# Static asset caching: hashed Vite assets get a long immutable TTL;
+# index.html / service-worker / assets without hash get no-store.
+# Headers are OUTSIDE route so they also apply to route 404s.
+# ---------------------------------------------------------------------
+@immutable_assets {
+path /assets/*
+}
+header @immutable_assets Cache-Control "public, max-age=31536000, immutable"
+
+@never_cache {
+not path /assets/*
+}
+header @never_cache Cache-Control "no-cache, no-store, must-revalidate"
+
+encode gzip zstd
+
+# ---------------------------------------------------------------------
+# ROUTE  enforcement order (short-circuit on first match)
+#   1. hidden dotfiles / dotdirs  -> 404  (EXCEPT /.well-known/*)
+#   2. sensitive file extensions   -> 404
+#   3. SPA static serving          -> root + try_files + file_server
+# WITHOUT route, try_files rewrites /.env -> /index.html 200 before
+# the hidden-file responder ever runs.
+# ---------------------------------------------------------------------
+@dot_sensitive {
+path_regexp dot ^/\..*$
+not path /.well-known/*
+}
+
+@secret_ext path_regexp ext \.(log|bak|sql|pem|key|crt|p12|pfx|env|swp|ya?ml)$
+
+route {
+respond @dot_sensitive 404
+respond @secret_ext 404
+root * /var/www/payease-user-miniapp
+try_files {path} /index.html
+file_server
+}
+
+# ---------------------------------------------------------------------
+# Structured access log  keep on a separate log file with rotation
+# so a Mini App-specific security event log can be SIEM-shipped alone.
+# ---------------------------------------------------------------------
+log {
+output file /var/log/caddy/payease-user-miniapp.log {
+roll_size 100MiB
+roll_keep 30
+roll_keep_for 2160h
+}
+format json
+}
+}
+
+# =============================================================================
+# HTTP  HTTPS redirector (same host, HSTS preload requires no mixed content)
+# =============================================================================
+http://app.payease-example.kh {
+redir https://{host}{uri} 301
+}

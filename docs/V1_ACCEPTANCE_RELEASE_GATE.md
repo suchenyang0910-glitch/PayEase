@@ -24,6 +24,30 @@
 
 建议使用 [run-v1-acceptance.ps1](../scripts/run-v1-acceptance.ps1) 在提交前一次运行 A-01 至 A-03。该脚本必须传入名为 `payease_test` 的一次性 PostgreSQL 测试数据库 URL；不提供 URL 或目标名称不正确会失败而不是静默跳过集成测试。
 
+### A-06：S0.5 静态演示产物隔离审查（仅受控演示环境）
+
+对于 `agent/s0-5-static-demo` 分支或任何包含 S0.5 静态演示门户的提交，需在 A-01~A-03 通过后，**使用合成数据**单独运行以下演示验收，再允许将其视为 "条件通过（受控演示）"。**A-06 通过不会解锁真实用户 / 真实 PII / 真实资金 / 真实银行接口的发布。**
+
+- 运行命令：
+  - `scripts\build-demo-portals.cmd`（Windows）或同等跨平台 bash 脚本
+  - `pnpm --filter @payease/hr-verify-portal run test`
+  - `pnpm --filter @payease/finance-verify-portal run test`
+- 审查步骤 **仅限合成数据（`DEMO-EMP-001` / `DEMO-LEDGER-*` / `DEMO-RECON-*` / `LENDER-A/B/C` / `EMP-YYYY-NNNN` / `ev-00000000*` / `rp-00000000*` / `rc-*` 等模板占位符）**，不得引入真实 PayEase 员工、客户、合作伙伴或任何真实国家身份证 / 护照 / E.164 手机号 / MoPF 税号 / 银行账号 / 稳定币地址；同时不得在 demo 源码或 dist assets 中嵌入 `Sok Dara`、`Chea Srey Mom` 这类真实姓名样本（即便被"举例"）：
+  1. 构建产物 `dist-demo/hr-verify-portal.zip` + `finance-verify-portal.zip` 仅包含静态 HTML/CSS/JS 与合成 mock（Vite build:demo 打包 DemoApp 单入口）；
+  2. 构建脚本 Step 4 **Network-Zero 扫描**（范围与 `build-demo-portals.cmd` 严格一致）：
+     - 源码层仅扫 **单文件**：`hr-verify-portal/src/pages/DemoApp.tsx` 与 `finance-verify-portal/src/pages/DemoApp.tsx`（不扫普通门户页面，不扫 shared packages，不扫 mocks）；
+     - 禁止源码中出现 `fetch(` / `axios` / `WebSocket(` / `XMLHttpRequest` / `navigator.sendBeacon` / 真实银行与支付域名（`.ababank.com` / `wingmoney.com` / `acledabank.com.kh` / `stripe.com` / `payway.com.kh`）/ 真实 HRIS/ERP 域名与产品（`sap.` / `oracle.com` / `quickbooks` / `xero`）；
+     - dist 层再扫 `hr-verify-portal/dist/assets/*.js` 与 `finance-verify-portal/dist/assets/*.js`：禁止 `/api` 相对路径、禁止 `nationalIdLast4` / `monthlyBaseSalary` / `borrowerName` 等 PII 字段名、禁止任何真实柬埔寨姓名样本（`Sok Dara` / `Chea Srey Mom` 等）；
+  3. 构建脚本 Step 5 **CI-10 amountMinor STRING 断言** 通过：`hr-verify-portal/dist/assets/*.js` 与 `finance-verify-portal/dist/assets/*.js` 中 `amountMinor:<JS_NUMBER_LITERAL>` 正则必须 0 命中；
+  4. 三语文案（中文 / 英文 / 高棉语）的所有叶子字段均为非空字符串，且 zh-CN 与 km ≥ 75% 的叶子字段与 en 不同，避免"名义多语实际未本地化"；同时 `HR_DEMO_COPY` 与 `FINANCE_DEMO_COPY` 必须直接从对应门户的 `src/pages/DemoApp.tsx` 导出，测试不得再复制另一份文案；
+  5. 演示 Vitest 全部通过：
+     - HR 门户仅显示核验引用与匹配结果，不渲染身份证号、护照号、手机号、真实薪资字面量、真实 MoPF 税号等合成 PII token；
+     - 财务门户不渲染借款人姓名、支付渠道或银行信息；
+     - 语言切换器仅持久化 `payease-demo-language` 一个存储键，且 `localStorage / sessionStorage.setItem` 写入任何 credential/token/password/secret/jwt/id_token/access_token/refresh_token/nonce/initData 会被 test-setup.ts 的 WEB-08 patch 立即抛出；
+     - Network-ZERO 全局 patch 在 beforeAll 生效：`fetch / XMLHttpRequest / WebSocket / navigator.sendBeacon` 访问 data://localhost/file:* 之外一律抛 `[S0.5-NETWORK-ZERO]`。
+- 归档：审查通过后记录操作者、时间与 commit SHA，作为 S0.5 受控演示环境放行记录；该记录不能替代 §4 上线红线 12 项。
+- **明确禁止用 A-06 的 demo 产物做以下动作**：接入真实云账号或与 broker-prod / lender-prod / employer-prod 三域 VPC peering；挂真实 SSO / OIDC / SAML / SCIM；上传真实 PII 或真实工资单 / 银行对账单 / Stripe PayWay CSV；复用 demo 的 TLS 证书 / SSH host key / htpasswd 进入 S1 Staging 或 Prod（S0.2 签字后必须重建）。
+
 ## P0：业务与安全验收
 
 | 编号 | 场景        | 期望结果                                                                              | 自动化覆盖                                                           |

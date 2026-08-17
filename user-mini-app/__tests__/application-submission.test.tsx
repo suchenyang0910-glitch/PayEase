@@ -45,7 +45,7 @@ describe("applicant submission", () => {
         target: { value: "123.45" },
       },
     );
-    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Test Applicant" },
     });
@@ -95,9 +95,7 @@ describe("applicant submission", () => {
         "This preview is view-only. Applications and personal data entry are disabled.",
       ),
     ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: /start application/i }),
-    ).toBeDisabled();
+    expect(screen.getByTestId("applicant-entry-submit-button")).toBeDisabled();
   });
 
   it("requires a signed-in applicant to choose a factory and submit an identity document", async () => {
@@ -139,7 +137,7 @@ describe("applicant submission", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     await screen.findByRole("option", { name: "Lanhai Factory A" });
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Factory Applicant" },
@@ -194,7 +192,7 @@ describe("applicant submission", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Test Applicant" },
     });
@@ -284,7 +282,7 @@ describe("applicant submission", () => {
     render(<App />);
 
     await screen.findByRole("button", { name: "ចាកចេញ" });
-    fireEvent.click(screen.getByRole("button", { name: /ចាប់ផ្តើមដាក់ពាក្យ/ }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     fireEvent.change(screen.getByLabelText("ឈ្មោះពេញ"), {
       target: { value: "Previous Applicant" },
     });
@@ -298,7 +296,7 @@ describe("applicant submission", () => {
     fireEvent.click(screen.getByRole("button", { name: "ចាកចេញ" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    fireEvent.click(screen.getByRole("button", { name: /ចាប់ផ្តើមដាក់ពាក្យ/ }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     expect(screen.getByLabelText("ឈ្មោះពេញ")).toHaveValue("");
     expect(screen.getByLabelText("លេខទូរស័ព្ទ")).toHaveValue("");
     expect(screen.getByLabelText("ក្រុមហ៊ុន")).toHaveValue("");
@@ -760,7 +758,7 @@ describe("applicant submission", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Test Applicant" },
     });
@@ -846,7 +844,7 @@ describe("applicant submission", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /start application/i }));
+    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
     fireEvent.change(screen.getByLabelText("Full name"), {
       target: { value: "Test Applicant" },
     });

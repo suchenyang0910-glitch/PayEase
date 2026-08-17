@@ -536,7 +536,7 @@ const labels: Record<LanguageCode, Record<string, string>> = {
 };
 
 const amountOptions = [10, 50, 100, 200, 500];
-const terms = [7, 30, 90, 180];
+const terms = [15, 30];
 
 type TelegramWebApp = Readonly<{
   initData?: string;
@@ -1462,11 +1462,7 @@ export function App(): JSX.Element {
                           className={term === value ? "selected" : ""}
                           onClick={() => setTerm(value)}
                         >
-                          {value === 7
-                            ? "7d"
-                            : value === 30
-                              ? "1m"
-                              : `${value / 30}m`}
+                          {value}d
                         </button>
                       ))}
                     </div>
@@ -1485,6 +1481,7 @@ export function App(): JSX.Element {
                     )}
                     <button
                       className="primary"
+                      data-testid="applicant-entry-submit-button"
                       disabled={showPreviewBadge}
                       onClick={() => {
                         const amountMinor = requestedAmountMinor;
@@ -3588,18 +3585,30 @@ export function App(): JSX.Element {
           }
           case "home":
           default:
-            return <HomePage language={language}>{pageBody}</HomePage>;
+            return (
+              <HomePage
+                language={language}
+                current={currentPage}
+                onChange={setCurrentPage}
+              >
+                {pageBody}
+              </HomePage>
+            );
         }
       })()}
-      <footer>
-        <span>🔒 {t.secured}</span>
-        <span>USD 10–500 · 7–180 days</span>
-      </footer>
-      <BottomNavigation
-        current={currentPage}
-        language={language}
-        onChange={setCurrentPage}
-      />
+      {currentPage !== "home" ? (
+        <>
+          <footer>
+            <span>🔒 {t.secured}</span>
+            <span>USD 10–500 · 15 / 30 days</span>
+          </footer>
+          <BottomNavigation
+            current={currentPage}
+            language={language}
+            onChange={setCurrentPage}
+          />
+        </>
+      ) : null}
     </main>
   );
 }

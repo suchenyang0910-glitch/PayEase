@@ -191,9 +191,18 @@ describe("user-mini-app P0 skeleton navigation", () => {
     expect(
       screen.getByLabelText("Enter requested amount (USD 10–500)"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /start application/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/USD 10–500 · 7–180 days/)).toBeInTheDocument();
+    const startButtons = screen.getAllByRole("button", {
+      name: /start application/i,
+    });
+    expect(startButtons.length).toBeGreaterThanOrEqual(1);
+    const footerLine = Array.from(screen.getAllByText(/USD 10–500/)).find(
+      (el) => {
+        const text = el.textContent ?? "";
+        return text.includes("15 / 30 days");
+      },
+    );
+    expect(footerLine).toBeInTheDocument();
+    expect(screen.queryByText(/7–180 days/)).not.toBeInTheDocument();
+    expect(screen.getAllByAltText("").length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -531,23 +531,34 @@ const labels: Record<LanguageCode, Record<string, string>> = {
 const amountOptions = [10, 50, 100, 200, 500];
 const terms = [7, 30, 90, 180];
 
-function telegramUserRef(): string {
-  const telegram = (
+type TelegramWebApp = Readonly<{
+  initData?: string;
+  initDataUnsafe?: { user?: { id?: number } };
+  ready?: () => void;
+  expand?: () => void;
+}>;
+
+function telegramWebApp(): TelegramWebApp | undefined {
+  return (
     window as Window & {
-      Telegram?: { WebApp?: { initDataUnsafe?: { user?: { id?: number } } } };
+      Telegram?: { WebApp?: TelegramWebApp };
     }
-  ).Telegram;
-  const id = telegram?.WebApp?.initDataUnsafe?.user?.id;
+  ).Telegram?.WebApp;
+}
+
+function telegramUserRef(): string {
+  const id = telegramWebApp()?.initDataUnsafe?.user?.id;
   return id ? `telegram-${id}` : `preview-${crypto.randomUUID()}`;
 }
 
 function telegramInitData(): string | undefined {
-  const telegram = (
-    window as Window & {
-      Telegram?: { WebApp?: { initData?: string } };
-    }
-  ).Telegram;
-  return telegram?.WebApp?.initData || undefined;
+  const webApp = telegramWebApp();
+  // Telegram's bridge can arrive just after the Vite bundle in an embedded
+  // WebView. Signal readiness and allow the caller to retry briefly rather
+  // than permanently falling back to the unauthenticated profile state.
+  webApp?.ready?.();
+  webApp?.expand?.();
+  return webApp?.initData || undefined;
 }
 
 export function App(): JSX.Element {
@@ -724,9 +735,11 @@ export function App(): JSX.Element {
   }, [applicantSession, stage]);
 
   useEffect(() => {
-    const initData = telegramInitData();
-    if (!initData) return;
-    void (async () => {
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    const authenticateTelegram = async (): Promise<void> => {
+      const initData = telegramInitData();
+      if (!initData) return;
       const authentication = await applicantRequest(
         "/api/v1/local/public/telegram-sessions",
         {
@@ -769,7 +782,25 @@ export function App(): JSX.Element {
         ) ?? payload.applications[0];
       if (!restored) return;
       await checkStatus(restored.applicationNo);
-    })().catch(() => void recoverApplicantSession());
+    };
+    const waitForTelegramBridge = (remainingAttempts: number) => {
+      if (cancelled) return;
+      if (telegramInitData()) {
+        void authenticateTelegram().catch(() => void recoverApplicantSession());
+        return;
+      }
+      if (remainingAttempts > 0) {
+        retryTimer = window.setTimeout(
+          () => waitForTelegramBridge(remainingAttempts - 1),
+          250,
+        );
+      }
+    };
+    waitForTelegramBridge(20);
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
   }, []);
 
   useEffect(() => {

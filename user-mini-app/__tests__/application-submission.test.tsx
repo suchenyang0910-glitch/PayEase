@@ -18,7 +18,21 @@ function shellPick<T extends HTMLElement = HTMLElement>(
 }
 
 function pickLabel(label: string): HTMLElement {
-  const all = screen.getAllByLabelText(label);
+  let all = screen.queryAllByLabelText(label);
+  if (all.length === 0) {
+    // Tests that assert English form fields must not depend on the product's
+    // persisted language preference left by an earlier scenario.
+    const languageSelect = screen
+      .queryAllByRole("combobox", { name: "Language" })
+      .find((element) => !element.closest(".kx-shell"));
+    if (languageSelect) {
+      fireEvent.change(languageSelect, { target: { value: "en" } });
+      all = screen.queryAllByLabelText(label);
+    }
+  }
+  if (all.length === 0) {
+    throw new Error(`Unable to find form label: ${label}`);
+  }
   return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
 }
 

@@ -22,6 +22,7 @@ import { applicantProfileValidationError } from "./applicant-profile.ts";
 import { applicantSubmissionErrorMessage } from "./applicant-submission-error.ts";
 import { notificationDeepLink } from "./applicant-notification.ts";
 import { requestTelegramPhoneContact } from "./telegram-phone-contact.ts";
+import { resolveTelegramInitData } from "./telegram-webapp-init-data.ts";
 import {
   APPLICATION_FORM_STEPS,
   useApplicationDraft,
@@ -955,7 +956,15 @@ function telegramInitData(): string | undefined {
   // than permanently falling back to the unauthenticated profile state.
   webApp?.ready?.();
   webApp?.expand?.();
-  return webApp?.initData || undefined;
+  try {
+    return resolveTelegramInitData(
+      webApp,
+      window.location,
+      window.sessionStorage,
+    );
+  } catch {
+    return webApp?.initData || undefined;
+  }
 }
 
 function trustedTelegramPhotoUrl(

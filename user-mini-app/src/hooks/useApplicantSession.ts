@@ -150,6 +150,9 @@ export function useApplicantSession({
         return;
       }
       const payload = (await applications.json()) as ApplicationList;
+      const restoredApplications = Array.isArray(payload.applications)
+        ? payload.applications
+        : [];
       setApplicantSession(true);
       setError("");
       setRecoveryEntryPoints([]);
@@ -160,7 +163,7 @@ export function useApplicantSession({
       ) {
         setLanguage(payload.preferredLanguage);
       }
-      setApplicationHistory(payload.applications);
+      setApplicationHistory(restoredApplications);
       const profile = await loadVerifiedProfileRef.current();
       if (
         profile?.language &&
@@ -181,9 +184,9 @@ export function useApplicantSession({
         setCurrentPage("profile");
       }
       const restored =
-        payload.applications.find(
+        restoredApplications.find(
           (item) => item.applicationNo === requestedApplicationNo,
-        ) ?? payload.applications[0];
+        ) ?? restoredApplications[0];
       if (!restored) return;
       await checkStatusRef.current(restored.applicationNo);
     };

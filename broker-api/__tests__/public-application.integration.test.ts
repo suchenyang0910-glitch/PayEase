@@ -1673,6 +1673,12 @@ integration("public applicant access", () => {
       expect(String(firstLogin.headers["set-cookie"])).toContain(
         "__Host-payease_applicant_session=",
       );
+      expect(String(firstLogin.headers["set-cookie"])).toContain(
+        "payease_applicant_session=",
+      );
+      expect(String(firstLogin.headers["set-cookie"])).toContain(
+        "Path=/api/v1/local/",
+      );
       expect(String(firstLogin.headers["set-cookie"])).toContain("Max-Age=900");
       expect(String(firstLogin.headers["set-cookie"])).toContain(
         "SameSite=None",

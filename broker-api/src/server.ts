@@ -2593,6 +2593,13 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     await client.query("COMMIT");
     reply.header("Set-Cookie", [
       `__Host-payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=900`,
+      // Telegram's embedded iOS WebView can reject a Partitioned cookie on
+      // older platform versions. Keep a path-scoped compatibility cookie so a
+      // successful initData exchange is usable by the immediately following
+      // same-origin applicant API requests. It is HttpOnly, Secure and has the
+      // same short lifetime; the server accepts either name and logout clears
+      // both.
+      `payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=900`,
       csrfCookie("applicant", randomBytes(32).toString("base64url"), 900),
     ]);
     return reply.code(201).send({ authenticated: true });

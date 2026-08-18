@@ -22,9 +22,13 @@ function pickLabel(label: string): HTMLElement {
   if (all.length === 0) {
     // Tests that assert English form fields must not depend on the product's
     // persisted language preference left by an earlier scenario.
-    const languageSelect = screen
-      .queryAllByRole("combobox", { name: "Language" })
-      .find((element) => !element.closest(".kx-shell"));
+    const languageSelect = Array.from(
+      document.querySelectorAll<HTMLSelectElement>("select"),
+    ).find(
+      (element) =>
+        !element.closest(".kx-shell") &&
+        Array.from(element.options).some((option) => option.value === "en"),
+    );
     if (languageSelect) {
       fireEvent.change(languageSelect, { target: { value: "en" } });
       all = screen.queryAllByLabelText(label);

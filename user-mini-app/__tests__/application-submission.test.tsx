@@ -172,6 +172,10 @@ function fillEnglishApplicationToConfirm(options?: {
   bankAccountNumber?: string;
   bankAccountHolder?: string;
 }): void {
+  // The Mini App intentionally remembers the applicant's language preference.
+  // This helper asserts English copy, so select English explicitly rather than
+  // relying on the default (which is Khmer for a fresh applicant session).
+  fireEvent.change(pickLanguage(), { target: { value: "en" } });
   fireEvent.change(pickLabel("Current address"), {
     target: { value: "Phnom Penh" },
   });

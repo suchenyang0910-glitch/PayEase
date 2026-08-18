@@ -372,12 +372,18 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
       seedHistoryAndSummary(language);
       window.history.replaceState(null, "", "/");
       const view = render(<App />);
+      const initialOrdersTab = [
+        USER_SKELETON_COPY.km.tabs.orders,
+        USER_SKELETON_COPY.en.tabs.orders,
+        USER_SKELETON_COPY["zh-CN"].tabs.orders,
+      ]
+        .flatMap((name) => screen.queryAllByRole("tab", { name }))
+        .find(Boolean);
+      if (!initialOrdersTab) {
+        throw new Error("Orders tab is unavailable for the current language");
+      }
       await act(async () => {
-        fireEvent.click(
-          screen.getAllByRole("tab", {
-            name: USER_SKELETON_COPY.km.tabs.orders,
-          })[0],
-        );
+        fireEvent.click(initialOrdersTab);
       });
       fireEvent.change(pickLanguageCombo(), {
         target: { value: language },

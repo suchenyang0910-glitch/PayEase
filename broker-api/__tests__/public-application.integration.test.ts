@@ -1878,6 +1878,16 @@ integration("public applicant access", () => {
         ],
       });
 
+      const authenticatedProfile = await brokerApi.app.inject({
+        method: "GET",
+        url: "/v1/local/public/profile/view",
+        headers: { cookie: secondCookie },
+      });
+      expect(authenticatedProfile.statusCode).toBe(200);
+      expect(authenticatedProfile.json()).toMatchObject({
+        telegramVerified: true,
+      });
+
       // Disabling a compromised Bot invalidates sessions that it issued.  The
       // two remaining Bots keep the production recovery topology intact and
       // can access the same Telegram-ID-owned record.

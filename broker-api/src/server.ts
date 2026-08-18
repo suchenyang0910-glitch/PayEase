@@ -484,6 +484,8 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicApplicantPhoneVerification =
     request.method === "GET" &&
     requestPath === "/v1/local/public/profile/telegram-phone-verification";
+  const isPublicApplicantProfileView =
+    request.method === "GET" && requestPath === "/v1/local/public/profile/view";
   const isPublicApplicantDraft =
     requestPath === "/v1/local/public/application-draft";
   const isPublicApplicantNotification =
@@ -577,6 +579,7 @@ app.addHook("onRequest", async (request, reply) => {
     isPublicTelegramSession ||
     isPublicApplicantLanguagePreference ||
     isPublicApplicantPhoneVerification ||
+    isPublicApplicantProfileView ||
     isPublicApplicantDraft ||
     isPublicApplicantNotification ||
     isPublicUserApplicationView ||

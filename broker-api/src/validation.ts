@@ -48,6 +48,40 @@ export const createApplicationSchema = z
     }
   });
 
+export const applicantDraftStageSchema = z.enum(["welcome", "details"]);
+export const applicantDraftFormStepSchema = z.enum([
+  "profile",
+  "contacts",
+  "payout",
+  "supplements",
+  "confirm",
+]);
+
+export const applicantApplicationDraftSchema = z.object({
+  version: z.literal(1),
+  stage: applicantDraftStageSchema,
+  formStep: applicantDraftFormStepSchema,
+  amountInput: z.string().max(32),
+  term: z.union([z.literal(15), z.literal(30)]),
+  name: z.string().max(120),
+  residentialAddress: z.string().max(240),
+  phone: z.string().max(32),
+  employer: z.string().max(160),
+  emergencyContactOneName: z.string().max(120),
+  emergencyContactOnePhone: z.string().max(32),
+  emergencyContactTwoName: z.string().max(120),
+  emergencyContactTwoPhone: z.string().max(32),
+  employerTenantId: z.string().uuid().or(z.literal("")),
+  bankName: z.string().max(120),
+  bankAccountNumber: z.string().max(64),
+  bankAccountHolder: z.string().max(120),
+  identityDocumentType: z.enum(["NATIONAL_ID", "PASSPORT"]),
+  identityDocumentNumber: z.string().max(64),
+  livenessPrepared: z.boolean(),
+  wealthProofAttached: z.boolean(),
+  consent: z.boolean(),
+});
+
 export const telegramSessionSchema = z.object({
   initData: z.string().min(32).max(8192),
 });
@@ -122,6 +156,91 @@ export const applicantSupplementResponseSchema = z.object({
   // encrypted-document collection flow and must never be pasted into it.
   message: z.string().trim().min(10).max(2000),
 });
+
+export const applicantPaymentProofUploadSchema = z
+  .object({
+    fileName: z
+      .string()
+      .trim()
+      .min(1)
+      .max(160)
+      .regex(/^[^\\/\u0000-\u001f]+$/),
+    contentType: z.enum([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+    ]),
+    contentBase64: z
+      .string()
+      .trim()
+      .min(16)
+      .max(2_800_000)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+    transferReference: z.string().trim().min(3).max(120).optional(),
+  })
+  .superRefine((value, context) => {
+    try {
+      const size = Buffer.from(value.contentBase64, "base64").byteLength;
+      if (size < 1 || size > 2 * 1024 * 1024) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["contentBase64"],
+          message: "Payment proof file must be between 1 byte and 2 MiB.",
+        });
+      }
+    } catch {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contentBase64"],
+        message: "Payment proof content must be valid base64.",
+      });
+    }
+  });
+
+export const applicantReassessmentRequestSchema = z
+  .object({
+    addressChanged: z.boolean(),
+    employerUpdated: z.boolean(),
+    wealthProofDeclared: z.boolean(),
+    note: z.string().trim().min(10).max(1000).optional(),
+  })
+  .superRefine((value, context) => {
+    if (
+      !value.addressChanged &&
+      !value.employerUpdated &&
+      !value.wealthProofDeclared &&
+      !value.note
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["note"],
+        message:
+          "Provide at least one reassessment update flag or an explanatory note.",
+      });
+    }
+  });
+
+export const applicantPaymentProofReviewSchema = z.object({
+  status: z.enum(["NEEDS_MORE", "RECONCILED", "EXCEPTION"]),
+  reasonCode: z
+    .string()
+    .trim()
+    .regex(/^[A-Z0-9_]{3,64}$/),
+});
+
+const reassessmentReviewDecisionSchema = z.object({
+  decision: z.enum(["APPROVED", "RETURNED", "REJECTED"]),
+  reasonCode: z
+    .string()
+    .trim()
+    .regex(/^[A-Z0-9_]{3,64}$/),
+});
+
+export const applicantReassessmentBrokerReviewSchema =
+  reassessmentReviewDecisionSchema;
+export const applicantReassessmentLenderReviewSchema =
+  reassessmentReviewDecisionSchema;
 
 export const applicantServiceCaseLenderResolutionSchema = z.object({
   reasonCode: z

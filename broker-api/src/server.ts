@@ -4,6 +4,12 @@ import Fastify from "fastify";
 import { Pool, type PoolClient } from "pg";
 import { z } from "zod";
 import {
+  applicantApplicationDraftSchema,
+  applicantPaymentProofReviewSchema,
+  applicantPaymentProofUploadSchema,
+  applicantReassessmentBrokerReviewSchema,
+  applicantReassessmentLenderReviewSchema,
+  applicantReassessmentRequestSchema,
   brokerReviewSchema,
   bootstrapAdminSchema,
   adminAccountCreateSchema,
@@ -38,6 +44,12 @@ import {
   summarizeRepaymentSchedule,
   type RepaymentScheduleItem,
 } from "./repayment.js";
+import {
+  buildApplicantNotification,
+  buildApplicantNotificationId,
+  type ApplicantNotification,
+  type ApplicantNotificationTimelineRow,
+} from "./applicant-notifications.js";
 import {
   configuredTelegramBots,
   enabledTelegramBotEntryUrls,
@@ -91,7 +103,14 @@ if (!databaseUrl) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: 4 * 1024 * 1024 });
+app.addContentTypeParser(
+  /^multipart\/form-data/i,
+  { parseAs: "buffer" },
+  (_request, body, done) => {
+    done(null, body);
+  },
+);
 const requestTraceContext = new AsyncLocalStorage<{ traceId: string }>();
 const acceptedTraceId =
   /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i;
@@ -116,6 +135,100 @@ function currentTraceId(): string {
 
 function normalizedPhoneNumber(value: string): string {
   return value.normalize("NFKC").replace(/[\s()-]/g, "");
+}
+
+function multipartBoundary(contentType: string): string | undefined {
+  const matched = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+  return matched?.[1]?.trim() || matched?.[2]?.trim();
+}
+
+function multipartDispositionParams(
+  header: string | undefined,
+): Readonly<{ name?: string; filename?: string }> {
+  if (!header) return {};
+  const name = /(?:^|;)\s*name="([^"]+)"/i.exec(header)?.[1];
+  const filename = /(?:^|;)\s*filename="([^"]*)"/i.exec(header)?.[1];
+  return {
+    ...(name ? { name } : {}),
+    ...(typeof filename === "string" ? { filename } : {}),
+  };
+}
+
+function parseApplicantPaymentProofMultipart(
+  contentType: string | undefined,
+  body: unknown,
+): z.infer<typeof applicantPaymentProofUploadSchema> {
+  if (!contentType) {
+    throw new Error("Missing multipart content type.");
+  }
+  const boundary = multipartBoundary(contentType);
+  if (!boundary || !Buffer.isBuffer(body)) {
+    throw new Error("Invalid multipart payment proof payload.");
+  }
+  const raw = body.toString("latin1");
+  const marker = `--${boundary}`;
+  const sections = raw.split(marker);
+  let transferReference: string | undefined;
+  let file:
+    | undefined
+    | Readonly<{
+        fieldName: string;
+        fileName: string;
+        contentType: string;
+        contentBase64: string;
+      }>;
+
+  for (const section of sections) {
+    if (!section || section === "--\r\n" || section === "--") continue;
+    let normalized = section.startsWith("\r\n") ? section.slice(2) : section;
+    if (normalized.endsWith("--\r\n")) normalized = normalized.slice(0, -4);
+    if (normalized.endsWith("\r\n")) normalized = normalized.slice(0, -2);
+    const headerBreak = normalized.indexOf("\r\n\r\n");
+    if (headerBreak < 0) continue;
+    const headerText = normalized.slice(0, headerBreak);
+    const contentText = normalized.slice(headerBreak + 4);
+    const headers = new Map(
+      headerText.split("\r\n").map((line) => {
+        const separator = line.indexOf(":");
+        return [
+          line.slice(0, separator).trim().toLowerCase(),
+          line.slice(separator + 1).trim(),
+        ] as const;
+      }),
+    );
+    const disposition = multipartDispositionParams(
+      headers.get("content-disposition"),
+    );
+    if (!disposition.name) continue;
+    if (typeof disposition.filename === "string") {
+      if (file) {
+        throw new Error("Only one payment proof file is allowed.");
+      }
+      file = {
+        fieldName: disposition.name,
+        fileName: disposition.filename,
+        contentType:
+          headers.get("content-type")?.toLowerCase() ??
+          "application/octet-stream",
+        contentBase64: Buffer.from(contentText, "latin1").toString("base64"),
+      };
+      continue;
+    }
+    if (disposition.name === "transferReference") {
+      transferReference = contentText;
+    }
+  }
+
+  if (!file || file.fieldName !== "file") {
+    throw new Error("Payment proof file field is required.");
+  }
+
+  return applicantPaymentProofUploadSchema.parse({
+    fileName: file.fileName,
+    contentType: file.contentType,
+    contentBase64: file.contentBase64,
+    ...(transferReference ? { transferReference } : {}),
+  });
 }
 
 // Schema failures are client input errors.  Never surface them as a 500, which
@@ -214,6 +327,114 @@ async function authenticatedApplicant(
   return { telegramUserRef: identity.telegram_user_ref };
 }
 
+async function authenticatedApplicantUser(
+  cookieHeader: string | undefined,
+  userAgent: string | string[] | undefined,
+): Promise<{ id: string; telegramUserRef: string } | undefined> {
+  const applicant = await authenticatedApplicant(cookieHeader, userAgent);
+  if (!applicant) return undefined;
+  const user = await pool.query<{ id: string }>(
+    "SELECT id FROM users WHERE telegram_user_ref = $1",
+    [applicant.telegramUserRef],
+  );
+  if (!user.rowCount) return undefined;
+  return { id: user.rows[0]!.id, telegramUserRef: applicant.telegramUserRef };
+}
+
+type ApplicantApplicationDraft = z.infer<
+  typeof applicantApplicationDraftSchema
+>;
+
+function serializeApplicantApplicationDraft(
+  draft: ApplicantApplicationDraft,
+): Buffer {
+  return encryptPersonalValue(JSON.stringify(draft));
+}
+
+function parseApplicantApplicationDraft(
+  ciphertext: Buffer,
+): ApplicantApplicationDraft {
+  return applicantApplicationDraftSchema.parse(
+    JSON.parse(decryptPersonalValue(ciphertext)) as unknown,
+  );
+}
+
+function maskedApplicationReference(
+  applicationNo: string | null | undefined,
+): string | undefined {
+  if (!applicationNo) return undefined;
+  if (applicationNo.length <= 8) return applicationNo;
+  return `${applicationNo.slice(0, 4)}***${applicationNo.slice(-4)}`;
+}
+
+function profileNextAction(status: string): string {
+  switch (status) {
+    case "DRAFT":
+      return "CONTINUE_APPLICATION";
+    case "SUBMITTED":
+    case "BROKER_REVIEW":
+    case "EMPLOYER_VERIFICATION":
+    case "LENDER_INITIAL_REVIEW":
+    case "LENDER_FINAL_REVIEW":
+      return "VIEW_PROGRESS";
+    case "CONTRACT_PENDING":
+    case "CONTRACT_CONFIRMED":
+      return "VIEW_CONTRACT";
+    case "DISBURSEMENT_PENDING":
+    case "DISBURSED":
+    case "REPAYMENT_ACTIVE":
+      return "VIEW_BILL";
+    case "SETTLED":
+      return "VIEW_RECORD";
+    default:
+      return "VIEW_DETAILS";
+  }
+}
+
+function canApplicantUploadPaymentProof(status: string): boolean {
+  return status === "REPAYMENT_ACTIVE";
+}
+
+function canApplicantRequestReassessment(status: string): boolean {
+  return ["REJECTED", "SETTLED", "CLOSED"].includes(status);
+}
+
+const REAPPLICATION_COOLING_OFF_DAYS = 7;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function applicantCoolingOffEndsAt(
+  rejectedAt: string | null | undefined,
+): string | null {
+  if (!rejectedAt) return null;
+  const rejected = new Date(rejectedAt);
+  if (Number.isNaN(rejected.getTime())) return null;
+  return new Date(
+    rejected.getTime() + REAPPLICATION_COOLING_OFF_DAYS * MS_PER_DAY,
+  ).toISOString();
+}
+
+function applicantCoolingOffDaysRemaining(
+  rejectedAt: string | null | undefined,
+): number | null {
+  const endsAt = applicantCoolingOffEndsAt(rejectedAt);
+  if (!endsAt) return null;
+  const remainingMs = new Date(endsAt).getTime() - Date.now();
+  if (remainingMs <= 0) {
+    // Keep the UI fail-closed until the back-office explicitly clears the
+    // reapplication restriction.
+    return 1;
+  }
+  return Math.max(1, Math.ceil(remainingMs / MS_PER_DAY));
+}
+
+function approvalCaseAction(decision: "APPROVED" | "RETURNED" | "REJECTED") {
+  return decision === "APPROVED"
+    ? "APPROVE"
+    : decision === "RETURNED"
+      ? "RETURN"
+      : "REJECT";
+}
+
 async function hasRole(
   cookieHeader: string | undefined,
   roleCode: string,
@@ -263,6 +484,12 @@ app.addHook("onRequest", async (request, reply) => {
   const isPublicApplicantPhoneVerification =
     request.method === "GET" &&
     requestPath === "/v1/local/public/profile/telegram-phone-verification";
+  const isPublicApplicantDraft =
+    requestPath === "/v1/local/public/application-draft";
+  const isPublicApplicantNotification =
+    requestPath === "/v1/local/public/notifications" ||
+    requestPath === "/v1/local/public/notifications/read-all" ||
+    requestPath.startsWith("/v1/local/public/notifications/");
   const isPublicUserApplicationView =
     requestPath === "/v1/local/public/applications" ||
     requestPath.startsWith("/v1/local/public/applications/");
@@ -278,6 +505,10 @@ app.addHook("onRequest", async (request, reply) => {
   const isApplicantStateChange =
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
+    ((request.method === "PUT" || request.method === "DELETE") &&
+      isPublicApplicantDraft) ||
+    ((request.method === "POST" || request.method === "DELETE") &&
+      isPublicApplicantNotification) ||
     isPublicApplicantLanguagePreference ||
     ((request.method === "POST" ||
       request.method === "PUT" ||
@@ -346,6 +577,8 @@ app.addHook("onRequest", async (request, reply) => {
     isPublicTelegramSession ||
     isPublicApplicantLanguagePreference ||
     isPublicApplicantPhoneVerification ||
+    isPublicApplicantDraft ||
+    isPublicApplicantNotification ||
     isPublicUserApplicationView ||
     isPublicTelegramEntryPoints ||
     isPublicEmployerTenantList ||
@@ -417,6 +650,37 @@ function requireServiceCaseReadRole(
   return true;
 }
 
+function requirePaymentProofReviewRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  const roles = request.adminIdentity?.roles ?? [];
+  if (
+    !roles.includes("BROKER_OFFICER") &&
+    !roles.includes("LENDER_REPAYMENT_CHECKER")
+  ) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
+function requireReassessmentQueueRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  const roles = request.adminIdentity?.roles ?? [];
+  if (
+    !roles.includes("BROKER_OFFICER") &&
+    !roles.includes("LENDER_CREDIT_OFFICER") &&
+    !roles.includes("LENDER_CREDIT_REVIEWER")
+  ) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
 function requireLenderComplaintOfficer(
   request: { adminIdentity?: { roles: string[] } },
   reply: any,
@@ -479,6 +743,11 @@ class DualControlConflictError extends Error {}
 
 type ManualActionName =
   | "BROKER_REVIEW"
+  | "APPLICANT_PAYMENT_PROOF_UPLOAD"
+  | "APPLICANT_PAYMENT_PROOF_REVIEW"
+  | "APPLICANT_REASSESSMENT_REQUEST"
+  | "REASSESSMENT_BROKER_REVIEW"
+  | "REASSESSMENT_LENDER_REVIEW"
   | "EMPLOYER_IDENTITY_MATCH"
   | "EMPLOYER_VERIFICATION"
   | "EMPLOYER_FINANCE_VERIFICATION"
@@ -575,6 +844,37 @@ async function lockApplication(
   const result = await client.query<ApplicationRow>(
     "SELECT id, status, review_round, employer_tenant_id FROM applications WHERE application_no = $1 FOR UPDATE",
     [applicationNo],
+  );
+  return result.rows[0];
+}
+
+async function lockApplicantOwnedApplication(
+  client: PoolClient,
+  applicationNo: string,
+  telegramUserRef: string,
+): Promise<ApplicationRow | undefined> {
+  const result = await client.query<ApplicationRow>(
+    `SELECT applications.id, applications.status, applications.review_round, applications.employer_tenant_id
+       FROM applications
+       JOIN users ON users.id = applications.user_id
+      WHERE applications.application_no = $1
+        AND users.telegram_user_ref = $2
+      FOR UPDATE`,
+    [applicationNo, telegramUserRef],
+  );
+  return result.rows[0];
+}
+
+async function lockApplicationById(
+  client: PoolClient,
+  applicationId: string,
+): Promise<ApplicationRow | undefined> {
+  const result = await client.query<ApplicationRow>(
+    `SELECT id, status, review_round, employer_tenant_id
+       FROM applications
+      WHERE id = $1
+      FOR UPDATE`,
+    [applicationId],
   );
   return result.rows[0];
 }
@@ -882,6 +1182,339 @@ async function loadLoanDetails(applicationId: string): Promise<{
       : null,
     repayment: summarizeRepaymentSchedule(schedule),
   };
+}
+
+async function loadApplicantExperienceData(applicationId: string): Promise<{
+  repaymentProof: null | {
+    proofNo: string;
+    status: "UNDER_REVIEW" | "NEEDS_MORE" | "RECONCILED" | "EXCEPTION";
+    fileName: string;
+    contentType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    transferReference?: string;
+    submittedAt: string;
+  };
+  reassessmentRequest: null | {
+    requestNo: string;
+    status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "DECLINED" | "CLOSED";
+    addressChanged: boolean;
+    employerUpdated: boolean;
+    wealthProofDeclared: boolean;
+    submittedAt: string;
+  };
+}> {
+  const latestProof = await pool.query<{
+    proof_no: string;
+    status: "UNDER_REVIEW" | "NEEDS_MORE" | "RECONCILED" | "EXCEPTION";
+    file_name: string;
+    content_type: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    transfer_reference: string | null;
+    submitted_at: string;
+  }>(
+    `SELECT proof_no, status, file_name, content_type, transfer_reference, submitted_at::text
+       FROM applicant_payment_proofs
+      WHERE application_id = $1
+      ORDER BY submitted_at DESC
+      LIMIT 1`,
+    [applicationId],
+  );
+  const latestRequest = await pool.query<{
+    request_no: string;
+    status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "DECLINED" | "CLOSED";
+    address_changed: boolean;
+    employer_updated: boolean;
+    wealth_proof_declared: boolean;
+    created_at: string;
+  }>(
+    `SELECT request_no, status, address_changed, employer_updated,
+            wealth_proof_declared, created_at::text
+       FROM applicant_reassessment_requests
+      WHERE application_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [applicationId],
+  );
+  return {
+    repaymentProof: latestProof.rows[0]
+      ? {
+          proofNo: latestProof.rows[0]!.proof_no,
+          status: latestProof.rows[0]!.status,
+          fileName: latestProof.rows[0]!.file_name,
+          contentType: latestProof.rows[0]!.content_type,
+          ...(latestProof.rows[0]!.transfer_reference
+            ? { transferReference: latestProof.rows[0]!.transfer_reference }
+            : {}),
+          submittedAt: latestProof.rows[0]!.submitted_at,
+        }
+      : null,
+    reassessmentRequest: latestRequest.rows[0]
+      ? {
+          requestNo: latestRequest.rows[0]!.request_no,
+          status: latestRequest.rows[0]!.status,
+          addressChanged: latestRequest.rows[0]!.address_changed,
+          employerUpdated: latestRequest.rows[0]!.employer_updated,
+          wealthProofDeclared: latestRequest.rows[0]!.wealth_proof_declared,
+          submittedAt: latestRequest.rows[0]!.created_at,
+        }
+      : null,
+  };
+}
+
+async function loadApplicantTimeline(applicationId: string): Promise<
+  Array<{
+    occurredAt: string;
+    entryType:
+      | "STATUS"
+      | "APPROVAL"
+      | "PAYMENT_PROOF_SUBMITTED"
+      | "PAYMENT_PROOF_REVIEWED"
+      | "REASSESSMENT_SUBMITTED"
+      | "REASSESSMENT_APPROVAL";
+    status?: string;
+    stage?: string;
+    decision?: string;
+    actorUserRef?: string;
+    actorRole?: string;
+    reasonCode?: string;
+    referenceNo?: string;
+  }>
+> {
+  const rows = await pool.query<{
+    occurred_at: string;
+    entry_type:
+      | "STATUS"
+      | "APPROVAL"
+      | "PAYMENT_PROOF_SUBMITTED"
+      | "PAYMENT_PROOF_REVIEWED"
+      | "REASSESSMENT_SUBMITTED"
+      | "REASSESSMENT_APPROVAL";
+    status: string | null;
+    stage: string | null;
+    decision: string | null;
+    actor_user_ref: string | null;
+    actor_role: string | null;
+    reason_code: string | null;
+    reference_no: string | null;
+  }>(
+    `SELECT occurred_at::text, entry_type, status, stage, decision, actor_user_ref,
+            actor_role, reason_code, reference_no
+       FROM (
+         SELECT e.occurred_at, 'STATUS'::text AS entry_type, e.to_status AS status,
+                NULL::text AS stage, NULL::text AS decision, e.actor_user_ref,
+                NULL::text AS actor_role, e.reason_code, NULL::text AS reference_no
+           FROM application_status_events e
+          WHERE e.application_id = $1
+         UNION ALL
+         SELECT e.occurred_at, 'APPROVAL'::text AS entry_type, NULL::text AS status,
+                e.stage, e.decision, e.actor_user_ref, e.actor_role, e.reason_code,
+                NULL::text AS reference_no
+           FROM approval_events e
+          WHERE e.application_id = $1
+         UNION ALL
+         SELECT p.submitted_at, 'PAYMENT_PROOF_SUBMITTED'::text AS entry_type,
+                p.status, NULL::text AS stage, NULL::text AS decision,
+                NULL::text AS actor_user_ref, NULL::text AS actor_role,
+                NULL::text AS reason_code, p.proof_no
+           FROM applicant_payment_proofs p
+          WHERE p.application_id = $1
+         UNION ALL
+         SELECT p.reviewed_at, 'PAYMENT_PROOF_REVIEWED'::text AS entry_type,
+                p.status, NULL::text AS stage, NULL::text AS decision,
+                p.reviewed_by_user_ref, NULL::text AS actor_role,
+                p.review_reason_code, p.proof_no
+           FROM applicant_payment_proofs p
+          WHERE p.application_id = $1 AND p.reviewed_at IS NOT NULL
+         UNION ALL
+         SELECT r.created_at, 'REASSESSMENT_SUBMITTED'::text AS entry_type,
+                r.status, NULL::text AS stage, NULL::text AS decision,
+                NULL::text AS actor_user_ref, NULL::text AS actor_role,
+                NULL::text AS reason_code, r.request_no
+           FROM applicant_reassessment_requests r
+          WHERE r.application_id = $1
+         UNION ALL
+         SELECT e.occurred_at, 'REASSESSMENT_APPROVAL'::text AS entry_type,
+                NULL::text AS status, e.step, e.action AS decision,
+                e.actor_user_ref, e.actor_role, e.reason_code, r.request_no
+           FROM applicant_reassessment_requests r
+           JOIN approval_case_events e ON e.approval_case_id = r.approval_case_id
+          WHERE r.application_id = $1
+       ) timeline
+      ORDER BY occurred_at DESC`,
+    [applicationId],
+  );
+  return rows.rows.map((row) => ({
+    occurredAt: row.occurred_at,
+    entryType: row.entry_type,
+    ...(row.status ? { status: row.status } : {}),
+    ...(row.stage ? { stage: row.stage } : {}),
+    ...(row.decision ? { decision: row.decision } : {}),
+    ...(row.actor_user_ref ? { actorUserRef: row.actor_user_ref } : {}),
+    ...(row.actor_role ? { actorRole: row.actor_role } : {}),
+    ...(row.reason_code ? { reasonCode: row.reason_code } : {}),
+    ...(row.reference_no ? { referenceNo: row.reference_no } : {}),
+  }));
+}
+
+async function loadApplicantNotifications(
+  userId: string,
+): Promise<ApplicantNotification[]> {
+  const applications = await pool.query<{ id: string; application_no: string }>(
+    `SELECT id, application_no
+       FROM applications
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 20`,
+    [userId],
+  );
+  const timelineGroups = await Promise.all(
+    applications.rows.map(async (application) => {
+      const timeline = await loadApplicantTimeline(application.id);
+      return timeline.map<ApplicantNotificationTimelineRow>((entry) => ({
+        applicationNo: application.application_no,
+        occurredAt: entry.occurredAt,
+        entryType: entry.entryType,
+        ...(entry.status ? { status: entry.status } : {}),
+        ...(entry.stage ? { stage: entry.stage } : {}),
+        ...(entry.decision ? { decision: entry.decision } : {}),
+        ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}),
+        ...(entry.referenceNo ? { referenceNo: entry.referenceNo } : {}),
+      }));
+    }),
+  );
+  const timelineRows = timelineGroups
+    .flat()
+    .sort(
+      (left, right) =>
+        new Date(right.occurredAt).getTime() -
+        new Date(left.occurredAt).getTime(),
+    )
+    .slice(0, 50);
+  if (timelineRows.length === 0) return [];
+  const notificationIds = timelineRows.map((row) =>
+    buildApplicantNotificationId(row),
+  );
+  const readRows = await pool.query<{
+    notification_id: string;
+    read_at: string;
+  }>(
+    `SELECT notification_id, read_at::text
+       FROM applicant_notification_reads
+      WHERE user_id = $1
+        AND notification_id = ANY($2::text[])`,
+    [userId, notificationIds],
+  );
+  const readAtByNotificationId = new Map(
+    readRows.rows.map((row) => [row.notification_id, row.read_at]),
+  );
+  return timelineRows.map((row) =>
+    buildApplicantNotification(
+      row,
+      readAtByNotificationId.get(buildApplicantNotificationId(row)),
+    ),
+  );
+}
+
+function paginateApplicantNotifications(
+  notifications: readonly ApplicantNotification[],
+  page: number,
+  pageSize: number,
+): Readonly<{
+  items: ApplicantNotification[];
+  itemCount: number;
+  pageCount: number;
+  unreadCount: number;
+}> {
+  const itemCount = notifications.length;
+  const pageCount = Math.max(1, Math.ceil(itemCount / pageSize));
+  const normalizedPage = Math.min(Math.max(1, page), pageCount);
+  return {
+    items: notifications.slice(
+      (normalizedPage - 1) * pageSize,
+      normalizedPage * pageSize,
+    ),
+    itemCount,
+    pageCount,
+    unreadCount: notifications.filter((item) => item.unread).length,
+  };
+}
+
+async function lockPaymentProof(
+  client: PoolClient,
+  proofNo: string,
+): Promise<
+  | undefined
+  | {
+      id: string;
+      application_id: string;
+      proof_no: string;
+      status: "UNDER_REVIEW" | "NEEDS_MORE" | "RECONCILED" | "EXCEPTION";
+      file_name: string;
+      content_type:
+        "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+      file_content_encrypted: Buffer;
+      transfer_reference: string | null;
+      submitted_at: string;
+    }
+> {
+  const result = await client.query<{
+    id: string;
+    application_id: string;
+    proof_no: string;
+    status: "UNDER_REVIEW" | "NEEDS_MORE" | "RECONCILED" | "EXCEPTION";
+    file_name: string;
+    content_type: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    file_content_encrypted: Buffer;
+    transfer_reference: string | null;
+    submitted_at: string;
+  }>(
+    `SELECT id, application_id, proof_no, status, file_name, content_type,
+            file_content_encrypted, transfer_reference, submitted_at::text
+       FROM applicant_payment_proofs
+      WHERE proof_no = $1
+      FOR UPDATE`,
+    [proofNo],
+  );
+  return result.rows[0];
+}
+
+async function lockReassessmentRequest(
+  client: PoolClient,
+  requestNo: string,
+): Promise<
+  | undefined
+  | {
+      id: string;
+      application_id: string;
+      request_no: string;
+      status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "DECLINED" | "CLOSED";
+      approval_case_id: string | null;
+      note_encrypted: Buffer | null;
+      address_changed: boolean;
+      employer_updated: boolean;
+      wealth_proof_declared: boolean;
+      created_at: string;
+    }
+> {
+  const result = await client.query<{
+    id: string;
+    application_id: string;
+    request_no: string;
+    status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "DECLINED" | "CLOSED";
+    approval_case_id: string | null;
+    note_encrypted: Buffer | null;
+    address_changed: boolean;
+    employer_updated: boolean;
+    wealth_proof_declared: boolean;
+    created_at: string;
+  }>(
+    `SELECT id, application_id, request_no, status, approval_case_id, note_encrypted,
+            address_changed, employer_updated, wealth_proof_declared,
+            created_at::text
+       FROM applicant_reassessment_requests
+      WHERE request_no = $1
+      FOR UPDATE`,
+    [requestNo],
+  );
+  return result.rows[0];
 }
 
 app.get("/health/live", async () => {
@@ -1911,9 +2544,22 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
     // application. Create the minimal identity row at authenticated login so
     // the Bot webhook has a safe record to bind that proof to.
     await client.query(
-      `INSERT INTO users (telegram_user_ref, preferred_language)
-       VALUES ($1, 'en') ON CONFLICT (telegram_user_ref) DO NOTHING`,
-      [identity.telegramUserRef],
+      `INSERT INTO users (
+         telegram_user_ref, preferred_language, telegram_display_name,
+         telegram_username, telegram_photo_url
+       )
+       VALUES ($1, 'en', $2, $3, $4)
+       ON CONFLICT (telegram_user_ref) DO UPDATE SET
+         telegram_display_name = COALESCE(EXCLUDED.telegram_display_name, users.telegram_display_name),
+         telegram_username = EXCLUDED.telegram_username,
+         telegram_photo_url = COALESCE(EXCLUDED.telegram_photo_url, users.telegram_photo_url),
+         updated_at = now()`,
+      [
+        identity.telegramUserRef,
+        identity.displayName,
+        identity.username,
+        identity.photoUrl,
+      ],
     );
     const replay = await client.query(
       `INSERT INTO telegram_initdata_replay_guards
@@ -2087,6 +2733,97 @@ app.get("/v1/local/public/employer-tenants", async () => {
   };
 });
 
+app.get("/v1/local/public/profile/view", async (request, reply) => {
+  const applicant = await authenticatedApplicant(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!applicant) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const user = await pool.query<{
+    preferred_language: "km" | "en" | "zh-CN";
+    telegram_display_name: string | null;
+    telegram_username: string | null;
+    telegram_photo_url: string | null;
+    telegram_phone_verified_at: Date | null;
+    employer_display_name: string | null;
+    active_application_no: string | null;
+    active_application_status: string | null;
+    bill_application_no: string | null;
+    bill_status: string | null;
+  }>(
+    `SELECT
+       u.preferred_language,
+       u.telegram_display_name,
+       u.telegram_username,
+       u.telegram_photo_url,
+       u.telegram_phone_verified_at,
+       app.employer_tenant_display_name AS employer_display_name,
+       app.application_no AS active_application_no,
+       app.status AS active_application_status,
+       bill.application_no AS bill_application_no,
+       bill.status AS bill_status
+     FROM users u
+     LEFT JOIN LATERAL (
+       SELECT a.application_no, a.status, a.employer_tenant_display_name
+         FROM applications a
+        WHERE a.user_id = u.id
+        ORDER BY a.created_at DESC
+        LIMIT 1
+     ) app ON true
+     LEFT JOIN LATERAL (
+       SELECT a.application_no, a.status
+         FROM applications a
+        WHERE a.user_id = u.id
+          AND a.status IN ('DISBURSEMENT_PENDING', 'DISBURSED', 'REPAYMENT_ACTIVE')
+        ORDER BY a.created_at DESC
+        LIMIT 1
+     ) bill ON true
+    WHERE u.telegram_user_ref = $1`,
+    [applicant.telegramUserRef],
+  );
+  const profile = user.rows[0];
+  if (!profile) {
+    return reply.code(404).send({ code: "APPLICANT_PROFILE_NOT_FOUND" });
+  }
+  return {
+    displayName: profile.telegram_display_name,
+    username: profile.telegram_username,
+    photoUrl: profile.telegram_photo_url,
+    telegramVerified: true,
+    phoneVerificationStatus: profile.telegram_phone_verified_at
+      ? "VERIFIED"
+      : requiresTelegramPhoneVerification()
+        ? "PENDING"
+        : "NOT_STARTED",
+    employerDisplayName: profile.employer_display_name,
+    language: profile.preferred_language,
+    ...(profile.active_application_no && profile.active_application_status
+      ? {
+          activeApplication: {
+            referenceMasked: maskedApplicationReference(
+              profile.active_application_no,
+            ),
+            status: profile.active_application_status,
+            nextAction: profileNextAction(profile.active_application_status),
+          },
+        }
+      : {}),
+    ...(profile.bill_application_no && profile.bill_status
+      ? {
+          activeBill: {
+            referenceMasked: maskedApplicationReference(
+              profile.bill_application_no,
+            ),
+            status: profile.bill_status,
+            dueDate: null,
+          },
+        }
+      : {}),
+  };
+});
+
 // Never return the contact itself to the browser. The Mini App needs only the
 // boolean state to decide whether it should ask Telegram to share a contact.
 app.get(
@@ -2112,6 +2849,97 @@ app.get(
     };
   },
 );
+
+app.get("/v1/local/public/application-draft", async (request, reply) => {
+  const applicant = await authenticatedApplicantUser(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!applicant) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const draft = await pool.query<{
+    draft_payload_encrypted: Buffer;
+  }>(
+    `SELECT draft_payload_encrypted
+       FROM applicant_application_drafts
+      WHERE user_id = $1`,
+    [applicant.id],
+  );
+  if (!draft.rowCount) {
+    return { draft: null };
+  }
+  try {
+    return {
+      draft: parseApplicantApplicationDraft(
+        draft.rows[0]!.draft_payload_encrypted,
+      ),
+    };
+  } catch (error) {
+    request.log.error({ err: error }, "applicant draft read unavailable");
+    return reply
+      .code(503)
+      .send({ code: "APPLICATION_DRAFT_STORAGE_UNAVAILABLE" });
+  }
+});
+
+app.put("/v1/local/public/application-draft", async (request, reply) => {
+  const applicant = await authenticatedApplicantUser(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!applicant) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const input = applicantApplicationDraftSchema.parse(request.body);
+  let encryptedDraft: Buffer;
+  let keyVersion: string;
+  try {
+    encryptedDraft = serializeApplicantApplicationDraft(input);
+    keyVersion = personalDataKeyVersion();
+  } catch (error) {
+    request.log.error({ err: error }, "applicant draft storage unavailable");
+    return reply
+      .code(503)
+      .send({ code: "APPLICATION_DRAFT_STORAGE_UNAVAILABLE" });
+  }
+  await pool.query(
+    `INSERT INTO applicant_application_drafts
+      (user_id, draft_version, stage, form_step, draft_payload_encrypted, draft_key_version)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (user_id) DO UPDATE SET
+       draft_version = EXCLUDED.draft_version,
+       stage = EXCLUDED.stage,
+       form_step = EXCLUDED.form_step,
+       draft_payload_encrypted = EXCLUDED.draft_payload_encrypted,
+       draft_key_version = EXCLUDED.draft_key_version,
+       updated_at = now()`,
+    [
+      applicant.id,
+      input.version,
+      input.stage,
+      input.formStep,
+      encryptedDraft,
+      keyVersion,
+    ],
+  );
+  return reply.code(204).send();
+});
+
+app.delete("/v1/local/public/application-draft", async (request, reply) => {
+  const applicant = await authenticatedApplicantUser(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!applicant) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  await pool.query(
+    "DELETE FROM applicant_application_drafts WHERE user_id = $1",
+    [applicant.id],
+  );
+  return reply.code(204).send();
+});
 
 app.post(
   "/v1/local/public/telegram-sessions/logout",
@@ -2495,17 +3323,26 @@ app.get(
       rejection_condition_resolved: boolean;
       supplement_requested: boolean;
       rejected_reason_code: string | null;
+      rejected_at: string | null;
       employer_tenant_display_name: string | null;
+      created_at: string;
+      updated_at: string;
     }>(
       `SELECT applications.id, applications.application_no, applications.requested_amount_minor::text,
             applications.currency, applications.tenor_days, applications.status,
             approved_amount_minor::text, rejection_condition_resolved, supplement_requested,
+            applications.created_at::text, applications.updated_at::text,
             tenant.display_name AS employer_tenant_display_name,
             (
               SELECT reason_code FROM approval_events
                WHERE application_id = applications.id AND decision = 'REJECTED'
                ORDER BY occurred_at DESC LIMIT 1
-            ) AS rejected_reason_code
+            ) AS rejected_reason_code,
+            (
+              SELECT occurred_at::text FROM approval_events
+               WHERE application_id = applications.id AND decision = 'REJECTED'
+               ORDER BY occurred_at DESC LIMIT 1
+            ) AS rejected_at
        FROM applications
        LEFT JOIN employer_tenants tenant ON tenant.id = applications.employer_tenant_id
        WHERE application_no = $1
@@ -2529,6 +3366,8 @@ app.get(
     }
     const application = result.rows[0]!;
     const loanDetails = await loadLoanDetails(application.id);
+    const experience = await loadApplicantExperienceData(application.id);
+    const timeline = await loadApplicantTimeline(application.id);
     return formatApplicantLoanSummary(
       {
         applicationNo: application.application_no,
@@ -2538,6 +3377,16 @@ app.get(
         tenorDays: application.tenor_days,
         approvedAmountMinor: application.approved_amount_minor,
         rejectionConditionResolved: application.rejection_condition_resolved,
+        rejectionCoolingOffEndsAt:
+          application.status === "REJECTED" &&
+          !application.rejection_condition_resolved
+            ? applicantCoolingOffEndsAt(application.rejected_at)
+            : null,
+        rejectionCoolingOffDaysRemaining:
+          application.status === "REJECTED" &&
+          !application.rejection_condition_resolved
+            ? applicantCoolingOffDaysRemaining(application.rejected_at)
+            : null,
         rejectionNoticeCode: applicantRejectionNoticeCode(
           application.status,
           application.rejected_reason_code,
@@ -2547,6 +3396,21 @@ app.get(
       },
       loanDetails.terms,
       loanDetails.repayment,
+      {
+        recordDetail: {
+          createdAt: application.created_at,
+          updatedAt: application.updated_at,
+          canUploadPaymentProof: canApplicantUploadPaymentProof(
+            application.status,
+          ),
+          canRequestReassessment: canApplicantRequestReassessment(
+            application.status,
+          ),
+        },
+        repaymentProof: experience.repaymentProof,
+        reassessmentRequest: experience.reassessmentRequest,
+        timeline,
+      },
     );
   },
 );
@@ -2573,6 +3437,7 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     rejection_condition_resolved: boolean;
     supplement_requested: boolean;
     rejected_reason_code: string | null;
+    rejected_at: string | null;
     created_at: Date;
     employer_tenant_display_name: string | null;
   }>(
@@ -2586,6 +3451,11 @@ app.get("/v1/local/public/applications", async (request, reply) => {
                WHERE application_id = applications.id AND decision = 'REJECTED'
                ORDER BY occurred_at DESC LIMIT 1
             ) AS rejected_reason_code,
+            (
+              SELECT occurred_at::text FROM approval_events
+               WHERE application_id = applications.id AND decision = 'REJECTED'
+               ORDER BY occurred_at DESC LIMIT 1
+            ) AS rejected_at,
             applications.created_at
        FROM applications
        JOIN users ON users.id = applications.user_id
@@ -2605,6 +3475,16 @@ app.get("/v1/local/public/applications", async (request, reply) => {
       tenorDays: application.tenor_days,
       approvedAmountMinor: application.approved_amount_minor,
       rejectionConditionResolved: application.rejection_condition_resolved,
+      rejectionCoolingOffEndsAt:
+        application.status === "REJECTED" &&
+        !application.rejection_condition_resolved
+          ? applicantCoolingOffEndsAt(application.rejected_at)
+          : null,
+      rejectionCoolingOffDaysRemaining:
+        application.status === "REJECTED" &&
+        !application.rejection_condition_resolved
+          ? applicantCoolingOffDaysRemaining(application.rejected_at)
+          : null,
       rejectionNoticeCode: applicantRejectionNoticeCode(
         application.status,
         application.rejected_reason_code,
@@ -2615,6 +3495,481 @@ app.get("/v1/local/public/applications", async (request, reply) => {
     })),
   };
 });
+
+app.get("/v1/local/public/notifications", async (request, reply) => {
+  const query = z
+    .object({
+      page: z.coerce.number().int().min(1).default(1),
+      pageSize: z.coerce.number().int().min(1).max(50).default(10),
+    })
+    .parse(request.query);
+  const authenticatedUser = await authenticatedApplicant(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!authenticatedUser) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const user = await pool.query<{ id: string }>(
+    "SELECT id FROM users WHERE telegram_user_ref = $1",
+    [authenticatedUser.telegramUserRef],
+  );
+  if (!user.rowCount) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const notifications = await loadApplicantNotifications(user.rows[0]!.id);
+  const page = Math.max(1, query.page);
+  const pageSize = Math.max(1, query.pageSize);
+  const paginated = paginateApplicantNotifications(
+    notifications,
+    page,
+    pageSize,
+  );
+  return {
+    page: Math.min(page, paginated.pageCount),
+    pageSize,
+    itemCount: paginated.itemCount,
+    pageCount: paginated.pageCount,
+    unreadCount: paginated.unreadCount,
+    items: paginated.items,
+  };
+});
+
+app.get(
+  "/v1/local/public/notifications/:notificationId",
+  async (request, reply) => {
+    const params = z
+      .object({ notificationId: z.string().regex(/^[a-f0-9]{64}$/i) })
+      .parse(request.params);
+    const authenticatedUser = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!authenticatedUser) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const user = await pool.query<{ id: string }>(
+      "SELECT id FROM users WHERE telegram_user_ref = $1",
+      [authenticatedUser.telegramUserRef],
+    );
+    if (!user.rowCount) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const items = await loadApplicantNotifications(user.rows[0]!.id);
+    const target = items.find((item) => item.id === params.notificationId);
+    if (!target) {
+      return reply.code(404).send({ code: "NOTIFICATION_NOT_FOUND" });
+    }
+    return target;
+  },
+);
+
+app.post("/v1/local/public/notifications/read-all", async (request, reply) => {
+  const authenticatedUser = await authenticatedApplicant(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!authenticatedUser) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const user = await pool.query<{ id: string }>(
+    "SELECT id FROM users WHERE telegram_user_ref = $1",
+    [authenticatedUser.telegramUserRef],
+  );
+  if (!user.rowCount) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const userId = user.rows[0]!.id;
+  const items = await loadApplicantNotifications(userId);
+  const unreadIds = items.filter((item) => item.unread).map((item) => item.id);
+  if (unreadIds.length === 0) {
+    return {
+      readCount: 0,
+      unreadCount: 0,
+    };
+  }
+  const result = await pool.query<{ notification_id: string; read_at: string }>(
+    `INSERT INTO applicant_notification_reads (user_id, notification_id)
+       SELECT $1, notification_id
+         FROM unnest($2::text[]) AS source(notification_id)
+       ON CONFLICT (user_id, notification_id)
+       DO UPDATE SET read_at = applicant_notification_reads.read_at
+       RETURNING notification_id, read_at::text`,
+    [userId, unreadIds],
+  );
+  return {
+    readCount: result.rowCount,
+    unreadCount: 0,
+    readAt: result.rows[0]?.read_at,
+  };
+});
+
+app.post(
+  "/v1/local/public/notifications/:notificationId/read",
+  async (request, reply) => {
+    const params = z
+      .object({ notificationId: z.string().regex(/^[a-f0-9]{64}$/i) })
+      .parse(request.params);
+    const authenticatedUser = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!authenticatedUser) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const user = await pool.query<{ id: string }>(
+      "SELECT id FROM users WHERE telegram_user_ref = $1",
+      [authenticatedUser.telegramUserRef],
+    );
+    if (!user.rowCount) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const userId = user.rows[0]!.id;
+    const items = await loadApplicantNotifications(userId);
+    const target = items.find((item) => item.id === params.notificationId);
+    if (!target) {
+      return reply.code(404).send({ code: "NOTIFICATION_NOT_FOUND" });
+    }
+    const result = await pool.query<{ read_at: string }>(
+      `INSERT INTO applicant_notification_reads (user_id, notification_id)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id, notification_id)
+       DO UPDATE SET read_at = applicant_notification_reads.read_at
+       RETURNING read_at::text`,
+      [userId, params.notificationId],
+    );
+    return {
+      notificationId: params.notificationId,
+      unread: false,
+      readAt: result.rows[0]!.read_at,
+    };
+  },
+);
+
+app.post(
+  "/v1/local/public/applications/:applicationNo/payment-proofs",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input =
+      typeof request.headers["content-type"] === "string" &&
+      /^multipart\/form-data/i.test(request.headers["content-type"])
+        ? parseApplicantPaymentProofMultipart(
+            request.headers["content-type"],
+            request.body,
+          )
+        : applicantPaymentProofUploadSchema.parse(request.body);
+    let encryptedContent: Buffer;
+    let keyVersion: string;
+    try {
+      encryptedContent = encryptPersonalValue(input.contentBase64);
+      keyVersion = personalDataKeyVersion();
+    } catch (error) {
+      request.log.error({ err: error }, "payment proof encryption unavailable");
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplicantOwnedApplication(
+        client,
+        params.applicationNo,
+        applicant.telegramUserRef,
+      );
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "APPLICANT_PAYMENT_PROOF_UPLOAD",
+        applicant.telegramUserRef,
+        idempotencyKey,
+        {
+          fileName: input.fileName,
+          contentType: input.contentType,
+          contentBase64Hash: eventHash([input.contentBase64]),
+          transferReference: input.transferReference ?? null,
+        },
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      if (!canApplicantUploadPaymentProof(application.status)) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "PAYMENT_PROOF_NOT_AVAILABLE",
+          currentStatus: application.status,
+        });
+      }
+      const latestProof = await client.query<{ status: string }>(
+        `SELECT status
+           FROM applicant_payment_proofs
+          WHERE application_id = $1
+          ORDER BY submitted_at DESC
+          LIMIT 1
+          FOR UPDATE`,
+        [application.id],
+      );
+      if (
+        latestProof.rows[0]?.status === "UNDER_REVIEW" ||
+        latestProof.rows[0]?.status === "RECONCILED"
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "PAYMENT_PROOF_ALREADY_ACTIVE",
+          currentStatus: latestProof.rows[0]!.status,
+        });
+      }
+      const owner = await client.query<{ user_id: string }>(
+        `SELECT user_id FROM applications WHERE id = $1`,
+        [application.id],
+      );
+      const proofNo = `PRF-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const created = await client.query<{
+        proof_no: string;
+        status: "UNDER_REVIEW";
+        submitted_at: string;
+      }>(
+        `INSERT INTO applicant_payment_proofs
+          (proof_no, application_id, user_id, file_name, content_type, file_size_bytes,
+           file_content_encrypted, file_key_version, transfer_reference)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::bytea, $8, $9)
+         RETURNING proof_no, status, submitted_at::text`,
+        [
+          proofNo,
+          application.id,
+          owner.rows[0]!.user_id,
+          input.fileName,
+          input.contentType,
+          Buffer.from(input.contentBase64, "base64").byteLength,
+          encryptedContent,
+          keyVersion,
+          input.transferReference ?? null,
+        ],
+      );
+      const response = {
+        proofNo: created.rows[0]!.proof_no,
+        status: created.rows[0]!.status,
+        submittedAt: created.rows[0]!.submitted_at,
+      };
+      await addAuditEvent(
+        client,
+        application.id,
+        "APPLICANT_PAYMENT_PROOF_SUBMITTED",
+        applicant.telegramUserRef,
+        {
+          proofNo,
+          contentType: input.contentType,
+          transferReferenceProvided: Boolean(input.transferReference),
+        },
+      );
+      await recordManualActionResult(
+        client,
+        application,
+        "APPLICANT_PAYMENT_PROOF_UPLOAD",
+        applicant.telegramUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send(response);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/public/applications/:applicationNo/reassessment-requests",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = applicantReassessmentRequestSchema.parse(request.body);
+    let encryptedNote: Buffer | undefined;
+    let keyVersion: string | undefined;
+    if (input.note) {
+      try {
+        encryptedNote = encryptPersonalValue(input.note);
+        keyVersion = personalDataKeyVersion();
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          "reassessment request encryption unavailable",
+        );
+        return reply
+          .code(503)
+          .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+      }
+    }
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplicantOwnedApplication(
+        client,
+        params.applicationNo,
+        applicant.telegramUserRef,
+      );
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "APPLICANT_REASSESSMENT_REQUEST",
+        applicant.telegramUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      if (!canApplicantRequestReassessment(application.status)) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "REASSESSMENT_NOT_AVAILABLE",
+          currentStatus: application.status,
+        });
+      }
+      const existing = await client.query<{ status: string }>(
+        `SELECT status
+           FROM applicant_reassessment_requests
+          WHERE application_id = $1
+            AND status IN ('SUBMITTED', 'UNDER_REVIEW')
+          LIMIT 1
+          FOR UPDATE`,
+        [application.id],
+      );
+      if (existing.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "REASSESSMENT_ALREADY_ACTIVE",
+          currentStatus: existing.rows[0]!.status,
+        });
+      }
+      const owner = await client.query<{ user_id: string }>(
+        `SELECT user_id FROM applications WHERE id = $1`,
+        [application.id],
+      );
+      const requestNo = `REA-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const created = await client.query<{
+        request_no: string;
+        status: "SUBMITTED";
+        created_at: string;
+        id: string;
+      }>(
+        `INSERT INTO applicant_reassessment_requests
+          (request_no, application_id, user_id, address_changed, employer_updated,
+           wealth_proof_declared, note_encrypted, note_key_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::bytea, $8)
+         RETURNING id, request_no, status, created_at::text`,
+        [
+          requestNo,
+          application.id,
+          owner.rows[0]!.user_id,
+          input.addressChanged,
+          input.employerUpdated,
+          input.wealthProofDeclared,
+          encryptedNote ?? null,
+          keyVersion ?? null,
+        ],
+      );
+      const approvalCase = await client.query<{ id: string }>(
+        `INSERT INTO approval_cases
+          (aggregate_type, aggregate_id, workflow_definition_code, workflow_definition_version,
+           current_step, status, assigned_role_code, strategy_requires_checker)
+         VALUES ('REASSESSMENT_REQUEST', $1, 'REASSESSMENT_REVIEW_V1', 1,
+           'BROKER_REVIEW', 'PENDING', 'BROKER_OFFICER', true)
+         RETURNING id`,
+        [created.rows[0]!.id],
+      );
+      await client.query(
+        `UPDATE applicant_reassessment_requests
+            SET approval_case_id = $1, updated_at = now()
+          WHERE id = $2`,
+        [approvalCase.rows[0]!.id, created.rows[0]!.id],
+      );
+      const response = {
+        requestNo: created.rows[0]!.request_no,
+        status: created.rows[0]!.status,
+        submittedAt: created.rows[0]!.created_at,
+      };
+      await addAuditEvent(
+        client,
+        application.id,
+        "APPLICANT_REASSESSMENT_REQUESTED",
+        applicant.telegramUserRef,
+        {
+          requestNo,
+          addressChanged: input.addressChanged,
+          employerUpdated: input.employerUpdated,
+          wealthProofDeclared: input.wealthProofDeclared,
+          noteProvided: Boolean(input.note),
+        },
+      );
+      await recordManualActionResult(
+        client,
+        application,
+        "APPLICANT_REASSESSMENT_REQUEST",
+        applicant.telegramUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send(response);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
 
 app.put(
   "/v1/local/public/profile/preferred-language",
@@ -4765,6 +6120,698 @@ app.post(
       client.release();
     }
     */
+  },
+);
+
+app.get("/v1/local/payment-proofs/open", async (request, reply) => {
+  if (!requirePaymentProofReviewRole(request, reply)) return;
+  const result = await pool.query<{
+    proof_no: string;
+    application_no: string;
+    status: "UNDER_REVIEW" | "NEEDS_MORE" | "RECONCILED" | "EXCEPTION";
+    file_name: string;
+    content_type: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    transfer_reference: string | null;
+    submitted_at: string;
+  }>(
+    `SELECT p.proof_no, a.application_no, p.status, p.file_name, p.content_type,
+            p.transfer_reference, p.submitted_at::text
+       FROM applicant_payment_proofs p
+       JOIN applications a ON a.id = p.application_id
+      WHERE p.status = 'UNDER_REVIEW'
+      ORDER BY p.submitted_at ASC`,
+  );
+  return {
+    items: result.rows.map((row) => ({
+      proofNo: row.proof_no,
+      applicationNo: row.application_no,
+      status: row.status,
+      fileName: row.file_name,
+      contentType: row.content_type,
+      transferReference: row.transfer_reference,
+      submittedAt: row.submitted_at,
+    })),
+  };
+});
+
+app.get("/v1/local/payment-proofs/:proofNo", async (request, reply) => {
+  if (!requirePaymentProofReviewRole(request, reply)) return;
+  const params = z.object({ proofNo: z.string().min(1) }).parse(request.params);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const proof = await lockPaymentProof(client, params.proofNo);
+    if (!proof) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ code: "PAYMENT_PROOF_NOT_FOUND" });
+    }
+    let contentBase64: string;
+    try {
+      contentBase64 = decryptPersonalValue(proof.file_content_encrypted);
+    } catch (error) {
+      request.log.error({ err: error }, "payment proof decryption unavailable");
+      await client.query("ROLLBACK");
+      return reply
+        .code(503)
+        .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+    }
+    await addAuditEvent(
+      client,
+      proof.id,
+      "APPLICANT_PAYMENT_PROOF_VIEWED",
+      request.adminIdentity!.loginName,
+      { proofNo: proof.proof_no },
+      "APPLICANT_PAYMENT_PROOF",
+    );
+    await client.query("COMMIT");
+    return {
+      proofNo: proof.proof_no,
+      applicationId: proof.application_id,
+      status: proof.status,
+      fileName: proof.file_name,
+      contentType: proof.content_type,
+      transferReference: proof.transfer_reference,
+      submittedAt: proof.submitted_at,
+      contentBase64,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/v1/local/payment-proofs/:proofNo/review", async (request, reply) => {
+  if (!requirePaymentProofReviewRole(request, reply)) return;
+  const idempotencyKey = manualActionIdempotencyKey(
+    request.headers["idempotency-key"],
+  );
+  if (!idempotencyKey)
+    return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+  const params = z.object({ proofNo: z.string().min(1) }).parse(request.params);
+  const input = applicantPaymentProofReviewSchema.parse(request.body);
+  const actorUserRef = request.adminIdentity!.loginName;
+  const actorRole = request.adminIdentity!.roles.includes(
+    "LENDER_REPAYMENT_CHECKER",
+  )
+    ? "LENDER_REPAYMENT_CHECKER"
+    : "BROKER_OFFICER";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const proof = await lockPaymentProof(client, params.proofNo);
+    if (!proof) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ code: "PAYMENT_PROOF_NOT_FOUND" });
+    }
+    const application = await lockApplicationById(client, proof.application_id);
+    if (!application) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+    }
+    const replay = await manualActionReplay(
+      client,
+      application,
+      "APPLICANT_PAYMENT_PROOF_REVIEW",
+      actorUserRef,
+      idempotencyKey,
+      input,
+    );
+    if (replay.kind === "replay") {
+      await client.query("ROLLBACK");
+      return reply.code(replay.responseStatus).send(replay.responseBody);
+    }
+    if (replay.kind === "key-reused") {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+    }
+    if (proof.status !== "UNDER_REVIEW") {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({
+        code: "PAYMENT_PROOF_REVIEW_NOT_AVAILABLE",
+        currentStatus: proof.status,
+      });
+    }
+    await client.query(
+      `UPDATE applicant_payment_proofs
+          SET status = $1,
+              review_reason_code = $2,
+              reviewed_by_user_ref = $3,
+              reviewed_at = now()
+        WHERE id = $4`,
+      [input.status, input.reasonCode, actorUserRef, proof.id],
+    );
+    const response = {
+      proofNo: proof.proof_no,
+      status: input.status,
+      reviewedBy: actorUserRef,
+    };
+    await addAuditEvent(
+      client,
+      proof.id,
+      "APPLICANT_PAYMENT_PROOF_REVIEWED",
+      actorUserRef,
+      { proofNo: proof.proof_no, actorRole, ...input },
+      "APPLICANT_PAYMENT_PROOF",
+    );
+    await recordManualActionResult(
+      client,
+      application,
+      "APPLICANT_PAYMENT_PROOF_REVIEW",
+      actorUserRef,
+      replay,
+      response,
+    );
+    await client.query("COMMIT");
+    return response;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/v1/local/reassessment-requests/open", async (request, reply) => {
+  if (!requireReassessmentQueueRole(request, reply)) return;
+  const roles = request.adminIdentity!.roles;
+  const assignedRoleCodes = [
+    ...(roles.includes("BROKER_OFFICER") ? ["BROKER_OFFICER"] : []),
+    ...(roles.includes("LENDER_CREDIT_OFFICER")
+      ? ["LENDER_CREDIT_OFFICER"]
+      : []),
+    ...(roles.includes("LENDER_CREDIT_REVIEWER")
+      ? ["LENDER_CREDIT_REVIEWER"]
+      : []),
+  ];
+  const result = await pool.query<{
+    request_no: string;
+    application_no: string;
+    status: string;
+    current_step: string;
+    assigned_role_code: string | null;
+    created_at: string;
+  }>(
+    `SELECT r.request_no, a.application_no, r.status, c.current_step,
+            c.assigned_role_code, r.created_at::text
+       FROM applicant_reassessment_requests r
+       JOIN applications a ON a.id = r.application_id
+       JOIN approval_cases c ON c.id = r.approval_case_id
+      WHERE c.workflow_definition_code = 'REASSESSMENT_REVIEW_V1'
+        AND c.status IN ('PENDING', 'RETURNED')
+        AND c.assigned_role_code = ANY($1::text[])
+      ORDER BY r.created_at ASC`,
+    [assignedRoleCodes],
+  );
+  return {
+    items: result.rows.map((row) => ({
+      requestNo: row.request_no,
+      applicationNo: row.application_no,
+      status: row.status,
+      currentStep: row.current_step,
+      assignedRoleCode: row.assigned_role_code,
+      submittedAt: row.created_at,
+    })),
+  };
+});
+
+app.get(
+  "/v1/local/reassessment-requests/:requestNo",
+  async (request, reply) => {
+    if (!requireReassessmentQueueRole(request, reply)) return;
+    const params = z
+      .object({ requestNo: z.string().min(1) })
+      .parse(request.params);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const record = await lockReassessmentRequest(client, params.requestNo);
+      if (!record) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "REASSESSMENT_REQUEST_NOT_FOUND" });
+      }
+      const approvalCase = record.approval_case_id
+        ? await client.query<{
+            current_step: string;
+            status: string;
+            assigned_role_code: string | null;
+          }>(
+            `SELECT current_step, status, assigned_role_code
+               FROM approval_cases
+              WHERE id = $1
+              FOR UPDATE`,
+            [record.approval_case_id],
+          )
+        : undefined;
+      let note: string | null = null;
+      if (record.note_encrypted) {
+        try {
+          note = decryptPersonalValue(record.note_encrypted);
+        } catch (error) {
+          request.log.error(
+            { err: error },
+            "reassessment note decryption unavailable",
+          );
+          await client.query("ROLLBACK");
+          return reply
+            .code(503)
+            .send({ code: "PERSONAL_DATA_STORAGE_UNAVAILABLE" });
+        }
+      }
+      await addAuditEvent(
+        client,
+        record.id,
+        "APPLICANT_REASSESSMENT_VIEWED",
+        request.adminIdentity!.loginName,
+        { requestNo: record.request_no },
+        "APPLICANT_REASSESSMENT_REQUEST",
+      );
+      await client.query("COMMIT");
+      return {
+        requestNo: record.request_no,
+        applicationId: record.application_id,
+        status: record.status,
+        addressChanged: record.address_changed,
+        employerUpdated: record.employer_updated,
+        wealthProofDeclared: record.wealth_proof_declared,
+        submittedAt: record.created_at,
+        note,
+        approvalCase: approvalCase?.rows[0]
+          ? {
+              currentStep: approvalCase.rows[0]!.current_step,
+              status: approvalCase.rows[0]!.status,
+              assignedRoleCode: approvalCase.rows[0]!.assigned_role_code,
+            }
+          : null,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/reassessment-requests/:requestNo/broker-review",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    const params = z
+      .object({ requestNo: z.string().min(1) })
+      .parse(request.params);
+    const input = applicantReassessmentBrokerReviewSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const record = await lockReassessmentRequest(client, params.requestNo);
+      if (!record || !record.approval_case_id) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "REASSESSMENT_REQUEST_NOT_FOUND" });
+      }
+      const application = await lockApplicationById(
+        client,
+        record.application_id,
+      );
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "REASSESSMENT_BROKER_REVIEW",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const approvalCase = await client.query<{
+        current_step: string;
+        status: string;
+        current_round: number;
+      }>(
+        `SELECT current_step, status, current_round
+           FROM approval_cases
+          WHERE id = $1
+          FOR UPDATE`,
+        [record.approval_case_id],
+      );
+      const item = approvalCase.rows[0];
+      if (!item || item.current_step !== "BROKER_REVIEW") {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "REASSESSMENT_REVIEW_NOT_AVAILABLE" });
+      }
+      await client.query(
+        `INSERT INTO approval_case_events
+          (approval_case_id, step, action, actor_user_ref, actor_role, reason_code,
+           input_snapshot_hash, idempotency_key, occurred_at, current_round)
+         VALUES ($1, 'BROKER_REVIEW', $2, $3, 'BROKER_OFFICER', $4, $5, $6, now(), $7)`,
+        [
+          record.approval_case_id,
+          approvalCaseAction(input.decision),
+          actorUserRef,
+          input.reasonCode,
+          eventHash([JSON.stringify(input)]),
+          idempotencyKey,
+          item.current_round,
+        ],
+      );
+      if (input.decision === "APPROVED") {
+        await client.query(
+          `UPDATE approval_cases
+              SET current_step = 'CREDIT_MAKER_REVIEW',
+                  status = 'PENDING',
+                  assigned_role_code = 'LENDER_CREDIT_OFFICER',
+                  updated_at = now()
+            WHERE id = $1`,
+          [record.approval_case_id],
+        );
+        await client.query(
+          `UPDATE applicant_reassessment_requests
+              SET status = 'UNDER_REVIEW', updated_at = now()
+            WHERE id = $1`,
+          [record.id],
+        );
+      } else if (input.decision === "RETURNED") {
+        await client.query(
+          `UPDATE approval_cases
+              SET status = 'RETURNED',
+                  assigned_role_code = 'BROKER_OFFICER',
+                  current_round = current_round + 1,
+                  updated_at = now()
+            WHERE id = $1`,
+          [record.approval_case_id],
+        );
+        await client.query(
+          `UPDATE applicant_reassessment_requests
+              SET status = 'UNDER_REVIEW', updated_at = now()
+            WHERE id = $1`,
+          [record.id],
+        );
+      } else {
+        await client.query(
+          `UPDATE approval_cases
+              SET status = 'REJECTED', updated_at = now()
+            WHERE id = $1`,
+          [record.approval_case_id],
+        );
+        await client.query(
+          `UPDATE applicant_reassessment_requests
+              SET status = 'DECLINED',
+                  decision_reason_code = $1,
+                  reviewed_by_user_ref = $2,
+                  reviewed_at = now(),
+                  updated_at = now()
+            WHERE id = $3`,
+          [input.reasonCode, actorUserRef, record.id],
+        );
+      }
+      const response = {
+        requestNo: record.request_no,
+        decision: input.decision,
+      };
+      await addAuditEvent(
+        client,
+        record.id,
+        "APPLICANT_REASSESSMENT_BROKER_REVIEWED",
+        actorUserRef,
+        { requestNo: record.request_no, ...input },
+        "APPLICANT_REASSESSMENT_REQUEST",
+      );
+      await recordManualActionResult(
+        client,
+        application,
+        "REASSESSMENT_BROKER_REVIEW",
+        actorUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return response;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/reassessment-requests/:requestNo/lender-review",
+  async (request, reply) => {
+    if (!requireReassessmentQueueRole(request, reply)) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    const params = z
+      .object({ requestNo: z.string().min(1) })
+      .parse(request.params);
+    const input = applicantReassessmentLenderReviewSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const roles = request.adminIdentity!.roles;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const record = await lockReassessmentRequest(client, params.requestNo);
+      if (!record || !record.approval_case_id) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "REASSESSMENT_REQUEST_NOT_FOUND" });
+      }
+      const application = await lockApplicationById(
+        client,
+        record.application_id,
+      );
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "REASSESSMENT_LENDER_REVIEW",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const approvalCase = await client.query<{
+        current_step: string;
+        status: string;
+        current_round: number;
+      }>(
+        `SELECT current_step, status, current_round
+           FROM approval_cases
+          WHERE id = $1
+          FOR UPDATE`,
+        [record.approval_case_id],
+      );
+      const item = approvalCase.rows[0];
+      if (!item) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "REASSESSMENT_REQUEST_NOT_FOUND" });
+      }
+      const actorRole =
+        item.current_step === "CREDIT_MAKER_REVIEW"
+          ? "LENDER_CREDIT_OFFICER"
+          : "LENDER_CREDIT_REVIEWER";
+      if (
+        (item.current_step === "CREDIT_MAKER_REVIEW" &&
+          !roles.includes("LENDER_CREDIT_OFFICER")) ||
+        (item.current_step === "CREDIT_CHECKER_REVIEW" &&
+          !roles.includes("LENDER_CREDIT_REVIEWER"))
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+      }
+      if (
+        item.current_step === "CREDIT_CHECKER_REVIEW" &&
+        input.decision === "APPROVED"
+      ) {
+        const maker = await client.query<{ actor_user_ref: string }>(
+          `SELECT actor_user_ref
+             FROM approval_case_events
+            WHERE approval_case_id = $1
+              AND step = 'CREDIT_MAKER_REVIEW'
+              AND action = 'APPROVE'
+              AND current_round = $2
+            ORDER BY occurred_at DESC
+            LIMIT 1`,
+          [record.approval_case_id, item.current_round],
+        );
+        if (maker.rows[0]?.actor_user_ref === actorUserRef) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ code: "DUAL_CONTROL_CONFLICT" });
+        }
+      }
+      await client.query(
+        `INSERT INTO approval_case_events
+          (approval_case_id, step, action, actor_user_ref, actor_role, reason_code,
+           input_snapshot_hash, idempotency_key, occurred_at, current_round)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9)`,
+        [
+          record.approval_case_id,
+          item.current_step,
+          approvalCaseAction(input.decision),
+          actorUserRef,
+          actorRole,
+          input.reasonCode,
+          eventHash([JSON.stringify(input)]),
+          idempotencyKey,
+          item.current_round,
+        ],
+      );
+      if (item.current_step === "CREDIT_MAKER_REVIEW") {
+        if (input.decision === "APPROVED") {
+          await client.query(
+            `UPDATE approval_cases
+                SET current_step = 'CREDIT_CHECKER_REVIEW',
+                    status = 'PENDING',
+                    assigned_role_code = 'LENDER_CREDIT_REVIEWER',
+                    updated_at = now()
+              WHERE id = $1`,
+            [record.approval_case_id],
+          );
+        } else if (input.decision === "RETURNED") {
+          await client.query(
+            `UPDATE approval_cases
+                SET current_step = 'BROKER_REVIEW',
+                    status = 'RETURNED',
+                    assigned_role_code = 'BROKER_OFFICER',
+                    current_round = current_round + 1,
+                    updated_at = now()
+              WHERE id = $1`,
+            [record.approval_case_id],
+          );
+        } else {
+          await client.query(
+            `UPDATE approval_cases
+                SET status = 'REJECTED', updated_at = now()
+              WHERE id = $1`,
+            [record.approval_case_id],
+          );
+          await client.query(
+            `UPDATE applicant_reassessment_requests
+                SET status = 'DECLINED',
+                    decision_reason_code = $1,
+                    reviewed_by_user_ref = $2,
+                    reviewed_at = now(),
+                    updated_at = now()
+              WHERE id = $3`,
+            [input.reasonCode, actorUserRef, record.id],
+          );
+        }
+      } else if (item.current_step === "CREDIT_CHECKER_REVIEW") {
+        if (input.decision === "APPROVED") {
+          await client.query(
+            `UPDATE approval_cases
+                SET current_step = 'OFFER_READY',
+                    status = 'COMPLETED',
+                    assigned_role_code = 'LENDER_CREDIT_REVIEWER',
+                    updated_at = now()
+              WHERE id = $1`,
+            [record.approval_case_id],
+          );
+          await client.query(
+            `UPDATE applicant_reassessment_requests
+                SET status = 'APPROVED',
+                    decision_reason_code = $1,
+                    reviewed_by_user_ref = $2,
+                    reviewed_at = now(),
+                    updated_at = now()
+              WHERE id = $3`,
+            [input.reasonCode, actorUserRef, record.id],
+          );
+        } else if (input.decision === "RETURNED") {
+          await client.query(
+            `UPDATE approval_cases
+                SET current_step = 'CREDIT_MAKER_REVIEW',
+                    status = 'RETURNED',
+                    assigned_role_code = 'LENDER_CREDIT_OFFICER',
+                    current_round = current_round + 1,
+                    updated_at = now()
+              WHERE id = $1`,
+            [record.approval_case_id],
+          );
+        } else {
+          await client.query(
+            `UPDATE approval_cases
+                SET status = 'REJECTED', updated_at = now()
+              WHERE id = $1`,
+            [record.approval_case_id],
+          );
+          await client.query(
+            `UPDATE applicant_reassessment_requests
+                SET status = 'DECLINED',
+                    decision_reason_code = $1,
+                    reviewed_by_user_ref = $2,
+                    reviewed_at = now(),
+                    updated_at = now()
+              WHERE id = $3`,
+            [input.reasonCode, actorUserRef, record.id],
+          );
+        }
+      } else {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "REASSESSMENT_REVIEW_NOT_AVAILABLE" });
+      }
+      const response = {
+        requestNo: record.request_no,
+        decision: input.decision,
+        step: item.current_step,
+      };
+      await addAuditEvent(
+        client,
+        record.id,
+        "APPLICANT_REASSESSMENT_LENDER_REVIEWED",
+        actorUserRef,
+        { requestNo: record.request_no, actorRole, ...input },
+        "APPLICANT_REASSESSMENT_REQUEST",
+      );
+      await recordManualActionResult(
+        client,
+        application,
+        "REASSESSMENT_LENDER_REVIEW",
+        actorUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return response;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 );
 

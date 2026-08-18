@@ -3,10 +3,27 @@
 
 [CmdletBinding()]
 param(
-  [string]$RootDir = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
+  [string]$RootDir
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Match the primary scanner's host-safe root resolution. Some PowerShell
+# wrappers leave MyInvocation.MyCommand.Path empty.
+if ([string]::IsNullOrWhiteSpace($RootDir)) {
+  $candidate = $null
+  if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    try { $candidate = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($PSScriptRoot)) } catch { $candidate = $null }
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+    try {
+      $scriptDir = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($MyInvocation.MyCommand.Path))
+      $candidate = [IO.Path]::GetDirectoryName($scriptDir)
+    } catch { $candidate = $null }
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate)) { $candidate = (Get-Location).Path }
+  $RootDir = $candidate
+}
 
 Write-Host ('[check-secrets-trufflehog PS] RootDir=' + $RootDir + ' (secondary; gitleaks primary)')
 

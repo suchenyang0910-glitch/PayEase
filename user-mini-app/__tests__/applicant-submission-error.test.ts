@@ -22,6 +22,27 @@ describe("applicant submission error messages", () => {
     }
   });
 
+  it("maps phone verification and mismatch errors to actionable guidance", () => {
+    expect(
+      applicantSubmissionErrorMessage(
+        "TELEGRAM_PHONE_VERIFICATION_REQUIRED",
+        "zh-CN",
+      ),
+    ).toContain("Telegram 手机号验证");
+    expect(
+      applicantSubmissionErrorMessage("TELEGRAM_PHONE_MISMATCH", "zh-CN"),
+    ).toContain("不一致");
+  });
+
+  it("maps profile and factory issues to concrete next steps", () => {
+    expect(
+      applicantSubmissionErrorMessage("PERSONAL_PROFILE_REQUIRED", "zh-CN"),
+    ).toContain("完整填写基础资料");
+    expect(
+      applicantSubmissionErrorMessage("EMPLOYER_TENANT_UNAVAILABLE", "zh-CN"),
+    ).toContain("所属工厂");
+  });
+
   it("does not replace unrelated submission errors", () => {
     expect(
       applicantSubmissionErrorMessage("SUBMISSION_FAILED", "en"),

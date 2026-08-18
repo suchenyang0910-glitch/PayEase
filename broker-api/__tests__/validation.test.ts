@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  applicantPaymentProofReviewSchema,
+  applicantReassessmentBrokerReviewSchema,
   createApplicationSchema,
   disbursementDualControlSchema,
   applicantSupplementResponseSchema,
@@ -121,6 +123,36 @@ describe("controlled-pilot application validation", () => {
     expect(
       applicantSupplementResponseSchema.safeParse({
         message: "x".repeat(2001),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts only controlled payment-proof review statuses and reason codes", () => {
+    expect(
+      applicantPaymentProofReviewSchema.safeParse({
+        status: "RECONCILED",
+        reasonCode: "PROOF_MATCHED",
+      }).success,
+    ).toBe(true);
+    expect(
+      applicantPaymentProofReviewSchema.safeParse({
+        status: "UNDER_REVIEW",
+        reasonCode: "PROOF_MATCHED",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a valid reassessment review decision payload", () => {
+    expect(
+      applicantReassessmentBrokerReviewSchema.safeParse({
+        decision: "APPROVED",
+        reasonCode: "REASSESSMENT_ELIGIBLE",
+      }).success,
+    ).toBe(true);
+    expect(
+      applicantReassessmentBrokerReviewSchema.safeParse({
+        decision: "APPROVED",
+        reasonCode: "bad reason",
       }).success,
     ).toBe(false);
   });

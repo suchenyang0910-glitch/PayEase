@@ -43,7 +43,7 @@
     ]
   },
   "source_matrix_ref": {
-    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "doc": "docs/04-安全与合规/ROLE_RBAC_MATRIX.md",
     "section": "§X.X <domain> page/action matrix",
     "row_label": "/example/protected/page-or-endpoint example row",
     "cell_expected": "200"

@@ -60,7 +60,7 @@ describe("applicant service-case list", () => {
       "Complaint · With the licensed lender",
     );
     expect(applicantServiceCaseLabel(serviceCase, "zh-CN")).toBe(
-      "投诉 · 已转交持牌机构",
+      "投诉 · 已转交处理",
     );
     expect(applicantServiceCaseLabel(serviceCase, "km")).toContain("បណ្តឹង");
   });

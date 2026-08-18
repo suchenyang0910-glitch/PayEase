@@ -23,6 +23,15 @@ export type ApplicantResult =
   | "withdrawn"
   | "reviewing";
 
+export type BorrowEntryAction =
+  | "start"
+  | "continue-draft"
+  | "view-progress"
+  | "review-sign"
+  | "view-bill"
+  | "apply-new"
+  | "view-explanation";
+
 const withdrawableStatuses = new Set([
   "BROKER_REVIEW",
   "EMPLOYER_VERIFICATION",
@@ -63,4 +72,33 @@ export function applicantResult(
   if (application?.supplementRequested) return "supplement-requested";
   if (application?.approvedAmountMinor) return "approved";
   return "reviewing";
+}
+
+export function borrowEntryAction(
+  result: ApplicantResult | undefined,
+  hasDraft: boolean,
+): BorrowEntryAction {
+  if (result === "reviewing" || result === "supplement-requested") {
+    return "view-progress";
+  }
+  if (result === "approved" || result === "contract-processing") {
+    return "review-sign";
+  }
+  if (result === "funded" || result === "repayment-active") {
+    return "view-bill";
+  }
+  if (result === "rejected-pending") {
+    return "view-explanation";
+  }
+  if (
+    result === "settled" ||
+    result === "withdrawn" ||
+    result === "rejected-resolved"
+  ) {
+    return "apply-new";
+  }
+  if (hasDraft) {
+    return "continue-draft";
+  }
+  return "start";
 }

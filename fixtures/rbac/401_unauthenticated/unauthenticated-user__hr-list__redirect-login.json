@@ -42,7 +42,7 @@
     ]
   },
   "source_matrix_ref": {
-    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "doc": "docs/04-安全与合规/ROLE_RBAC_MATRIX.md",
     "section": "§2.5 authentication and session",
     "row_label": "Unauthenticated access to a protected portal",
     "cell_expected": "401 or 302 /login"

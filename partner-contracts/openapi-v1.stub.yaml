@@ -5,7 +5,7 @@ info:
     S0.1 阶段 OpenAPI3.1 占位。
     - 真实接口 spec 由 S1.3 (申请编排 API) 与 S4 (lender-core API) 阶段按 template 生成。
     - 所有跨域 API 必须包含：contract-version / idempotency-key / signature / request-id / signature-key-id 5 个头。
-    - 参照文档：docs/三方API接口规范.md + 安全基线 §1.4 API 控制。
+    - 参照文档：docs/06-接口与集成/三方API接口规范.md + 安全基线 §1.4 API 控制。
   version: 0.1.0-s0.1
   contact:
     name: PayEase Security Gate

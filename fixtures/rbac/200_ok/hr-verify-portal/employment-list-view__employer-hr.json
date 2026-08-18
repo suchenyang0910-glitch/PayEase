@@ -50,7 +50,7 @@
     ]
   },
   "source_matrix_ref": {
-    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "doc": "docs/04-安全与合规/ROLE_RBAC_MATRIX.md",
     "section": "§2.3 employer HR verification pages",
     "row_label": "/employment/list view own employer pending verifications",
     "cell_expected": "200 (same employer tenant)"

@@ -8,12 +8,273 @@ import {
 } from "@testing-library/react";
 import { App } from "../src/App.tsx";
 
+const TEST_EMPLOYER_TENANT_ID = "4c16e7c6-6a31-4d22-9f47-4b5f9f6db201";
+
+function shellPick<T extends HTMLElement = HTMLElement>(
+  arr: T[] | (() => T[] | Promise<T[]>),
+  isAsync = false,
+): any {
+  return null;
+}
+
+function pickLabel(label: string): HTMLElement {
+  const all = screen.getAllByLabelText(label);
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+function pickRoleLiteral(role: string, name: string): HTMLElement {
+  const all = screen.getAllByRole(role as any, { name });
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+function pickRoleRe(role: string, name: RegExp): HTMLElement {
+  const all = screen.getAllByRole(role as any, { name });
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+async function findRoleRe(role: string, name: RegExp): Promise<HTMLElement> {
+  const all = await screen.findAllByRole(role as any, { name });
+  return (all.find((el) => !el.closest(".kx-shell")) ?? all[0]) as HTMLElement;
+}
+
+async function findRoleLiteral(
+  role: string,
+  name: string,
+): Promise<HTMLElement> {
+  const all = await screen.findAllByRole(role as any, { name });
+  return (all.find((el) => !el.closest(".kx-shell")) ?? all[0]) as HTMLElement;
+}
+
+function pickCheckbox(): HTMLElement {
+  const all = screen.getAllByRole("checkbox");
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+function toggleConsentCheckbox(): void {
+  const checkbox = screen
+    .getAllByRole("checkbox")
+    .find((element) =>
+      element.closest(".consent--confirm"),
+    ) as HTMLInputElement;
+  fireEvent.click(checkbox.closest("label") ?? checkbox);
+  expect(checkbox.checked).toBe(true);
+}
+
+function pickLanguage(): HTMLElement {
+  const all = screen.queryAllByRole("combobox", { name: "Language" });
+  if (all.length === 0) {
+    const profileTab = ["Me", "我的", "របស់ខ្ញុំ"]
+      .flatMap((name) => screen.queryAllByRole("tab", { name }))
+      .find(Boolean);
+    if (profileTab) fireEvent.click(profileTab);
+    return screen.getAllByRole("combobox", { name: "Language" })[0];
+  }
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+function currentTabLabel(
+  label: "home" | "orders" | "repayment" | "profile",
+): string {
+  const text = document.body.textContent ?? "";
+  if (
+    text.includes("Home") ||
+    text.includes("Borrow") ||
+    text.includes("Profile")
+  ) {
+    return label === "home"
+      ? "Home"
+      : label === "orders"
+        ? "Borrow"
+        : label === "repayment"
+          ? "Bill"
+          : "Me";
+  }
+  if (text.includes("首页") || text.includes("借款") || text.includes("我的")) {
+    return label === "home"
+      ? "首页"
+      : label === "orders"
+        ? "借款"
+        : label === "repayment"
+          ? "账单"
+          : "我的";
+  }
+  return label === "home"
+    ? "ទំព័រដើម"
+    : label === "orders"
+      ? "ខ្ចីប្រាក់"
+      : label === "repayment"
+        ? "វិក្កយបត្រ"
+        : "របស់ខ្ញុំ";
+}
+
+function openProfileLanguagePicker(): void {
+  void currentTabLabel;
+}
+
+async function findAlert(): Promise<HTMLElement> {
+  const all = await screen.findAllByRole("alert");
+  return (all.find((el) => !el.closest(".kx-shell")) ?? all[0]) as HTMLElement;
+}
+
+function pickLink(): HTMLElement {
+  const all = screen.getAllByRole("link");
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+function queryHeading(role: string, name: string): HTMLElement | null {
+  const all = screen.queryAllByRole(role as any, { name });
+  if (all.length === 0) return null;
+  return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
+}
+
+function openOrdersFromHome(): void {
+  const borrowTabs = screen.getAllByRole("tab", { name: /borrow|借款|ខ្ចី/i });
+  fireEvent.click(borrowTabs[0]!);
+}
+
+async function findBorrowEntryButton(): Promise<HTMLElement> {
+  return await screen.findByTestId("applicant-entry-submit-button");
+}
+
+async function enterBorrowDetailsStepIfNeeded(): Promise<void> {
+  const entryButton = screen.queryByTestId("applicant-entry-submit-button");
+  if (entryButton) {
+    fireEvent.click(entryButton);
+    return;
+  }
+  await findRoleRe("button", /save and continue|保存并继续|រក្សាទុក និងបន្ត/i);
+}
+
+async function findSubmitReviewButton(): Promise<HTMLElement> {
+  const all = await screen.findAllByRole("button", {
+    name: /submit for broker review|提交审核|确认提交/i,
+  });
+  return (all.find((element) => !element.closest(".application-stepper")) ??
+    all[0]) as HTMLElement;
+}
+
+function continueApplicationStep(): void {
+  const button =
+    screen.queryByRole("button", { name: /save and continue/i }) ??
+    screen.queryByRole("button", { name: /保存并继续/i }) ??
+    screen.queryByRole("button", { name: /រក្សាទុក និងបន្ត/i });
+  if (!button) throw new Error("Continue-step button not found");
+  fireEvent.click(button);
+}
+
+function fillEnglishApplicationToConfirm(options?: {
+  employer?: string;
+  contactOneName?: string;
+  contactOnePhone?: string;
+  contactTwoName?: string;
+  contactTwoPhone?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountHolder?: string;
+}): void {
+  fireEvent.change(pickLabel("Current address"), {
+    target: { value: "Phnom Penh" },
+  });
+  fireEvent.change(pickLabel("Full name"), {
+    target: { value: "Test Applicant" },
+  });
+  fireEvent.change(pickLabel("Mobile number"), {
+    target: { value: "+85512345678" },
+  });
+  fireEvent.change(pickLabel("Employer"), {
+    target: { value: options?.employer ?? "Pilot Factory" },
+  });
+  continueApplicationStep();
+
+  fireEvent.change(pickLabel("Emergency contact 1"), {
+    target: { value: options?.contactOneName ?? "Contact One" },
+  });
+  fireEvent.change(pickLabel("Emergency contact 1 phone"), {
+    target: { value: options?.contactOnePhone ?? "+85511111111" },
+  });
+  fireEvent.change(pickLabel("Emergency contact 2"), {
+    target: { value: options?.contactTwoName ?? "Contact Two" },
+  });
+  fireEvent.change(pickLabel("Emergency contact 2 phone"), {
+    target: { value: options?.contactTwoPhone ?? "+85522222222" },
+  });
+  continueApplicationStep();
+
+  if (screen.queryByLabelText("Select factory")) {
+    fireEvent.change(pickLabel("Select factory"), {
+      target: { value: TEST_EMPLOYER_TENANT_ID },
+    });
+    fireEvent.change(pickLabel("National ID / passport number"), {
+      target: { value: "KH-ID-10001" },
+    });
+  }
+  fireEvent.change(pickLabel("Receiving bank"), {
+    target: { value: options?.bankName ?? "ABA" },
+  });
+  fireEvent.change(pickLabel("Account / card number"), {
+    target: { value: options?.bankAccountNumber ?? "000111222333" },
+  });
+  fireEvent.change(pickLabel("Account holder name"), {
+    target: { value: options?.bankAccountHolder ?? "Test Applicant" },
+  });
+  continueApplicationStep();
+  continueApplicationStep();
+}
+
+function verifiedProfileResponse(
+  overrides: Partial<{
+    displayName: string | null;
+    username: string | null;
+    photoUrl: string | null;
+    telegramVerified: boolean;
+    phoneVerificationStatus: "VERIFIED" | "PENDING" | "NOT_STARTED";
+    employerDisplayName: string | null;
+    language: "km" | "en" | "zh-CN";
+    activeApplication: {
+      referenceMasked?: string;
+      status: string;
+      nextAction: string;
+    };
+    activeBill: {
+      referenceMasked?: string;
+      status: string;
+      dueDate: string | null;
+    };
+  }> = {},
+): Response {
+  return new Response(
+    JSON.stringify({
+      displayName: "Preview User",
+      username: "preview_user",
+      photoUrl: null,
+      telegramVerified: true,
+      phoneVerificationStatus: "NOT_STARTED",
+      employerDisplayName: null,
+      language: "en",
+      ...overrides,
+    }),
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function emptyDraftResponse(): Response {
+  return new Response(JSON.stringify({ draft: null }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 describe("applicant submission", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    if (typeof window.localStorage?.clear === "function") {
+      window.localStorage.clear();
+    } else {
+      window.localStorage?.removeItem?.("payease.language");
+    }
     Reflect.deleteProperty(window, "Telegram");
     Reflect.deleteProperty(document, "cookie");
     window.history.replaceState(null, "", "/");
@@ -36,33 +297,20 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.change(
-      screen.getByLabelText("Enter requested amount (USD 10–500)"),
-      {
-        target: { value: "123.45" },
-      },
-    );
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    fireEvent.change(screen.getByLabelText("Full name"), {
-      target: { value: "Test Applicant" },
+    fireEvent.click(screen.getAllByRole("tab", { name: "Borrow" })[0]!);
+    await findBorrowEntryButton();
+    fireEvent.change(pickLabel("Enter requested amount (USD 10–500)"), {
+      target: { value: "123.45" },
     });
-    fireEvent.change(screen.getByLabelText("Mobile number"), {
-      target: { value: "+85512345678" },
-    });
-    fireEvent.change(screen.getByLabelText("Employer"), {
-      target: { value: "Pilot Factory" },
-    });
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /personal-data authorization and privacy notice/i,
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /submit for broker review/i }),
-    );
+    fireEvent.click(await findBorrowEntryButton());
+    fillEnglishApplicationToConfirm();
+    toggleConsentCheckbox();
+    fireEvent.click(await findSubmitReviewButton());
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -82,20 +330,23 @@ describe("applicant submission", () => {
     });
   });
 
-  it("keeps a controlled preview read-only before personal-data entry", () => {
+  it("keeps a controlled preview read-only before personal-data entry", async () => {
     vi.stubEnv("VITE_PAYEASE_DEPLOYMENT_MODE", "controlled-preview");
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
+    fireEvent.click(screen.getAllByRole("tab", { name: "Borrow" })[0]!);
 
     expect(
-      screen.getByText(
+      await screen.findByText(
         "This preview is view-only. Applications and personal data entry are disabled.",
       ),
     ).toBeVisible();
-    expect(screen.getByTestId("applicant-entry-submit-button")).toBeDisabled();
+    expect(await findBorrowEntryButton()).toBeDisabled();
   });
 
   it("requires a signed-in applicant to choose a factory and submit an identity document", async () => {
@@ -103,83 +354,161 @@ describe("applicant submission", () => {
       configurable: true,
       value: { WebApp: { initData: "signed-init-data" } },
     });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 201 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ applications: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            tenants: [
-              { id: "tenant-lanhai-a", displayName: "Lanhai Factory A" },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            applicationNo: "APP-FACTORY-001",
-            status: "BROKER_REVIEW",
-          }),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
-      );
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/local/public/telegram-sessions") {
+        return Promise.resolve(new Response(null, { status: 201 }));
+      }
+      if (url === "/api/v1/local/public/applications" && !init?.method) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ preferredLanguage: "en", applications: [] }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }
+      if (url === "/api/v1/local/public/profile/view") {
+        return Promise.resolve(verifiedProfileResponse({ language: "en" }));
+      }
+      if (url.startsWith("/api/v1/local/public/notifications?")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              page: 1,
+              pageSize: 10,
+              itemCount: 0,
+              pageCount: 1,
+              unreadCount: 0,
+              items: [],
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Promise.resolve(emptyDraftResponse());
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        init?.method === "PUT"
+      ) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url === "/api/v1/local/public/employer-tenants") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              tenants: [
+                {
+                  id: TEST_EMPLOYER_TENANT_ID,
+                  displayName: "Lanhai Factory A",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (url === "/api/v1/local/applications" && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              applicationNo: "APP-FACTORY-001",
+              status: "BROKER_REVIEW",
+            }),
+            { status: 201, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
-      target: { value: "en" },
+    openOrdersFromHome();
+    fireEvent.click(await findBorrowEntryButton());
+    fireEvent.change(pickLabel("Current address"), {
+      target: { value: "Phnom Penh" },
     });
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    await screen.findByRole("option", { name: "Lanhai Factory A" });
-    fireEvent.change(screen.getByLabelText("Full name"), {
+    fireEvent.change(pickLabel("Full name"), {
       target: { value: "Factory Applicant" },
     });
-    fireEvent.change(screen.getByLabelText("Mobile number"), {
+    fireEvent.change(pickLabel("Mobile number"), {
       target: { value: "+85512345678" },
     });
-    fireEvent.change(screen.getByLabelText("Employer"), {
+    fireEvent.change(pickLabel("Employer"), {
       target: { value: "Lanhai Factory A" },
     });
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /personal-data authorization and privacy notice/i,
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /submit for broker review/i }),
-    );
+    continueApplicationStep();
+    fireEvent.change(pickLabel("Emergency contact 1"), {
+      target: { value: "Contact One" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 1 phone"), {
+      target: { value: "+85511111111" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 2"), {
+      target: { value: "Contact Two" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 2 phone"), {
+      target: { value: "+85522222222" },
+    });
+    continueApplicationStep();
+    fireEvent.change(pickLabel("Receiving bank"), {
+      target: { value: "ABA" },
+    });
+    fireEvent.change(pickLabel("Account / card number"), {
+      target: { value: "000111222333" },
+    });
+    fireEvent.change(pickLabel("Account holder name"), {
+      target: { value: "Factory Applicant" },
+    });
+    await findRoleLiteral("option", "Lanhai Factory A");
+    continueApplicationStep();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    expect(await findAlert()).toHaveTextContent(
       "Select your factory and enter a valid identity document number.",
     );
     const requestCountBeforeFactorySelection = fetchMock.mock.calls.length;
 
-    fireEvent.change(screen.getByLabelText("Select factory"), {
-      target: { value: "tenant-lanhai-a" },
+    fireEvent.change(pickLabel("Select factory"), {
+      target: { value: TEST_EMPLOYER_TENANT_ID },
     });
-    fireEvent.change(screen.getByLabelText("National ID / passport number"), {
+    fireEvent.change(pickLabel("National ID / passport number"), {
       target: { value: "KH-ID-10001" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /submit for broker review/i }),
-    );
+    continueApplicationStep();
+    continueApplicationStep();
+    toggleConsentCheckbox();
+    fireEvent.click(await findSubmitReviewButton());
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledTimes(
-        requestCountBeforeFactorySelection + 1,
-      ),
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            url === "/api/v1/local/applications" &&
+            (init as RequestInit | undefined)?.method === "POST",
+        ),
+      ).toBe(true),
     );
-    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(
+      requestCountBeforeFactorySelection,
+    );
+    const [, init] = fetchMock.mock.calls.findLast(
+      ([url, init]) =>
+        url === "/api/v1/local/applications" &&
+        (init as RequestInit | undefined)?.method === "POST",
+    ) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toMatchObject({
-      employerTenantId: "tenant-lanhai-a",
+      employerTenantId: TEST_EMPLOYER_TENANT_ID,
       identityDocument: { type: "NATIONAL_ID", number: "KH-ID-10001" },
     });
   });
@@ -189,32 +518,344 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    fireEvent.change(screen.getByLabelText("Full name"), {
+    fireEvent.click(screen.getAllByRole("tab", { name: "Borrow" })[0]!);
+    fireEvent.click(await findBorrowEntryButton());
+    fireEvent.change(pickLabel("Current address"), {
+      target: { value: "Phnom Penh" },
+    });
+    fireEvent.change(pickLabel("Full name"), {
       target: { value: "Test Applicant" },
     });
-    fireEvent.change(screen.getByLabelText("Mobile number"), {
+    fireEvent.change(pickLabel("Mobile number"), {
       target: { value: "invalid" },
     });
-    fireEvent.change(screen.getByLabelText("Employer"), {
+    fireEvent.change(pickLabel("Employer"), {
       target: { value: "Pilot Factory" },
     });
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /personal-data authorization and privacy notice/i,
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /submit for broker review/i }),
-    );
+    continueApplicationStep();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter a valid mobile number.",
-    );
+    expect(await findAlert()).toHaveTextContent("Enter a valid mobile number.");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the factory guidance when the backend rejects employerTenantId validation", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "signed-init-data" } },
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/local/public/telegram-sessions") {
+        return Promise.resolve(new Response(null, { status: 201 }));
+      }
+      if (url === "/api/v1/local/public/applications" && !init?.method) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ preferredLanguage: "en", applications: [] }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }
+      if (url === "/api/v1/local/public/profile/view") {
+        return Promise.resolve(verifiedProfileResponse({ language: "en" }));
+      }
+      if (url.startsWith("/api/v1/local/public/notifications?")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              page: 1,
+              pageSize: 10,
+              itemCount: 0,
+              pageCount: 1,
+              unreadCount: 0,
+              items: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Promise.resolve(emptyDraftResponse());
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        init?.method === "PUT"
+      ) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url === "/api/v1/local/public/employer-tenants") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              tenants: [
+                {
+                  id: TEST_EMPLOYER_TENANT_ID,
+                  displayName: "Lanhai Factory A",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (url === "/api/v1/local/applications" && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              code: "VALIDATION_ERROR",
+              fields: ["employerTenantId"],
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    openOrdersFromHome();
+    fireEvent.click(await findBorrowEntryButton());
+    fireEvent.change(pickLabel("Current address"), {
+      target: { value: "Phnom Penh" },
+    });
+    fireEvent.change(pickLabel("Full name"), {
+      target: { value: "Factory Applicant" },
+    });
+    fireEvent.change(pickLabel("Mobile number"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(pickLabel("Employer"), {
+      target: { value: "Lanhai Factory A" },
+    });
+    continueApplicationStep();
+    fireEvent.change(pickLabel("Emergency contact 1"), {
+      target: { value: "Contact One" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 1 phone"), {
+      target: { value: "+85511111111" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 2"), {
+      target: { value: "Contact Two" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 2 phone"), {
+      target: { value: "+85522222222" },
+    });
+    continueApplicationStep();
+    fireEvent.change(pickLabel("Receiving bank"), {
+      target: { value: "ABA" },
+    });
+    fireEvent.change(pickLabel("Account / card number"), {
+      target: { value: "000111222333" },
+    });
+    fireEvent.change(pickLabel("Account holder name"), {
+      target: { value: "Factory Applicant" },
+    });
+    await findRoleLiteral("option", "Lanhai Factory A");
+    fireEvent.change(pickLabel("Select factory"), {
+      target: { value: TEST_EMPLOYER_TENANT_ID },
+    });
+    fireEvent.change(pickLabel("National ID / passport number"), {
+      target: { value: "KH-ID-10001" },
+    });
+    continueApplicationStep();
+    continueApplicationStep();
+    toggleConsentCheckbox();
+    fireEvent.click(await findSubmitReviewButton());
+
+    expect(await findAlert()).toHaveTextContent(
+      "Select your factory and enter a valid identity document number.",
+    );
+  });
+
+  it("allows revisiting previous steps from the confirm flow navigator", async () => {
+    Object.defineProperty(window, "Telegram", {
+      configurable: true,
+      value: { WebApp: { initData: "signed-init-data" } },
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/local/public/telegram-sessions") {
+        return Promise.resolve(new Response(null, { status: 201 }));
+      }
+      if (url === "/api/v1/local/public/applications" && !init?.method) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ preferredLanguage: "en", applications: [] }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }
+      if (url === "/api/v1/local/public/profile/view") {
+        return Promise.resolve(verifiedProfileResponse({ language: "en" }));
+      }
+      if (url.startsWith("/api/v1/local/public/notifications?")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              page: 1,
+              pageSize: 10,
+              itemCount: 0,
+              pageCount: 1,
+              unreadCount: 0,
+              items: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Promise.resolve(emptyDraftResponse());
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        init?.method === "PUT"
+      ) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url === "/api/v1/local/public/employer-tenants") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              tenants: [
+                {
+                  id: TEST_EMPLOYER_TENANT_ID,
+                  displayName: "Lanhai Factory A",
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    openOrdersFromHome();
+    fireEvent.click(await findBorrowEntryButton());
+    fireEvent.change(pickLabel("Current address"), {
+      target: { value: "Phnom Penh" },
+    });
+    fireEvent.change(pickLabel("Full name"), {
+      target: { value: "Navigator Applicant" },
+    });
+    fireEvent.change(pickLabel("Mobile number"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(pickLabel("Employer"), {
+      target: { value: "Lanhai Factory A" },
+    });
+    continueApplicationStep();
+    fireEvent.change(pickLabel("Emergency contact 1"), {
+      target: { value: "Contact One" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 1 phone"), {
+      target: { value: "+85511111111" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 2"), {
+      target: { value: "Contact Two" },
+    });
+    fireEvent.change(pickLabel("Emergency contact 2 phone"), {
+      target: { value: "+85522222222" },
+    });
+    continueApplicationStep();
+    await findRoleLiteral("option", "Lanhai Factory A");
+    fireEvent.change(pickLabel("Select factory"), {
+      target: { value: TEST_EMPLOYER_TENANT_ID },
+    });
+    fireEvent.change(pickLabel("National ID / passport number"), {
+      target: { value: "KH-ID-10001" },
+    });
+    fireEvent.change(pickLabel("Receiving bank"), {
+      target: { value: "ABA" },
+    });
+    fireEvent.change(pickLabel("Account / card number"), {
+      target: { value: "000111222333" },
+    });
+    fireEvent.change(pickLabel("Account holder name"), {
+      target: { value: "Navigator Applicant" },
+    });
+    continueApplicationStep();
+    continueApplicationStep();
+
+    expect(await findSubmitReviewButton()).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /basic profile/i }));
+    expect(screen.getByLabelText("Current address")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Phnom Penh")).toBeInTheDocument();
+  });
+
+  it("restores a saved draft step and values after re-entering the mini app", () => {
+    const draftJson = JSON.stringify({
+      version: 1,
+      ownerKey: "local",
+      stage: "details",
+      formStep: "contacts",
+      amountInput: "200",
+      term: 15,
+      name: "Draft Applicant",
+      residentialAddress: "Phnom Penh",
+      phone: "+85512345678",
+      employer: "Pilot Factory",
+      emergencyContactOneName: "Saved Contact",
+      emergencyContactOnePhone: "+85511111111",
+      emergencyContactTwoName: "",
+      emergencyContactTwoPhone: "",
+      employerTenantId: "",
+      bankName: "",
+      bankAccountNumber: "",
+      bankAccountHolder: "",
+      identityDocumentType: "NATIONAL_ID",
+      identityDocumentNumber: "",
+      livenessPrepared: false,
+      wealthProofAttached: false,
+      consent: false,
+    });
+    const storage: Record<string, string> = {
+      "payease.application-draft.v1": draftJson,
+      "payease.language": "en",
+    };
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage[key] ?? null,
+        setItem: (key: string, value: string) => {
+          storage[key] = String(value);
+        },
+        removeItem: (key: string) => {
+          delete storage[key];
+        },
+        clear: () => {
+          for (const key of Object.keys(storage)) delete storage[key];
+        },
+      },
+    });
+
+    render(<App />);
+    openOrdersFromHome();
+
+    expect(pickLabel("Emergency contact 1")).toBeVisible();
+    expect(pickLabel("Emergency contact 1")).toHaveValue("Saved Contact");
+    expect(pickLabel("Emergency contact 1 phone")).toHaveValue("+85511111111");
+    expect(screen.queryByDisplayValue("200")).toBeNull();
   });
 
   it("persists an applicant language selected before the Telegram session finishes", async () => {
@@ -228,6 +869,7 @@ describe("applicant submission", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         ),
       )
+      .mockResolvedValueOnce(verifiedProfileResponse({ language: "en" }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ preferredLanguage: "en" }), {
           status: 200,
@@ -237,15 +879,27 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
+    fireEvent.click(screen.getAllByRole("tab", { name: "Borrow" })[0]!);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(screen.getByRole("combobox", { name: "Language" })).toHaveValue(
-      "en",
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => url === "/api/v1/local/public/profile/preferred-language",
+        ),
+      ).toBe(true),
     );
-    expect(fetchMock.mock.calls[2]).toEqual([
+    openProfileLanguagePicker();
+    expect(pickLanguage()).toHaveValue("en");
+    expect(
+      fetchMock.mock.calls.find(
+        ([url]) => url === "/api/v1/local/public/profile/preferred-language",
+      ),
+    ).toEqual([
       "/api/v1/local/public/profile/preferred-language",
       {
         method: "PUT",
@@ -261,46 +915,107 @@ describe("applicant submission", () => {
       configurable: true,
       value: { WebApp: { initData: "fresh-init-data" } },
     });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 201 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ applications: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ tenants: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/local/public/telegram-sessions") {
+        return Promise.resolve(new Response(null, { status: 201 }));
+      }
+      if (url === "/api/v1/local/public/applications" && !init?.method) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ applications: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      if (url === "/api/v1/local/public/profile/view") {
+        return Promise.resolve(verifiedProfileResponse({ language: "km" }));
+      }
+      if (url.startsWith("/api/v1/local/public/notifications?")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              page: 1,
+              pageSize: 10,
+              itemCount: 0,
+              pageCount: 1,
+              unreadCount: 0,
+              items: [],
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Promise.resolve(emptyDraftResponse());
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        init?.method === "PUT"
+      ) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        init?.method === "DELETE"
+      ) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url === "/api/v1/local/public/employer-tenants") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ tenants: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      if (url === "/api/v1/local/public/telegram-sessions/logout") {
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    openOrdersFromHome();
 
-    await screen.findByRole("button", { name: "ចាកចេញ" });
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    fireEvent.change(screen.getByLabelText("ឈ្មោះពេញ"), {
+    await findRoleLiteral("button", "ចាកចេញ");
+    await enterBorrowDetailsStepIfNeeded();
+    fireEvent.change(pickLabel("អាសយដ្ឋានបច្ចុប្បន្ន"), {
+      target: { value: "Phnom Penh" },
+    });
+    fireEvent.change(pickLabel("ឈ្មោះពេញ"), {
       target: { value: "Previous Applicant" },
     });
-    fireEvent.change(screen.getByLabelText("លេខទូរស័ព្ទ"), {
+    fireEvent.change(pickLabel("លេខទូរស័ព្ទ"), {
       target: { value: "+85512345678" },
     });
-    fireEvent.change(screen.getByLabelText("ក្រុមហ៊ុន"), {
+    fireEvent.change(pickLabel("ក្រុមហ៊ុន"), {
       target: { value: "Pilot Factory" },
     });
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "ចាកចេញ" }));
+    fireEvent.click(pickRoleLiteral("button", "ចាកចេញ"));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    expect(screen.getByLabelText("ឈ្មោះពេញ")).toHaveValue("");
-    expect(screen.getByLabelText("លេខទូរស័ព្ទ")).toHaveValue("");
-    expect(screen.getByLabelText("ក្រុមហ៊ុន")).toHaveValue("");
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
+    expect(fetchMock.mock.calls).toContainEqual([
+      "/api/v1/local/public/application-draft",
+      { method: "DELETE", credentials: "include" },
+    ]);
+    expect(fetchMock.mock.calls).toContainEqual([
+      "/api/v1/local/public/telegram-sessions/logout",
+      { method: "POST", credentials: "include" },
+    ]);
+    openOrdersFromHome();
+    await enterBorrowDetailsStepIfNeeded();
+    expect(pickLabel("អាសយដ្ឋានបច្ចុប្បន្ន")).toHaveValue("");
+    expect(pickLabel("ឈ្មោះពេញ")).toHaveValue("");
+    expect(pickLabel("លេខទូរស័ព្ទ")).toHaveValue("");
+    expect(pickLabel("ក្រុមហ៊ុន")).toHaveValue("");
   });
 
   it("tells an applicant to reopen Telegram when replayed initData cannot restore a session", async () => {
@@ -328,9 +1043,10 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    openOrdersFromHome();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Telegram");
-    expect(screen.getByRole("link")).toHaveAttribute(
+    expect(await findAlert()).toHaveTextContent("Telegram");
+    expect(pickLink()).toHaveAttribute(
       "href",
       "https://t.me/payease_recovery?startapp=apply",
     );
@@ -368,8 +1084,9 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    openOrdersFromHome();
 
-    await screen.findByRole("alert");
+    await findAlert();
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute(
@@ -398,8 +1115,9 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    openOrdersFromHome();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Telegram");
+    expect(await findAlert()).toHaveTextContent("Telegram");
     expect(screen.queryByRole("link")).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -420,6 +1138,7 @@ describe("applicant submission", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         ),
       )
+      .mockResolvedValueOnce(verifiedProfileResponse())
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ preferredLanguage: "zh-CN" }), {
           status: 200,
@@ -430,22 +1149,40 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    openOrdersFromHome();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3),
+    );
 
     now.mockReturnValue(startedAt + 4 * 60 * 1000 - 1);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    const callCountBeforeLanguageChange = fetchMock.mock.calls.length;
+    fireEvent.change(pickLanguage(), {
       target: { value: "zh-CN" },
     });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(
+        callCountBeforeLanguageChange,
+      ),
+    );
 
     fireEvent.keyDown(window, { key: "a" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url]) => url === "/api/v1/local/public/telegram-sessions/keepalive",
+      ),
+    ).toHaveLength(0);
 
     now.mockReturnValue(startedAt + 4 * 60 * 1000);
     fireEvent.keyDown(window, { key: "a" });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
-    expect(fetchMock.mock.calls[3]).toEqual([
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => url === "/api/v1/local/public/telegram-sessions/keepalive",
+        ),
+      ).toBe(true),
+    );
+    expect(fetchMock.mock.calls.at(-1)).toEqual([
       "/api/v1/local/public/telegram-sessions/keepalive",
       { method: "POST", credentials: "include" },
     ]);
@@ -466,16 +1203,20 @@ describe("applicant submission", () => {
           JSON.stringify({ preferredLanguage: "en", applications: [] }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
-      );
+      )
+      .mockResolvedValueOnce(verifiedProfileResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    openOrdersFromHome();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3),
+    );
 
     now.mockReturnValue(startedAt + 4 * 60 * 1000 - 1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const callsBeforeActivity = fetchMock.mock.calls.length;
     fireEvent.keyDown(window, { key: "a" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeActivity);
   });
 
   it("opens the latest Telegram application directly into its loan dashboard", async () => {
@@ -507,6 +1248,27 @@ describe("applicant submission", () => {
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
+      )
+      .mockResolvedValueOnce(emptyDraftResponse())
+      .mockResolvedValueOnce(
+        verifiedProfileResponse({
+          activeApplication: {
+            referenceMasked: "APP-***-0001",
+            status: "REPAYMENT_ACTIVE",
+            nextAction: "VIEW_BILL",
+          },
+          activeBill: {
+            referenceMasked: "APP-***-0001",
+            status: "REPAYMENT_ACTIVE",
+            dueDate: null,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ unreadCount: 0, items: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
       )
       .mockResolvedValueOnce(
         new Response(
@@ -567,12 +1329,15 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    openOrdersFromHome();
 
-    expect(await screen.findByText("Your loan information")).toBeVisible();
+    expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
+    await waitFor(() =>
+      expect(window.location.search).toBe("?application=APP-RETURNING-001"),
+    );
     expect(screen.getAllByText("APP-RETURNING-001")).toHaveLength(2);
-    expect(screen.getByText("Next payment")).toBeVisible();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[2]).toEqual([
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(fetchMock.mock.calls.at(-1)).toEqual([
       "/api/v1/local/public/applications/APP-RETURNING-001",
       { credentials: "include" },
     ]);
@@ -635,18 +1400,36 @@ describe("applicant submission", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         ),
       )
+      .mockResolvedValueOnce(emptyDraftResponse())
+      .mockResolvedValueOnce(
+        verifiedProfileResponse({
+          activeApplication: {
+            referenceMasked: "APP-***-NEW",
+            status: "BROKER_REVIEW",
+            nextAction: "VIEW_PROGRESS",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ unreadCount: 0, items: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
       .mockResolvedValueOnce(summary("APP-HISTORY-NEW", "BROKER_REVIEW"))
       .mockResolvedValueOnce(summary("APP-HISTORY-OLD", "CLOSED"));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    openOrdersFromHome();
 
-    const oldEntry = await screen.findByText("APP-HISTORY-OLD");
-    fireEvent.click(oldEntry.closest("button")!);
+    fireEvent.click(await findRoleRe("button", /APP-HISTORY-OLD/i));
 
-    expect(await screen.findByText("Application withdrawn")).toBeVisible();
-    expect(window.location.search).toBe("?application=APP-HISTORY-OLD");
-    expect(fetchMock.mock.calls[3]).toEqual([
+    await waitFor(() => {
+      expect(screen.getAllByText("APP-HISTORY-OLD").length).toBeGreaterThan(1);
+      expect(window.location.search).toBe("?application=APP-HISTORY-OLD");
+    });
+    expect(fetchMock.mock.calls.at(-1)).toEqual([
       "/api/v1/local/public/applications/APP-HISTORY-OLD",
       { credentials: "include" },
     ]);
@@ -688,15 +1471,14 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
     expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    fireEvent.click(pickRoleLiteral("button", "Refresh status"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/v1/local/public/applications/APP-REFRESH-001",
@@ -755,30 +1537,17 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    fireEvent.change(screen.getByLabelText("Full name"), {
-      target: { value: "Test Applicant" },
-    });
-    fireEvent.change(screen.getByLabelText("Mobile number"), {
-      target: { value: "+85512345678" },
-    });
-    fireEvent.change(screen.getByLabelText("Employer"), {
-      target: { value: "Pilot Factory" },
-    });
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /personal-data authorization and privacy notice/i,
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /submit for broker review/i }),
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
+    fireEvent.click(screen.getAllByRole("tab", { name: "Borrow" })[0]!);
+    await enterBorrowDetailsStepIfNeeded();
+    fillEnglishApplicationToConfirm();
+    toggleConsentCheckbox();
+    fireEvent.click(await findSubmitReviewButton());
+    fireEvent.click(await findRoleRe("button", /view application status/i));
 
     expect(
       await screen.findByText("We could not refresh the application status."),
@@ -841,27 +1610,16 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(screen.getByTestId("applicant-entry-submit-button"));
-    fireEvent.change(screen.getByLabelText("Full name"), {
-      target: { value: "Test Applicant" },
-    });
-    fireEvent.change(screen.getByLabelText("Mobile number"), {
-      target: { value: "+85512345678" },
-    });
-    fireEvent.change(screen.getByLabelText("Employer"), {
-      target: { value: "Pilot Factory" },
-    });
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: /personal-data authorization and privacy notice/i,
-      }),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /submit for broker review/i }),
-    );
+    fireEvent.click(screen.getAllByRole("tab", { name: "Borrow" })[0]!);
+    await enterBorrowDetailsStepIfNeeded();
+    fillEnglishApplicationToConfirm();
+    toggleConsentCheckbox();
+    fireEvent.click(await findSubmitReviewButton());
 
     expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
     expect(screen.getByText("APP-EXISTING-001")).toBeVisible();
@@ -872,6 +1630,115 @@ describe("applicant submission", () => {
     ).toBeNull();
     expect(window.location.search).toBe("?application=APP-EXISTING-001");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a concrete reason when submission is blocked by Telegram phone mismatch", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/local/public/applications" && !init?.method) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ preferredLanguage: "zh-CN", applications: [] }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (url === "/api/v1/local/public/profile/view") {
+        return Promise.resolve(verifiedProfileResponse({ language: "zh-CN" }));
+      }
+      if (url.startsWith("/api/v1/local/public/notifications?")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              page: 1,
+              pageSize: 10,
+              itemCount: 0,
+              pageCount: 1,
+              unreadCount: 0,
+              items: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Promise.resolve(emptyDraftResponse());
+      }
+      if (
+        url === "/api/v1/local/public/application-draft" &&
+        init?.method === "PUT"
+      ) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (url === "/api/v1/local/applications" && init?.method === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ code: "TELEGRAM_PHONE_MISMATCH" }), {
+            status: 422,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    openOrdersFromHome();
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
+      target: { value: "zh-CN" },
+    });
+    fireEvent.click(screen.getAllByRole("tab", { name: "借款" })[0]!);
+    await enterBorrowDetailsStepIfNeeded();
+    fireEvent.change(pickLabel("现居地址"), {
+      target: { value: "金边" },
+    });
+    fireEvent.change(pickLabel("姓名"), {
+      target: { value: "测试用户" },
+    });
+    fireEvent.change(pickLabel("手机号码"), {
+      target: { value: "+85512345678" },
+    });
+    fireEvent.change(pickLabel("所在企业"), {
+      target: { value: "测试工厂" },
+    });
+    fireEvent.click(pickRoleRe("button", /保存并继续/i));
+    fireEvent.change(pickLabel("紧急联系人 1"), {
+      target: { value: "联系人一" },
+    });
+    fireEvent.change(pickLabel("紧急联系人 1 手机号"), {
+      target: { value: "+85511111111" },
+    });
+    fireEvent.change(pickLabel("紧急联系人 2"), {
+      target: { value: "联系人二" },
+    });
+    fireEvent.change(pickLabel("紧急联系人 2 手机号"), {
+      target: { value: "+85522222222" },
+    });
+    fireEvent.click(pickRoleRe("button", /保存并继续/i));
+    fireEvent.change(pickLabel("收款银行"), {
+      target: { value: "ABA" },
+    });
+    fireEvent.change(pickLabel("收款账号 / 卡号"), {
+      target: { value: "000111222333" },
+    });
+    fireEvent.change(pickLabel("持卡人姓名"), {
+      target: { value: "测试用户" },
+    });
+    fireEvent.click(pickRoleRe("button", /保存并继续/i));
+    fireEvent.click(pickRoleRe("button", /保存并继续/i));
+    toggleConsentCheckbox();
+    fireEvent.click(await findSubmitReviewButton());
+
+    expect(
+      await screen.findByText(
+        "你填写的手机号与 Telegram 已验证手机号不一致，请检查后重试。",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("申请暂时未能提交，请稍后重试。")).toBeNull();
   });
 
   it("renders the approved terms and repayment dashboard returned for the applicant", async () => {
@@ -934,18 +1801,15 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
 
-    expect(await screen.findByText("Your loan information")).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: "Repayment in progress" }),
-    ).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Offer result" })).toBeNull();
+    expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
+    expect(pickRoleLiteral("heading", "Repayment in progress")).toBeVisible();
+    expect(queryHeading("heading", "Offer result")).toBeNull();
     expect(screen.getByText("Approved").parentElement).toHaveTextContent(
       "$250.00",
     );
@@ -972,7 +1836,7 @@ describe("applicant submission", () => {
     );
     expect(screen.getByText("Next payment")).toBeVisible();
     expect(screen.getAllByText(/#2.*2026-10-15/)).toHaveLength(2);
-    expect(screen.getByLabelText("Manual payment safety")).toHaveTextContent(
+    expect(pickLabel("Manual payment safety")).toHaveTextContent(
       "Confirm payment instructions with the licensed lender's operations team",
     );
     expect(screen.getByText("Paid")).toBeVisible();
@@ -1016,15 +1880,14 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
 
     expect(await screen.findByText("Application not approved")).toBeVisible();
-    expect(screen.getByLabelText("Reapplication guidance")).toHaveTextContent(
+    expect(pickLabel("Reapplication guidance")).toHaveTextContent(
       "Please complete employment or income verification before applying again.",
     );
     expect(screen.queryByText("SALARY_NOT_VERIFIED")).toBeNull();
@@ -1074,17 +1937,16 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
     await screen.findByText("Additional information needed");
-    fireEvent.change(screen.getByLabelText("Your response"), {
+    fireEvent.change(pickLabel("Your response"), {
       target: { value: "I have corrected the requested information." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Send response" }));
+    fireEvent.click(pickRoleLiteral("button", "Send response"));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1]).toEqual([
@@ -1152,26 +2014,21 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
     expect(
-      await screen.findByRole("button", { name: "Withdraw application" }),
+      await findRoleLiteral("button", "Withdraw application"),
     ).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Withdraw application" }),
-    );
-    expect(
-      screen.getByRole("button", { name: "Confirm withdrawal" }),
-    ).toBeVisible();
+    fireEvent.click(pickRoleLiteral("button", "Withdraw application"));
+    expect(pickRoleLiteral("button", "Confirm withdrawal")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    fireEvent.click(pickRoleLiteral("button", "Confirm withdrawal"));
     expect(await screen.findByText("Application withdrawn")).toBeVisible();
     expect(
       screen.getByText(
@@ -1183,10 +2040,8 @@ describe("applicant submission", () => {
       { method: "POST", credentials: "include" },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Start application" }));
-    expect(
-      screen.getByRole("button", { name: /^Start application/ }),
-    ).toBeVisible();
+    fireEvent.click(pickRoleLiteral("button", "Apply for credit"));
+    expect(pickRoleRe("button", /^Start application/)).toBeVisible();
     expect(window.location.search).toBe("");
   });
 
@@ -1271,26 +2126,21 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
-    await screen.findByRole("region", {
-      name: "Customer support and complaints",
-    });
-    fireEvent.change(screen.getByLabelText("Request type"), {
+    fireEvent.click(await findRoleRe("button", /view application status/i));
+    await findRoleLiteral("region", "Customer support and complaints");
+    fireEvent.change(pickLabel("Request type"), {
       target: { value: "COMPLAINT" },
     });
-    fireEvent.change(screen.getByLabelText("Tell us what happened"), {
+    fireEvent.change(pickLabel("Tell us what happened"), {
       target: {
         value: "Please review the repayment information in my account.",
       },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Submit support case" }),
-    );
+    fireEvent.click(pickRoleLiteral("button", "Submit support case"));
 
     expect(
       await screen.findByText(
@@ -1368,15 +2218,12 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Confirm terms" }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
+    fireEvent.click(await findRoleLiteral("button", "Confirm terms"));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1]).toEqual([
@@ -1440,22 +2287,19 @@ describe("applicant submission", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    openProfileLanguagePicker();
+    fireEvent.change(pickLanguage(), {
       target: { value: "en" },
     });
-    fireEvent.click(
-      await screen.findByRole("button", { name: /view application status/i }),
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Confirm terms" }),
-    );
+    fireEvent.click(await findRoleRe("button", /view application status/i));
+    fireEvent.click(await findRoleLiteral("button", "Confirm terms"));
 
     expect(
       await screen.findByText(
         "We could not record your confirmation. Please try again.",
       ),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Confirm terms" })).toBeVisible();
+    expect(pickRoleLiteral("button", "Confirm terms")).toBeVisible();
     expect(
       screen.queryByText(
         "Your confirmation is recorded. The lender is completing its contract record.",

@@ -31,6 +31,8 @@ export type ApplicantLoanSummary = Readonly<{
     tenorDays: number;
     approvedAmountMinor: string | null;
     rejectionConditionResolved: boolean;
+    rejectionCoolingOffEndsAt?: string | null;
+    rejectionCoolingOffDaysRemaining?: number | null;
     rejectionNoticeCode:
       | "INFORMATION_INCOMPLETE"
       | "EMPLOYMENT_OR_INCOME_UNVERIFIED"
@@ -50,14 +52,59 @@ export type ApplicantLoanSummary = Readonly<{
     firstDueDate: string;
   }>;
   repayment: RepaymentScheduleSummary;
+  recordDetail?: Readonly<{
+    createdAt: string;
+    updatedAt: string;
+    canUploadPaymentProof: boolean;
+    canRequestReassessment: boolean;
+  }>;
+  repaymentProof?: null | Readonly<{
+    proofNo: string;
+    status: "UNDER_REVIEW" | "NEEDS_MORE" | "RECONCILED" | "EXCEPTION";
+    fileName: string;
+    contentType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+    transferReference?: string;
+    submittedAt: string;
+  }>;
+  reassessmentRequest?: null | Readonly<{
+    requestNo: string;
+    status: "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "DECLINED" | "CLOSED";
+    addressChanged: boolean;
+    employerUpdated: boolean;
+    wealthProofDeclared: boolean;
+    submittedAt: string;
+  }>;
+  timeline?: ReadonlyArray<
+    Readonly<{
+      occurredAt: string;
+      entryType:
+        | "STATUS"
+        | "APPROVAL"
+        | "PAYMENT_PROOF_SUBMITTED"
+        | "PAYMENT_PROOF_REVIEWED"
+        | "REASSESSMENT_SUBMITTED"
+        | "REASSESSMENT_APPROVAL";
+      status?: string;
+      stage?: string;
+      decision?: string;
+      actorUserRef?: string;
+      actorRole?: string;
+      reasonCode?: string;
+      referenceNo?: string;
+    }>
+  >;
 }>;
 
 export function formatApplicantLoanSummary(
   application: ApplicantLoanSummary["application"],
   terms: ApplicantLoanSummary["terms"],
   repayment: RepaymentScheduleSummary,
+  extras: Pick<
+    ApplicantLoanSummary,
+    "recordDetail" | "repaymentProof" | "reassessmentRequest" | "timeline"
+  > = {},
 ): ApplicantLoanSummary {
-  return { application, terms, repayment };
+  return { application, terms, repayment, ...extras };
 }
 
 export function buildRepaymentSchedule(

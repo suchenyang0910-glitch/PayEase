@@ -12,12 +12,34 @@ import { USER_SKELETON_COPY } from "../src/copy/user-copy.ts";
 import type { ApplicationHistoryEntry, LanguageCode } from "@payease/v1-domain";
 import { formatUsdMinor } from "../src/format-usd-minor.ts";
 
+function pickLanguageCombo(): HTMLElement {
+  const all = screen.queryAllByRole("combobox", { name: "Language" });
+  if (all.length === 0) {
+    const profileTab = [
+      USER_SKELETON_COPY.km.tabs.profile,
+      USER_SKELETON_COPY.en.tabs.profile,
+      USER_SKELETON_COPY["zh-CN"].tabs.profile,
+    ]
+      .flatMap((name) => screen.queryAllByRole("tab", { name }))
+      .find(Boolean);
+    if (profileTab) fireEvent.click(profileTab);
+    return screen.getAllByRole("combobox", { name: "Language" })[0];
+  }
+  const shell = all.find((el) => !el.closest(".kx-shell"));
+  return shell ?? all[0];
+}
+
 describe("user-mini-app P0 step 2: Repayment readonly boundary", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    if (typeof window.localStorage?.clear === "function") {
+      window.localStorage.clear();
+    } else {
+      window.localStorage?.removeItem?.("payease.language");
+    }
     Reflect.deleteProperty(window, "Telegram");
     Reflect.deleteProperty(document, "cookie");
     window.history.replaceState(null, "", "/");
@@ -217,37 +239,48 @@ describe("user-mini-app P0 step 2: Repayment readonly boundary", () => {
     seed(language, scenario);
     window.history.replaceState(null, "", `/?application=${applicationNo}`);
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+    const languageCombo = pickLanguageCombo();
+    fireEvent.change(languageCombo, {
       target: { value: language },
     });
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("tab", {
-          name: USER_SKELETON_COPY[language].tabs.repayment,
-        }),
-      ).toBeInTheDocument(),
-    );
     const dashboardMaybe = screen.queryByLabelText("Loan dashboard");
     if (!dashboardMaybe) {
       await act(async () => {
-        fireEvent.click(
-          screen.getAllByRole("button").find((btn) => {
-            const raw = (btn.textContent ?? "").trim();
-            return (
-              raw.includes("application status") ||
-              raw.includes("申请状态") ||
-              raw.includes("ស្ថានភាព")
-            );
-          })!,
-        );
+        const statusBtn = screen.queryAllByRole("button").find((btn) => {
+          const raw = (btn.textContent ?? "").trim();
+          return (
+            raw.includes("application status") ||
+            raw.includes("Check status") ||
+            raw.includes("申请状态") ||
+            raw.includes("检查") ||
+            raw.includes("ស្ថានភាព") ||
+            raw.includes("ពិនិត្យ")
+          );
+        });
+        if (statusBtn) fireEvent.click(statusBtn);
       });
     }
     expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
+    const backBtn = screen.queryByRole("link", {
+      name: USER_SKELETON_COPY[language].backToOrders,
+    });
+    if (backBtn) {
+      await act(async () => {
+        fireEvent.click(backBtn);
+      });
+    }
+    await waitFor(() =>
+      expect(
+        screen.queryAllByRole("tab", {
+          name: USER_SKELETON_COPY[language].tabs.repayment,
+        }).length,
+      ).toBeGreaterThan(0),
+    );
     await act(async () => {
       fireEvent.click(
-        screen.getByRole("tab", {
+        screen.getAllByRole("tab", {
           name: USER_SKELETON_COPY[language].tabs.repayment,
-        }),
+        })[0],
       );
     });
     await waitFor(() =>
@@ -342,16 +375,19 @@ describe("user-mini-app P0 step 2: Repayment readonly boundary", () => {
     });
     await waitFor(() =>
       expect(
-        screen.getByRole("tab", {
-          name: USER_SKELETON_COPY.en.tabs.profile,
-          selected: true,
-        }),
-      ).toBeInTheDocument(),
+        (() => {
+          const matches = screen.queryAllByRole("tab", {
+            name: USER_SKELETON_COPY.en.tabs.profile,
+            selected: true,
+          });
+          return matches.length;
+        })(),
+      ).toBeGreaterThan(0),
     );
     expect(
-      screen.getByRole("heading", {
+      screen.getAllByRole("heading", {
         name: USER_SKELETON_COPY.en.profile.title,
-      }),
-    ).toBeInTheDocument();
+      }).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });

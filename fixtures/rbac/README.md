@@ -5,7 +5,7 @@
 > **用途**：
 >
 > - 作为未来 S1.0 MVP API 契约测试（`vitest`/`schemathesis` + `hurl`）的直接输入
-> - 作为 [ROLE_RBAC_MATRIX.md](file:///e:/PayEase/docs/ROLE_RBAC_MATRIX.md) 表格的机器可验证版本
+> - 作为 [ROLE_RBAC_MATRIX.md](file:///e:/PayEase/docs/04-安全与合规/ROLE_RBAC_MATRIX.md) 表格的机器可验证版本
 > - 作为未来 `playwright` E2E 角色权限回归的数据源（在 S0.2 签字 + Staging 环境就绪后启用）
 
 ---
@@ -100,7 +100,7 @@ fixtures/rbac/
     "redcard_never_appear_fields": ["monthlyBaseSalaryAmountMinor", "bankAccountNumberFull", "phoneNumberE164Full"]
   },
   "source_matrix_ref": {
-    "doc": "docs/ROLE_RBAC_MATRIX.md",
+    "doc": "docs/04-安全与合规/ROLE_RBAC_MATRIX.md",
     "section": "§2.3 企业 HR 核验域页面",
     "row_label": "/hr/employment/list 查看本企业待核验列表",
     "cell_expected": "200（本企业）"
@@ -123,8 +123,8 @@ fixtures/rbac/
 - `expected.error_code_if_403` ∈
   - `FORBIDDEN__ROLE_OUT_OF_SCOPE` （本矩阵该角色=403）
   - `FORBIDDEN__CROSS_TENANT` （跨企业/跨机构）
-  - `FORBIDDEN__DUAL_CONTROL_REQUIRED` （缺第二审批人，见 [AUDIT_EVENT_DICTIONARY.md §2](file:///e:/PayEase/docs/AUDIT_EVENT_DICTIONARY.md)）
-  - `FORBIDDEN__RED_CARD_FIELD` （响应包含 [DATA_CLASSIFICATION_DEIDENTIFICATION.md §4 红牌](file:///e:/PayEase/docs/DATA_CLASSIFICATION_DEIDENTIFICATION.md) 的字段）
+  - `FORBIDDEN__DUAL_CONTROL_REQUIRED` （缺第二审批人，见 [AUDIT_EVENT_DICTIONARY.md §2](file:///e:/PayEase/docs/04-安全与合规/AUDIT_EVENT_DICTIONARY.md)）
+  - `FORBIDDEN__RED_CARD_FIELD` （响应包含 [DATA_CLASSIFICATION_DEIDENTIFICATION.md §4 红牌](file:///e:/PayEase/docs/04-安全与合规/DATA_CLASSIFICATION_DEIDENTIFICATION.md) 的字段）
 
 ---
 
@@ -226,7 +226,7 @@ export const RbacFixtureV1Schema = z
       .strict(),
     source_matrix_ref: z
       .object({
-        doc: z.literal("docs/ROLE_RBAC_MATRIX.md"),
+        doc: z.literal("docs/04-安全与合规/ROLE_RBAC_MATRIX.md"),
         section: z.string().startsWith("§"),
         row_label: z.string().min(5),
         cell_expected: z.string().min(2),

@@ -1,17 +1,39 @@
 import type { LanguageCode } from "@payease/v1-domain";
 
 export type UserTab =
-  "home" | "orders" | "order-detail" | "repayment" | "profile";
+  | "home"
+  | "orders"
+  | "order-detail"
+  | "repayment"
+  | "profile"
+  | "notifications"
+  | "notification-detail"
+  | "help-guide"
+  | "help-safety";
 
-export const USER_TABS: readonly Exclude<UserTab, "order-detail">[] = [
-  "home",
-  "orders",
-  "repayment",
-  "profile",
-] as const;
+export const USER_TABS: readonly Exclude<
+  UserTab,
+  | "order-detail"
+  | "notifications"
+  | "notification-detail"
+  | "help-guide"
+  | "help-safety"
+>[] = ["home", "orders", "repayment", "profile"] as const;
 
 export type UserSkeletonCopy = Readonly<{
-  tabs: Readonly<Record<Exclude<UserTab, "order-detail">, string>>;
+  tabs: Readonly<
+    Record<
+      Exclude<
+        UserTab,
+        | "order-detail"
+        | "notifications"
+        | "notification-detail"
+        | "help-guide"
+        | "help-safety"
+      >,
+      string
+    >
+  >;
   backToOrders: string;
   home: Readonly<{
     title: string;
@@ -32,6 +54,16 @@ export type UserSkeletonCopy = Readonly<{
     empty: string;
     summary: string;
     actions: string;
+  }>;
+  notifications: Readonly<{
+    title: string;
+    empty: string;
+    backHint: string;
+  }>;
+  notificationDetail: Readonly<{
+    title: string;
+    backHint: string;
+    empty: string;
   }>;
   repayment: Readonly<{
     title: string;
@@ -91,13 +123,22 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       summary: "申请与进度概要",
       actions: "可执行操作",
     },
+    notifications: {
+      title: "通知",
+      empty: "暂无通知。",
+      backHint: "返回通知列表",
+    },
+    notificationDetail: {
+      title: "通知详情",
+      backHint: "返回通知列表",
+      empty: "通知不存在或尚未加载。",
+    },
     repayment: {
       title: "账单",
       empty: "尚未生成账单；放款成功后将在此显示还款计划。",
       summary: "已还、未还与下一期概要",
       installmentList: "每期详情",
-      manualNotice:
-        "人工还款指引：最终责任由持牌机构承担，如需协助请联系客服。",
+      manualNotice: "人工还款指引：请以最终确认结果为准，如需协助请联系客服。",
       support: "联系客服",
     },
     profile: {
@@ -144,6 +185,16 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       empty: "Application not found or not loaded yet.",
       summary: "Application and progress summary",
       actions: "Available actions",
+    },
+    notifications: {
+      title: "Notifications",
+      empty: "No notifications yet.",
+      backHint: "Back to notifications",
+    },
+    notificationDetail: {
+      title: "Notification detail",
+      backHint: "Back to notifications",
+      empty: "Notification not found or not loaded yet.",
     },
     repayment: {
       title: "Repayment",
@@ -199,6 +250,16 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       empty: "ពាក្យមិនមាន ឬមិនទាន់បានផ្ទុកឡើង។",
       summary: "សេចក្តីសង្ខេបនៃពាក្យ និងដំណើរការ",
       actions: "សកម្មភាពដែលអាចធ្វើបាន",
+    },
+    notifications: {
+      title: "សារ​ជូនដំណឹង",
+      empty: "មិនទាន់មានសារ​ជូនដំណឹង។",
+      backHint: "ត្រឡប់ទៅបញ្ជីសារ​ជូនដំណឹង",
+    },
+    notificationDetail: {
+      title: "លម្អិតសារ​ជូនដំណឹង",
+      backHint: "ត្រឡប់ទៅបញ្ជីសារ​ជូនដំណឹង",
+      empty: "រកមិនឃើញសារ​ជូនដំណឹង ឬមិនទាន់បានផ្ទុកឡើង។",
     },
     repayment: {
       title: "ការសងប្រាក់",

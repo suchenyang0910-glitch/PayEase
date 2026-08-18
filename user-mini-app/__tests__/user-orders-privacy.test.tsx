@@ -17,12 +17,34 @@ import type {
 } from "@payease/v1-domain";
 import { LANGUAGE_CODES } from "@payease/v1-domain";
 
+function pickLanguageCombo(): HTMLElement {
+  const all = screen.queryAllByRole("combobox", { name: "Language" });
+  if (all.length === 0) {
+    const profileTab = [
+      USER_SKELETON_COPY.km.tabs.profile,
+      USER_SKELETON_COPY.en.tabs.profile,
+      USER_SKELETON_COPY["zh-CN"].tabs.profile,
+    ]
+      .flatMap((name) => screen.queryAllByRole("tab", { name }))
+      .find(Boolean);
+    if (profileTab) fireEvent.click(profileTab);
+    return screen.getAllByRole("combobox", { name: "Language" })[0];
+  }
+  const shell = all.find((el) => !el.closest(".kx-shell"));
+  return shell ?? all[0];
+}
+
 describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    if (typeof window.localStorage?.clear === "function") {
+      window.localStorage.clear();
+    } else {
+      window.localStorage?.removeItem?.("payease.language");
+    }
     Reflect.deleteProperty(window, "Telegram");
     Reflect.deleteProperty(document, "cookie");
     window.history.replaceState(null, "", "/");
@@ -145,6 +167,22 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
         lastMessage: null,
       },
     ];
+    const timeline = [
+      {
+        occurredAt: new Date(Date.now() - 7200_000).toISOString(),
+        entryType: "STATUS",
+        status: "BROKER_REVIEW",
+      },
+      {
+        occurredAt: new Date(Date.now() - 3600_000).toISOString(),
+        entryType: "REASSESSMENT_APPROVAL",
+        stage: "CREDIT_CHECKER_REVIEW",
+        decision: "APPROVED",
+        actorUserRef: "internal-reviewer-001",
+        reasonCode: "REASSESSMENT_ELIGIBLE",
+        referenceNo: "REA-DEMO-ABCD1234",
+      },
+    ] as const;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -190,6 +228,13 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
                 firstDueDate: repayment.nextInstallment?.dueDate,
               },
               repayment,
+              recordDetail: {
+                createdAt: applications[0].createdAt,
+                updatedAt: new Date().toISOString(),
+                canUploadPaymentProof: false,
+                canRequestReassessment: false,
+              },
+              timeline,
               serviceCases: cases,
             }),
             { headers: { "Content-Type": "application/json" } },
@@ -234,28 +279,22 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
     seedHistoryAndSummary("en");
     window.history.replaceState(null, "", "/");
     render(<App />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
-      target: { value: "en" },
-    });
-    await waitFor(() =>
-      expect(
-        screen.getByRole("tab", {
-          name: USER_SKELETON_COPY.en.tabs.home,
-          selected: true,
-        }),
-      ).toBeInTheDocument(),
-    );
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("tab", {
-          name: USER_SKELETON_COPY.en.tabs.orders,
-        }),
-      ).toBeInTheDocument(),
-    );
     await act(async () => {
       fireEvent.click(
-        screen.getByRole("tab", { name: USER_SKELETON_COPY.en.tabs.orders }),
+        screen.getAllByRole("tab", {
+          name: USER_SKELETON_COPY.km.tabs.orders,
+        })[0],
       );
+    });
+    fireEvent.change(pickLanguageCombo(), {
+      target: { value: "en" },
+    });
+    const allOrdersTabs = screen.getAllByRole("tab", {
+      name: USER_SKELETON_COPY.en.tabs.orders,
+    });
+    expect(allOrdersTabs.length).toBeGreaterThan(0);
+    await act(async () => {
+      fireEvent.click(allOrdersTabs[0]);
     });
     await waitFor(() =>
       expect(
@@ -311,6 +350,10 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
     await waitFor(() =>
       expect(screen.queryByLabelText("Loan dashboard")).toBeInTheDocument(),
     );
+    expect(screen.getByLabelText("Application timeline")).toBeInTheDocument();
+    expect(
+      screen.getByText("Reassessment approval updated"),
+    ).toBeInTheDocument();
     const detailSection =
       screen.getByLabelText("Loan dashboard").closest("section") ??
       document.body;
@@ -318,6 +361,7 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
     for (const needle of SENSITIVE_HAYSTACK) {
       expect(rendered).not.toContain(needle);
     }
+    expect(rendered).not.toContain("internal-reviewer-001");
     const matches = (detailSection.textContent ?? "").match(/\d{6,}/g);
     expect(matches).toBeNull();
   });
@@ -326,15 +370,38 @@ describe("user-mini-app P0 step 2: Orders / OrderDetail privacy boundary", () =>
     for (const language of LANGUAGE_CODES) {
       cleanup();
       seedHistoryAndSummary(language);
+      window.history.replaceState(null, "", "/");
       const view = render(<App />);
-      fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
-        target: { value: language },
-      });
       await act(async () => {
         fireEvent.click(
-          screen.getByRole("tab", {
+          screen.getAllByRole("tab", {
+            name: USER_SKELETON_COPY.km.tabs.orders,
+          })[0],
+        );
+      });
+      fireEvent.change(pickLanguageCombo(), {
+        target: { value: language },
+      });
+      const backLink = screen.queryByRole("link", {
+        name: USER_SKELETON_COPY[language].backToOrders,
+      });
+      if (backLink) {
+        await act(async () => {
+          fireEvent.click(backLink);
+        });
+      }
+      await waitFor(() =>
+        expect(
+          screen.queryAllByRole("tab", {
             name: USER_SKELETON_COPY[language].tabs.orders,
-          }),
+          }).length,
+        ).toBeGreaterThan(0),
+      );
+      await act(async () => {
+        fireEvent.click(
+          screen.getAllByRole("tab", {
+            name: USER_SKELETON_COPY[language].tabs.orders,
+          })[0],
         );
       });
       await waitFor(() =>

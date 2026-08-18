@@ -24,7 +24,7 @@
 
 | 道具/环境（均为 Mock，不触碰生产）             | 提供方式                                                                                                                  | 负责人         | 提前 24h 确认 |
 | :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------ | :------------- | :-----------: |
-| Mock KMS CMK 别名清单                          | 打印 [SECURITY_S0_2_CHECKLIST.md §3.2](file:///e:/PayEase/docs/SECURITY_S0_2_CHECKLIST.md) 表格的 0 值模板                | 基础设施 Owner |       □       |
+| Mock KMS CMK 别名清单                          | 打印 [SECURITY_S0_2_CHECKLIST.md §3.2](file:///e:/PayEase/docs/04-安全与合规/SECURITY_S0_2_CHECKLIST.md) 表格的 0 值模板  | 基础设施 Owner |       □       |
 | Mock 持牌机构回调签名密钥清单（HMAC / RSA）    | 打印占位表：`LENDER-A / LENDER-B / LENDER-C`，每方一对 test 公钥                                                          | 机构对接负责人 |       □       |
 | Mock 账务对账快照（`rc-1…rc-5` + `rp-1…rp-6`） | 打印 [fin-mocks.static.ts](file:///e:/PayEase/finance-verify-portal/src/mocks/fin-mocks.static.ts) 5+6 行数据             | 财务对账负责人 |       □       |
 | Mock 员工 PII 样本                             | 打印 [hr-mocks.static.ts](file:///e:/PayEase/hr-verify-portal/src/mocks/hr-mocks.static.ts) 的 nationalIdLast4 + 合成姓名 | HR 产品负责人  |       □       |
@@ -210,24 +210,24 @@
 >
 > **异常点**：
 >
-> - broker-officer **绝不应该** VIEW_BANK_ACCOUNT_FULL（按 [DATA_CLASSIFICATION_DEIDENTIFICATION.md §4 红牌矩阵](file:///e:/PayEase/docs/DATA_CLASSIFICATION_DEIDENTIFICATION.md) ❌ Broker 域）
+> - broker-officer **绝不应该** VIEW_BANK_ACCOUNT_FULL（按 [DATA_CLASSIFICATION_DEIDENTIFICATION.md §4 红牌矩阵](file:///e:/PayEase/docs/04-安全与合规/DATA_CLASSIFICATION_DEIDENTIFICATION.md) ❌ Broker 域）
 > - EXPORT_BORROWER_PII_BATCH 因为缺第二审批人而 FAILURE，这是预期阻断，但 VIEW_BANK_ACCOUNT_FULL 竟然 SUCCESS，说明 RBAC 配置有漏洞（mock）
 
 ### 4.2 剧本步骤
 
-| 步骤                             |           T+           | 执行人                  | 检查项                                                                                                                                                                                                                                             | 通过？ |
-| :------------------------------- | :--------------------: | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----: |
-| 4.1 访问者会话强制下线（Mock）   |        T+00:05         | P-03                    | 在 mock RBAC 矩阵打印件上，mock-user-014 打 ✗ "FORCE LOGOUT"；当天该账号所有会话 TTL 改为 0                                                                                                                                                        |   □    |
-| 4.2 证据冻结（Mock）             |        T+00:20         | P-01 + P-08（审计观察） | 打印 3 条审计事件 JSON，加盖"SIMULATION EVIDENCE"章，贴到演练本；计算 3 条 JSON 的 SHA-256（手填 mock 哈希即可）并由外部审计观察员签字确认                                                                                                         |   □    |
-| 4.3 受影响 PII 范围评估          |        T+00:45         | DPO                     | VIEW_BANK_ACCOUNT_FULL 访问了 mock 多少条？回答：rp-1~rp-6 中 3 条（Sok Dara / Chea Srey Mom / Horng Piseth，全 mock 名）；银行全 PAN 实际没有真数据，范围评估结论为"Mock 0 真实用户暴露"                                                          |   □    |
-| 4.4 权限根因与即时修复（Mock）   |        T+01:30         | P-01                    | 对照 [ROLE_RBAC_MATRIX.md §2.2 Broker 域页面矩阵](file:///e:/PayEase/docs/ROLE_RBAC_MATRIX.md)：确认 `VIEW_BANK_ACCOUNT_FULL` 对 broker-officer 应返回 **403**；在打印矩阵上打 Δ "BUG FOUND"，标注"broker RBAC policy 误带 bank_account_full:view" |   □    |
-| 4.5 企业/Lender 客户通报（Mock） | T+24:00（要求 72h 内） | 法务 + P-06             | Mock 通报邮件模板：                                                                                                                                                                                                                                |
+| 步骤                             |           T+           | 执行人                  | 检查项                                                                                                                                                                                                                                                           | 通过？ |
+| :------------------------------- | :--------------------: | :---------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----: |
+| 4.1 访问者会话强制下线（Mock）   |        T+00:05         | P-03                    | 在 mock RBAC 矩阵打印件上，mock-user-014 打 ✗ "FORCE LOGOUT"；当天该账号所有会话 TTL 改为 0                                                                                                                                                                      |   □    |
+| 4.2 证据冻结（Mock）             |        T+00:20         | P-01 + P-08（审计观察） | 打印 3 条审计事件 JSON，加盖"SIMULATION EVIDENCE"章，贴到演练本；计算 3 条 JSON 的 SHA-256（手填 mock 哈希即可）并由外部审计观察员签字确认                                                                                                                       |   □    |
+| 4.3 受影响 PII 范围评估          |        T+00:45         | DPO                     | VIEW_BANK_ACCOUNT_FULL 访问了 mock 多少条？回答：rp-1~rp-6 中 3 条（Sok Dara / Chea Srey Mom / Horng Piseth，全 mock 名）；银行全 PAN 实际没有真数据，范围评估结论为"Mock 0 真实用户暴露"                                                                        |   □    |
+| 4.4 权限根因与即时修复（Mock）   |        T+01:30         | P-01                    | 对照 [ROLE_RBAC_MATRIX.md §2.2 Broker 域页面矩阵](file:///e:/PayEase/docs/04-安全与合规/ROLE_RBAC_MATRIX.md)：确认 `VIEW_BANK_ACCOUNT_FULL` 对 broker-officer 应返回 **403**；在打印矩阵上打 Δ "BUG FOUND"，标注"broker RBAC policy 误带 bank_account_full:view" |   □    |
+| 4.5 企业/Lender 客户通报（Mock） | T+24:00（要求 72h 内） | 法务 + P-06             | Mock 通报邮件模板：                                                                                                                                                                                                                                              |
 
 > - 企业客户 1 家（mock@employer-sample.test）："发生 1 次疑似越权访问，访问内容为 mock 占位银行卡号（不是贵司真实数据），已立即强制下线并做 RBAC 修复。"（DRAFT SIMULATION ONLY 水印）
 > - 持牌机构 Lender A："贵方 mock 结算卡 3 条占位号被 broker 侧 1 次误访问，真实号不受影响，见附件 SHA-256 证据。"
 >   法务审阅后签字 | □ |
 >   | 4.6 监管通报（Mock，如触发柬埔寨 PII 法） | T+72:00 内 | DPO + 法务 | 填写 mock 监管通报表格（DRAFT ONLY）：通报机关 × 受影响人数（0 真实）× 补救措施 × 报告人 DPO 签字 | □ |
->   | 4.7 长期补强：强制双控 | T+1 周（模拟） | P-01 + P-07 | 所有银行账号全 PAN 查看 + PII 批量导出，必须双控（RBAC 双审批）；在 [AUDIT_EVENT_DICTIONARY.md §2 双控清单](file:///e:/PayEase/docs/AUDIT_EVENT_DICTIONARY.md) 打印件上，补一项"VIEW_BANK_ACCOUNT_FULL 纳入双控"（便签贴） | □ |
+>   | 4.7 长期补强：强制双控 | T+1 周（模拟） | P-01 + P-07 | 所有银行账号全 PAN 查看 + PII 批量导出，必须双控（RBAC 双审批）；在 [AUDIT_EVENT_DICTIONARY.md §2 双控清单](file:///e:/PayEase/docs/04-安全与合规/AUDIT_EVENT_DICTIONARY.md) 打印件上，补一项"VIEW_BANK_ACCOUNT_FULL 纳入双控"（便签贴） | □ |
 >   | 4.8 Lessons Learned | T+1 周（模拟） | 全体 | 至少 1 项流程缺口（例：RED CARD 字段 × 域的 Semgrep 规则要覆盖 API 响应层，不只覆盖前端渲染层） | □ |
 
 ### 4.3 通过标准

@@ -42,7 +42,7 @@
     ]
   },
   "source_matrix_ref": {
-    "doc": "docs/ROLE_RBAC_MATRIX.md + docs/DATA_CLASSIFICATION_DEIDENTIFICATION.md",
+    "doc": "docs/04-安全与合规/ROLE_RBAC_MATRIX.md + docs/04-安全与合规/DATA_CLASSIFICATION_DEIDENTIFICATION.md",
     "section": "§2.1 broker operations and red-card matrix",
     "row_label": "Broker requests full HR salary field",
     "cell_expected": "403 FORBIDDEN__RED_CARD_FIELD"

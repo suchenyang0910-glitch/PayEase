@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applicantResult,
+  borrowEntryAction,
   canWithdrawApplicantApplication,
 } from "../src/application-result.ts";
 
@@ -104,5 +105,35 @@ describe("applicant result display state", () => {
         supplementRequested: false,
       }),
     ).toBe("withdrawn");
+  });
+
+  it("sends draft borrowers back to continue their application", () => {
+    expect(borrowEntryAction(undefined, true)).toBe("continue-draft");
+  });
+
+  it("prevents a reviewing borrower from creating a duplicate application", () => {
+    expect(borrowEntryAction("reviewing", false)).toBe("view-progress");
+    expect(borrowEntryAction("supplement-requested", false)).toBe(
+      "view-progress",
+    );
+  });
+
+  it("routes approved and contract-processing borrowers to signing", () => {
+    expect(borrowEntryAction("approved", false)).toBe("review-sign");
+    expect(borrowEntryAction("contract-processing", false)).toBe("review-sign");
+  });
+
+  it("routes funded and repayment-active borrowers to the bill view", () => {
+    expect(borrowEntryAction("funded", false)).toBe("view-bill");
+    expect(borrowEntryAction("repayment-active", false)).toBe("view-bill");
+  });
+
+  it("only allows a fresh application after a final reusable outcome", () => {
+    expect(borrowEntryAction("settled", false)).toBe("apply-new");
+    expect(borrowEntryAction("withdrawn", false)).toBe("apply-new");
+    expect(borrowEntryAction("rejected-resolved", false)).toBe("apply-new");
+    expect(borrowEntryAction("rejected-pending", false)).toBe(
+      "view-explanation",
+    );
   });
 });

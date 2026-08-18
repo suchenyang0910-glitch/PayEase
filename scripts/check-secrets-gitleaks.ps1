@@ -3,11 +3,29 @@
 
 [CmdletBinding()]
 param(
-  [string]$RootDir = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)),
+  [string]$RootDir,
   [switch]$ForceNoGit
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Resolve the repository root without assuming that MyInvocation contains a
+# path. PowerShell hosts that invoke a script through a wrapper can leave it
+# empty, while PSScriptRoot remains reliable for direct execution.
+if ([string]::IsNullOrWhiteSpace($RootDir)) {
+  $candidate = $null
+  if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    try { $candidate = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($PSScriptRoot)) } catch { $candidate = $null }
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate) -and -not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+    try {
+      $scriptDir = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($MyInvocation.MyCommand.Path))
+      $candidate = [IO.Path]::GetDirectoryName($scriptDir)
+    } catch { $candidate = $null }
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate)) { $candidate = (Get-Location).Path }
+  $RootDir = $candidate
+}
 
 $ConfigFile = Join-Path $RootDir '.gitleaks.toml'
 $CacheDir = Join-Path $RootDir '.cache'

@@ -1,19 +1,28 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import type { LanguageCode } from "@payease/v1-domain";
 import { USER_SKELETON_COPY, type UserTab } from "../copy/user-copy.ts";
 import khmerxLogo from "../assets/khmerx-logo.jpg";
 
-const TAB_ORDER: readonly Exclude<UserTab, "order-detail">[] = [
-  "home",
-  "orders",
-  "repayment",
-  "profile",
-] as const;
+const TAB_ORDER: readonly Exclude<
+  UserTab,
+  | "order-detail"
+  | "notifications"
+  | "notification-detail"
+  | "help-guide"
+  | "help-safety"
+>[] = ["home", "orders", "repayment", "profile"] as const;
 
 const TAB_LABELS: Readonly<
   Record<
-    Exclude<UserTab, "order-detail">,
+    Exclude<
+      UserTab,
+      | "order-detail"
+      | "notifications"
+      | "notification-detail"
+      | "help-guide"
+      | "help-safety"
+    >,
     Readonly<Record<LanguageCode, string>>
   >
 > = {
@@ -31,6 +40,49 @@ function themeLabel(language: LanguageCode): string {
       return "ប្តូរស្បែក";
     default:
       return "Toggle theme";
+  }
+}
+
+function messagesLabel(
+  language: LanguageCode,
+  unreadNotificationCount: number,
+): string {
+  if (unreadNotificationCount <= 0) {
+    return pick(language, {
+      "zh-CN": "消息",
+      en: "Messages",
+      km: "សារ",
+    });
+  }
+  return pick(language, {
+    "zh-CN": `消息，${unreadNotificationCount} 条未读`,
+    en: `Messages, ${unreadNotificationCount} unread`,
+    km: `សារ មានមិនទាន់អាន ${unreadNotificationCount}`,
+  });
+}
+
+function themeSectionTitle(language: LanguageCode): string {
+  switch (language) {
+    case "zh-CN":
+      return "外观";
+    case "km":
+      return "រូបរាង";
+    default:
+      return "Appearance";
+  }
+}
+
+function themeModeLabel(
+  language: LanguageCode,
+  theme: "light" | "dark",
+): string {
+  switch (language) {
+    case "zh-CN":
+      return theme === "dark" ? "当前：深色模式" : "当前：浅色模式";
+    case "km":
+      return theme === "dark" ? "បច្ចុប្បន្ន៖ ពណ៌ងងឹត" : "បច្ចុប្បន្ន៖ ពណ៌ភ្លឺ";
+    default:
+      return theme === "dark" ? "Current: Dark mode" : "Current: Light mode";
   }
 }
 
@@ -139,6 +191,21 @@ type Props = Readonly<{
   language: LanguageCode;
   current: UserTab;
   onChange: (next: UserTab) => void;
+  showPreviewBadge?: boolean;
+  applicantSession?: boolean;
+  loading?: boolean;
+  onLanguageChange?: (next: LanguageCode) => void;
+  onLogout?: () => void;
+  borrowEntryLabel?: string;
+  borrowEntryHint?: string;
+  borrowEntryDisabled?: boolean;
+  onBorrowEntry?: () => void;
+  onOpenNotifications?: () => void;
+  onOpenRecords?: () => void;
+  onOpenReassessment?: () => void;
+  onOpenHelpGuide?: () => void;
+  onOpenHelpSafety?: () => void;
+  unreadNotificationCount?: number;
   children?: ReactNode;
 }>;
 
@@ -146,9 +213,23 @@ export function HomePage({
   language,
   current,
   onChange,
+  showPreviewBadge = false,
+  applicantSession = false,
+  loading = false,
+  onLanguageChange,
+  onLogout,
+  borrowEntryLabel,
+  borrowEntryHint,
+  borrowEntryDisabled = false,
+  onBorrowEntry,
+  onOpenNotifications,
+  onOpenRecords,
+  onOpenReassessment,
+  onOpenHelpGuide,
+  onOpenHelpSafety,
+  unreadNotificationCount = 0,
   children,
 }: Props): JSX.Element {
-  const copy = USER_SKELETON_COPY[language].home;
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
     const saved = document.documentElement.getAttribute("data-theme");
@@ -193,7 +274,7 @@ export function HomePage({
       km: "ឥណទានដែលអាចខ្ចីបាន",
     }),
     creditHint: pick<string>(language, {
-      "zh-CN": "完成身份与在职核验后，由持牌机构审核并授予额度",
+      "zh-CN": "完成身份与在职核验后，将根据审核结果授予额度",
       en: "Credit limit is reviewed and granted by the licensed institution after identity & employment checks.",
       km: "កម្រិតឥណទានត្រូវបានពិនិត្យ និងផ្តល់ដោយស្ថាប័នមានអាជ្ញាប័ណ្ណ បន្ទាប់ពីពិនិត្យអត្តសញ្ញាណ និងការងារ។",
     }),
@@ -220,13 +301,13 @@ export function HomePage({
       }),
       history: pick<string>(language, {
         "zh-CN": "借款记录",
-        en: "Records",
+        en: "Loan records",
         km: "ប្រវត្តិ",
       }),
       raise: pick<string>(language, {
         "zh-CN": "额度提升",
-        en: "Raise limit",
-        km: "បង្កើនកម្រិត",
+        en: "Reassessment",
+        km: "វាយតម្លៃឡើងវិញ",
       }),
     },
     productTitle: pick<string>(language, {
@@ -245,7 +326,7 @@ export function HomePage({
       km: "ដាក់ពាក្យ",
     }),
     productDisclaimer: pick<string>(language, {
-      "zh-CN": "额度、费用与合同条款以持牌机构审核结果为准。",
+      "zh-CN": "额度、费用与合同条款以审核结果为准。",
       en: "Amount, fees and contract terms are subject to the licensed institution's review.",
       km: "ចំនួន ថ្លៃ និងល័ក្ខខ័ណ្ឌកិច្ចសន្យា អាស្រ័យលើការពិនិត្យរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ។",
     }),
@@ -261,20 +342,45 @@ export function HomePage({
     }),
     compliance: pick<string>(language, {
       "zh-CN":
-        "本服务由持牌金融机构提供。额度、费用与合同条款由持牌机构独立审核并在确认前展示。请勿过度借贷，按时还款珍爱征信。",
+        "本服务由合作金融机构提供。额度、费用与合同条款将在确认前展示。请勿过度借贷，按时还款珍爱征信。",
       en: "This service is delivered by a licensed financial institution. Amount, fees and contract terms are independently reviewed and presented before confirmation. Borrow wisely and repay on time to protect your credit standing.",
       km: "សេវាកម្មនេះផ្តល់ដោយស្ថាប័នហិរញ្ញវត្ថុមានអាជ្ញាប័ណ្ណ។ ចំនួន ថ្លៃ និងល័ក្ខខ័ណ្ឌកិច្ចសន្យា ត្រូវបានពិនិត្យដោយឯករាជ្យ និងបង្ហាញមុនការបញ្ជាក់។ សូមខ្ចីឲ្យសមស្រប និងសងទាន់ពេល ដើម្បីការពារកេរដំណែលរបស់អ្នក។",
     }),
     licensedNotice: pick<string>(language, {
       "zh-CN":
-        "额度、费用与合同条款由持牌金融机构独立审核并在确认前展示。请理性借贷，按时还款。",
+        "额度、费用与合同条款以最终审核结果为准，并将在确认前展示。请理性借贷，按时还款。",
       en: "Amount, fees and contract terms are independently reviewed by a licensed financial institution and shown before confirmation. Borrow responsibly.",
       km: "ចំនួន ថ្លៃ និងល័ក្ខខ័ណ្ឌកិច្ចសន្យា ត្រូវបានពិនិត្យដោយស្ថាប័នហិរញ្ញវត្ថុមានអាជ្ញាប័ណ្ណ ហើយបង្ហាញមុនការបញ្ជាក់។ សូមខ្ចីឲ្យសមស្រប និងសងទាន់ពេល។",
     }),
   };
 
-  const activeTab: Exclude<UserTab, "order-detail"> =
-    current === "order-detail" ? "orders" : current;
+  const activeTab: Exclude<
+    UserTab,
+    | "order-detail"
+    | "notifications"
+    | "notification-detail"
+    | "help-guide"
+    | "help-safety"
+  > =
+    current === "order-detail" ||
+    current === "notifications" ||
+    current === "notification-detail" ||
+    current === "help-guide" ||
+    current === "help-safety"
+      ? "home"
+      : current;
+  const isHome = current === "home";
+  const borrowEntryText = borrowEntryLabel ?? ui.creditCta;
+  const borrowEntryHintText = borrowEntryHint ?? ui.creditHint;
+  const openBorrowEntry = onBorrowEntry ?? (() => onChange("orders"));
+  const openNotifications =
+    onOpenNotifications ?? (() => onChange("notifications"));
+  const openRecords = onOpenRecords ?? (() => onChange("orders"));
+  const openReassessment = onOpenReassessment ?? (() => onChange("orders"));
+  const openHelpGuide = onOpenHelpGuide ?? (() => onChange("help-guide"));
+  const openHelpSafety = onOpenHelpSafety ?? (() => onChange("help-safety"));
+  const toggleTheme = () =>
+    setTheme((previous) => (previous === "dark" ? "light" : "dark"));
 
   return (
     <div className="kx-shell" lang={language}>
@@ -299,16 +405,44 @@ export function HomePage({
           </div>
         </div>
         <div className="kx-topnav__actions">
+          {showPreviewBadge
+            ? (() => {
+                const demoCopy: Readonly<Record<LanguageCode, string>> = {
+                  "zh-CN": "受控预览环境",
+                  en: "Controlled preview",
+                  km: "បរិស្ថានសាកល្បងគ្រប់គ្រង",
+                };
+                return (
+                  <span className="preview-pill">{demoCopy[language]}</span>
+                );
+              })()
+            : null}
+          {applicantSession && typeof onLogout === "function" ? (
+            <button
+              className="logout-button"
+              disabled={loading}
+              onClick={() => onLogout()}
+              type="button"
+            >
+              {pick<string>(language, {
+                "zh-CN": "退出",
+                en: "Sign out",
+                km: "ចាកចេញ",
+              })}
+            </button>
+          ) : null}
           <button
             className="kx-icon-btn"
             type="button"
-            aria-label={pick<string>(language, {
-              "zh-CN": "消息",
-              en: "Messages",
-              km: "សារ",
-            })}
+            aria-label={messagesLabel(language, unreadNotificationCount)}
+            onClick={openNotifications}
           >
             <IconBell />
+            {unreadNotificationCount > 0 ? (
+              <span className="kx-icon-btn__badge" aria-hidden="true">
+                {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+              </span>
+            ) : null}
           </button>
           <button
             className="kx-icon-btn"
@@ -325,153 +459,215 @@ export function HomePage({
         </div>
       </nav>
 
-      {/* Layout contract anchor for existing App.tsx and tests */}
-      <section className="page page--home" aria-labelledby="home-title">
-        <h2
-          id="home-title"
-          className="page__title"
-          aria-hidden="false"
-          style={{
-            position: "absolute",
-            left: "-9999px",
-            top: "auto",
-            width: "1px",
-            height: "1px",
-            overflow: "hidden",
-          }}
-        >
-          {USER_SKELETON_COPY[language].home.title}
-        </h2>
-        <div
-          className="page__body"
-          data-page-anchor="home"
-          style={{ marginTop: 0 }}
-        >
-          {children}
-        </div>
-      </section>
+      {isHome ? (
+        <>
+          <section className="page page--home" aria-labelledby="home-title">
+            <h2
+              id="home-title"
+              className="page__title"
+              aria-hidden="false"
+              style={{
+                position: "absolute",
+                left: "-9999px",
+                top: "auto",
+                width: "1px",
+                height: "1px",
+                overflow: "hidden",
+              }}
+            >
+              {USER_SKELETON_COPY[language].home.title}
+            </h2>
+          </section>
 
-      {/* Module 2: Credit Card (unique primary focus) */}
-      <section className="kx-credit" aria-labelledby="kx-credit-title">
-        <p className="kx-credit__label" id="kx-credit-title">
-          {ui.creditLabel}
-        </p>
-        <div className="kx-credit__amount">
-          <span className="kx-credit__currency">$</span>
-          <span>0.00</span>
-          <span className="kx-credit__unit">USD</span>
-        </div>
-        <p className="kx-credit__hint">{ui.creditHint}</p>
-        <button
-          type="button"
-          className="kx-credit__cta"
-          onClick={() => onChange("orders")}
-          aria-label="Start loan application from credit card"
-        >
-          {ui.creditCta}
-        </button>
-        <p className="kx-credit__disclaimer">{ui.riskNotice}</p>
-      </section>
+          {/* Module 2: Credit Card (unique primary focus) */}
+          <section className="kx-credit" aria-labelledby="kx-credit-title">
+            <p className="kx-credit__label" id="kx-credit-title">
+              {ui.creditLabel}
+            </p>
+            <div className="kx-credit__amount">
+              <span className="kx-credit__currency">$</span>
+              <span>0.00</span>
+              <span className="kx-credit__unit">USD</span>
+            </div>
+            <p className="kx-credit__hint">{borrowEntryHintText}</p>
+            <button
+              type="button"
+              className="kx-credit__cta"
+              onClick={openBorrowEntry}
+              disabled={borrowEntryDisabled}
+              aria-label="Start loan application from credit card"
+            >
+              {borrowEntryText}
+            </button>
+            <p className="kx-credit__disclaimer">{ui.riskNotice}</p>
+          </section>
 
-      {/* Module 3: Four-grid shortcuts */}
-      <section className="kx-grid" aria-label="Core features">
-        <button
-          type="button"
-          className="kx-grid__item"
-          onClick={() => onChange("orders")}
-        >
-          <span className="kx-grid__icon">
-            <IconBorrow />
-          </span>
-          <span className="kx-grid__label">{ui.grid.borrow}</span>
-        </button>
-        <button
-          type="button"
-          className="kx-grid__item"
-          onClick={() => onChange("repayment")}
-        >
-          <span className="kx-grid__icon">
-            <IconPay />
-          </span>
-          <span className="kx-grid__label">{ui.grid.pay}</span>
-        </button>
-        <button
-          type="button"
-          className="kx-grid__item"
-          onClick={() => onChange("orders")}
-        >
-          <span className="kx-grid__icon">
-            <IconHistory />
-          </span>
-          <span className="kx-grid__label">{ui.grid.history}</span>
-        </button>
-        <button
-          type="button"
-          className="kx-grid__item"
-          onClick={() => onChange("profile")}
-        >
-          <span className="kx-grid__icon">
-            <IconRaise />
-          </span>
-          <span className="kx-grid__label">{ui.grid.raise}</span>
-        </button>
-      </section>
+          {/* Module 3: Four-grid shortcuts */}
+          <section className="kx-grid" aria-label="Core features">
+            <button
+              type="button"
+              className="kx-grid__item"
+              onClick={openBorrowEntry}
+              disabled={borrowEntryDisabled}
+            >
+              <span className="kx-grid__icon">
+                <IconBorrow />
+              </span>
+              <span className="kx-grid__label">{ui.grid.borrow}</span>
+            </button>
+            <button
+              type="button"
+              className="kx-grid__item"
+              onClick={() => onChange("repayment")}
+            >
+              <span className="kx-grid__icon">
+                <IconPay />
+              </span>
+              <span className="kx-grid__label">{ui.grid.pay}</span>
+            </button>
+            <button
+              type="button"
+              className="kx-grid__item"
+              onClick={openRecords}
+            >
+              <span className="kx-grid__icon">
+                <IconHistory />
+              </span>
+              <span className="kx-grid__label">{ui.grid.history}</span>
+            </button>
+            <button
+              type="button"
+              className="kx-grid__item"
+              onClick={openReassessment}
+            >
+              <span className="kx-grid__icon">
+                <IconRaise />
+              </span>
+              <span className="kx-grid__label">{ui.grid.raise}</span>
+            </button>
+          </section>
 
-      {/* Module 4: Single product card */}
-      <section className="kx-product" aria-labelledby="kx-product-title">
-        <h3 className="kx-product__title" id="kx-product-title">
-          {ui.productTitle}
-        </h3>
-        <p className="kx-product__summary">{ui.productSummary}</p>
-        <button
-          type="button"
-          className="kx-product__cta"
-          onClick={() => onChange("orders")}
-          aria-label="Start loan application from product card"
-        >
-          {ui.productCta}
-        </button>
-        <p className="kx-product__disclaimer">{ui.productDisclaimer}</p>
-      </section>
+          {/* Module 4: Single product card */}
+          <section className="kx-product" aria-labelledby="kx-product-title">
+            <h3 className="kx-product__title" id="kx-product-title">
+              {ui.productTitle}
+            </h3>
+            <p className="kx-product__summary">{ui.productSummary}</p>
+            <button
+              type="button"
+              className="kx-product__cta"
+              onClick={openBorrowEntry}
+              disabled={borrowEntryDisabled}
+              aria-label="Start loan application from product card"
+            >
+              {borrowEntryText}
+            </button>
+            <p className="kx-product__disclaimer">{ui.productDisclaimer}</p>
+          </section>
 
-      {/* Module 5: Help links */}
-      <section className="kx-help" aria-label="Help center">
-        <button
-          type="button"
-          className="kx-help__link"
-          onClick={() => onChange("profile")}
-        >
-          {ui.helpGuide}
-        </button>
-        <button
-          type="button"
-          className="kx-help__link"
-          onClick={() => onChange("profile")}
-        >
-          {ui.helpSafety}
-        </button>
-      </section>
+          {/* Module 5: Help links */}
+          <section className="kx-help" aria-label="Help center">
+            <button
+              type="button"
+              className="kx-help__link"
+              onClick={openHelpGuide}
+            >
+              {ui.helpGuide}
+            </button>
+            <button
+              type="button"
+              className="kx-help__link"
+              onClick={openHelpSafety}
+            >
+              {ui.helpSafety}
+            </button>
+          </section>
 
-      {/* Licensed notice (doc 3.3) */}
-      <div className="kx-licensed" role="note">
-        {ui.licensedNotice}
-      </div>
+          <div className="kx-licensed" role="note">
+            {ui.licensedNotice}
+          </div>
 
-      {/* Module 6: Compliance footer (fixed bottom above tabs) */}
-      <footer className="kx-compliance" role="contentinfo">
-        {ui.compliance}
-      </footer>
-
-      {/* Theme toggle (visual-only, never stores PII) */}
-      <button
-        type="button"
-        className="kx-theme-toggle"
-        aria-label={themeLabel(language)}
-        title={themeLabel(language)}
-        onClick={() => setTheme((p) => (p === "dark" ? "light" : "dark"))}
-      >
-        {theme === "dark" ? "\u2600" : "\u263E"}
-      </button>
+          <footer className="kx-compliance" role="contentinfo">
+            {ui.compliance}
+          </footer>
+        </>
+      ) : (
+        <>
+          <div className="kx-page-slot">{children}</div>
+          {current === "profile" ? (
+            <section
+              className="kx-page-theme"
+              aria-label={themeSectionTitle(language)}
+            >
+              <div className="kx-page-theme__meta">
+                <strong className="kx-page-theme__title">
+                  {themeSectionTitle(language)}
+                </strong>
+                <span className="kx-page-theme__hint">
+                  {themeModeLabel(language, theme)}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="secondary kx-page-theme__toggle"
+                aria-label={themeLabel(language)}
+                title={themeLabel(language)}
+                aria-pressed={theme === "dark"}
+                onClick={toggleTheme}
+              >
+                {themeLabel(language)}
+              </button>
+            </section>
+          ) : null}
+          {typeof onLanguageChange === "function" ? (
+            current === "profile" ? (
+              <section
+                className="kx-page-language"
+                aria-label="Language preferences"
+              >
+                <label
+                  className="kx-page-language__label"
+                  htmlFor="page-language"
+                >
+                  {pick<string>(language, {
+                    "zh-CN": "语言偏好",
+                    en: "Language preference",
+                    km: "ភាសាដែលពេញចិត្ត",
+                  })}
+                </label>
+                <select
+                  id="page-language"
+                  aria-label="Language"
+                  value={language}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    onLanguageChange(event.target.value as LanguageCode)
+                  }
+                >
+                  <option value="km">ខ្មែរ</option>
+                  <option value="en">EN</option>
+                  <option value="zh-CN">中文</option>
+                </select>
+              </section>
+            ) : (
+              <div className="kx-language-sync">
+                <label htmlFor="page-language-sync">Language</label>
+                <select
+                  id="page-language-sync"
+                  aria-label="Language"
+                  value={language}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    onLanguageChange(event.target.value as LanguageCode)
+                  }
+                >
+                  <option value="km">ខ្មែរ</option>
+                  <option value="en">EN</option>
+                  <option value="zh-CN">中文</option>
+                </select>
+              </div>
+            )
+          ) : null}
+        </>
+      )}
 
       {/* Module 7: Bottom tabs */}
       <nav className="kx-tabs" aria-label="Primary tabs" role="tablist">

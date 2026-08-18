@@ -15,7 +15,13 @@ function signedInitData(botToken: string): string {
   const params = new URLSearchParams({
     auth_date: "2000000000",
     query_id: "AAE",
-    user: JSON.stringify({ id: 123456789, first_name: "Preview" }),
+    user: JSON.stringify({
+      id: 123456789,
+      first_name: "Preview",
+      last_name: "User",
+      username: "preview_user",
+      photo_url: "https://t.me/i/userpic/320/preview.jpg",
+    }),
   });
   const dataCheckString = [...params.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
@@ -48,6 +54,9 @@ describe("Telegram multi-bot Mini App verification", () => {
     ).toMatchObject({
       telegramUserRef: "telegram-123456789",
       authenticatedBotId: "222222222",
+      displayName: "Preview User",
+      username: "preview_user",
+      photoUrl: "https://t.me/i/userpic/320/preview.jpg",
     });
     expect(
       verifyTelegramMiniAppInitData(

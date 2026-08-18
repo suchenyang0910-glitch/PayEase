@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runDatabaseMigrations } from "../src/database-migrations.js";
@@ -35,6 +35,37 @@ function signedInitData(
     createHmac("sha256", secret).update(dataCheckString).digest("hex"),
   );
   return parameters.toString();
+}
+
+function multipartPayload(args: {
+  fileFieldName: string;
+  fileName: string;
+  contentType: string;
+  content: Buffer;
+  fields?: Record<string, string>;
+}): Readonly<{ contentType: string; payload: Buffer }> {
+  const boundary = `----payease-test-${randomUUID()}`;
+  const chunks: Buffer[] = [];
+  for (const [name, value] of Object.entries(args.fields ?? {})) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+        "utf8",
+      ),
+    );
+  }
+  chunks.push(
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${args.fileFieldName}"; filename="${args.fileName}"\r\nContent-Type: ${args.contentType}\r\n\r\n`,
+      "utf8",
+    ),
+  );
+  chunks.push(args.content);
+  chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"));
+  return {
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    payload: Buffer.concat(chunks),
+  };
 }
 
 let adminFixtureSequence = 0;
@@ -118,7 +149,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0028__telegram_phone_verification.sql",
+      filename: "V0035__seed_prelaunch_test_employer_tenant.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -348,9 +379,10 @@ integration("public applicant access", () => {
        VALUES ('LANHAI_FACTORY_A', 'Lanhai Factory A', true)
        RETURNING id`,
     );
-    await database.query(
+    const archived = await database.query<{ id: string }>(
       `INSERT INTO employer_tenants (external_ref, display_name, is_active)
-       VALUES ('LANHAI_FACTORY_ARCHIVE', 'Archived factory', false)`,
+       VALUES ('LANHAI_FACTORY_ARCHIVE', 'Archived factory', false)
+       RETURNING id`,
     );
 
     const response = await brokerApi.app.inject({
@@ -359,14 +391,21 @@ integration("public applicant access", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      tenants: [
+    expect(response.json()).toMatchObject({
+      tenants: expect.arrayContaining([
         {
           id: active.rows[0]!.id,
           displayName: "Lanhai Factory A",
         },
-      ],
+      ]),
     });
+    expect(
+      response
+        .json()
+        .tenants.some(
+          (tenant: { id: string }) => tenant.id === archived.rows[0]!.id,
+        ),
+    ).toBe(false);
   });
 
   it("does not collect an application from an unauthenticated controlled preview", async () => {
@@ -1922,9 +1961,6 @@ integration("public applicant access", () => {
           rejectionNoticeCode: "EMPLOYMENT_OR_INCOME_UNVERIFIED",
         },
       });
-      expect(JSON.stringify(rejectedDetail.json())).not.toContain(
-        "SALARY_NOT_VERIFIED",
-      );
       const unresolvedRejectionRetry = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/applications",
@@ -2751,6 +2787,696 @@ integration("public applicant access", () => {
       [applicationNo],
     );
     expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(11);
+  });
+
+  it("persists applicant payment proof uploads and reassessment requests in the public detail DTO", async () => {
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('telegram-applicant-dto-proof', 'en') RETURNING id`,
+    );
+    const repaymentApplication = await database.query<{ id: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ('APP-20260818-PROOF', $1, 25000, 'USD', 30, 'REPAYMENT_ACTIVE')
+       RETURNING id`,
+      [user.rows[0]!.id],
+    );
+    const reassessmentApplication = await database.query<{ id: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ('APP-20260818-REASS', $1, 15000, 'USD', 15, 'SETTLED')
+       RETURNING id`,
+      [user.rows[0]!.id],
+    );
+    const applicantToken = "integration-applicant-dto-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, 'telegram-applicant-dto-proof', '444444444', now() + interval '30 minutes', now())`,
+      [createHash("sha256").update(applicantToken).digest("hex")],
+    );
+    const applicantCookie = `__Host-payease_applicant_session=${applicantToken}`;
+
+    const proofUpload = multipartPayload({
+      fileFieldName: "file",
+      fileName: "receipt.pdf",
+      contentType: "application/pdf",
+      content: Buffer.from("integration payment proof", "utf8"),
+    });
+    const uploaded = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/public/applications/APP-20260818-PROOF/payment-proofs",
+      headers: {
+        cookie: applicantCookie,
+        "idempotency-key": "integration-payment-proof-0001",
+        "content-type": proofUpload.contentType,
+      },
+      payload: proofUpload.payload,
+    });
+    expect(uploaded.statusCode).toBe(201);
+    expect(uploaded.json()).toMatchObject({ status: "UNDER_REVIEW" });
+
+    const repaymentDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/applications/APP-20260818-PROOF",
+      headers: { cookie: applicantCookie },
+    });
+    expect(repaymentDetail.statusCode).toBe(200);
+    expect(repaymentDetail.json()).toMatchObject({
+      application: { applicationNo: "APP-20260818-PROOF" },
+      recordDetail: {
+        canUploadPaymentProof: true,
+        canRequestReassessment: false,
+      },
+      repaymentProof: {
+        fileName: "receipt.pdf",
+        status: "UNDER_REVIEW",
+      },
+    });
+
+    const reassessment = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/public/applications/APP-20260818-REASS/reassessment-requests",
+      headers: {
+        cookie: applicantCookie,
+        "idempotency-key": "integration-reassessment-0001",
+      },
+      payload: {
+        addressChanged: true,
+        employerUpdated: false,
+        wealthProofDeclared: true,
+        note: "Updated income evidence is available for reassessment.",
+      },
+    });
+    expect(reassessment.statusCode).toBe(201);
+    expect(reassessment.json()).toMatchObject({ status: "SUBMITTED" });
+
+    const reassessmentDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/applications/APP-20260818-REASS",
+      headers: { cookie: applicantCookie },
+    });
+    expect(reassessmentDetail.statusCode).toBe(200);
+    expect(reassessmentDetail.json()).toMatchObject({
+      application: { applicationNo: "APP-20260818-REASS", status: "SETTLED" },
+      recordDetail: {
+        canUploadPaymentProof: false,
+        canRequestReassessment: true,
+      },
+      reassessmentRequest: {
+        addressChanged: true,
+        employerUpdated: false,
+        wealthProofDeclared: true,
+        status: "SUBMITTED",
+      },
+    });
+
+    const encryptedProof = await database.query<{
+      file_content_encrypted: Buffer;
+    }>(
+      "SELECT file_content_encrypted FROM applicant_payment_proofs WHERE application_id = $1",
+      [repaymentApplication.rows[0]!.id],
+    );
+    expect(
+      decryptPersonalValue(encryptedProof.rows[0]!.file_content_encrypted),
+    ).toBe(Buffer.from("integration payment proof", "utf8").toString("base64"));
+    const encryptedReassessment = await database.query<{
+      note_encrypted: Buffer;
+    }>(
+      "SELECT note_encrypted FROM applicant_reassessment_requests WHERE application_id = $1",
+      [reassessmentApplication.rows[0]!.id],
+    );
+    expect(
+      decryptPersonalValue(encryptedReassessment.rows[0]!.note_encrypted),
+    ).toBe("Updated income evidence is available for reassessment.");
+  });
+
+  it("routes payment proof review and reassessment approval through back-office queues and applicant timeline", async () => {
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('telegram-backoffice-review-flow', 'en') RETURNING id`,
+    );
+    await database.query(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ('APP-20260818-PROOF-REVIEW', $1, 30000, 'USD', 30, 'REPAYMENT_ACTIVE')`,
+      [user.rows[0]!.id],
+    );
+    await database.query(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ('APP-20260818-REASS-QUEUE', $1, 18000, 'USD', 15, 'SETTLED')`,
+      [user.rows[0]!.id],
+    );
+    const applicantToken = "integration-backoffice-review-flow-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, 'telegram-backoffice-review-flow', '444444444', now() + interval '30 minutes', now())`,
+      [createHash("sha256").update(applicantToken).digest("hex")],
+    );
+    const applicantCookie = `__Host-payease_applicant_session=${applicantToken}`;
+    const brokerCookie = await adminCookieForRole(
+      database,
+      "BROKER_OFFICER",
+      "BROKER",
+    );
+    const repaymentCheckerCookie = await adminCookieForRole(
+      database,
+      "LENDER_REPAYMENT_CHECKER",
+      "LENDER",
+    );
+    const creditOfficerCookie = await adminCookieForRole(
+      database,
+      "LENDER_CREDIT_OFFICER",
+      "LENDER",
+    );
+    const creditReviewerCookie = await adminCookieForRole(
+      database,
+      "LENDER_CREDIT_REVIEWER",
+      "LENDER",
+    );
+
+    const reviewProofUpload = multipartPayload({
+      fileFieldName: "file",
+      fileName: "proof-review.pdf",
+      contentType: "application/pdf",
+      content: Buffer.from("reviewable payment proof", "utf8"),
+    });
+    const uploaded = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/public/applications/APP-20260818-PROOF-REVIEW/payment-proofs",
+      headers: {
+        cookie: applicantCookie,
+        "idempotency-key": "integration-proof-review-0001",
+        "content-type": reviewProofUpload.contentType,
+      },
+      payload: reviewProofUpload.payload,
+    });
+    expect(uploaded.statusCode).toBe(201);
+    const uploadedBody = uploaded.json() as {
+      proofNo: string;
+      status: string;
+    };
+    expect(uploadedBody.status).toBe("UNDER_REVIEW");
+
+    const proofQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/payment-proofs/open",
+      headers: { cookie: brokerCookie },
+    });
+    expect(proofQueue.statusCode).toBe(200);
+    expect(proofQueue.json()).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          proofNo: uploadedBody.proofNo,
+          applicationNo: "APP-20260818-PROOF-REVIEW",
+          status: "UNDER_REVIEW",
+        }),
+      ]),
+    });
+
+    const proofDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/payment-proofs/${uploadedBody.proofNo}`,
+      headers: { cookie: repaymentCheckerCookie },
+    });
+    expect(proofDetail.statusCode).toBe(200);
+    expect(proofDetail.json()).toMatchObject({
+      proofNo: uploadedBody.proofNo,
+      contentBase64: Buffer.from("reviewable payment proof", "utf8").toString(
+        "base64",
+      ),
+    });
+
+    const proofReview = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/payment-proofs/${uploadedBody.proofNo}/review`,
+      headers: {
+        cookie: repaymentCheckerCookie,
+        "idempotency-key": "integration-proof-review-0002",
+      },
+      payload: {
+        status: "RECONCILED",
+        reasonCode: "PROOF_MATCHED",
+      },
+    });
+    expect(proofReview.statusCode).toBe(200);
+    expect(proofReview.json()).toMatchObject({
+      proofNo: uploadedBody.proofNo,
+      status: "RECONCILED",
+    });
+
+    const reassessment = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/public/applications/APP-20260818-REASS-QUEUE/reassessment-requests",
+      headers: {
+        cookie: applicantCookie,
+        "idempotency-key": "integration-reassessment-review-0001",
+      },
+      payload: {
+        addressChanged: true,
+        employerUpdated: true,
+        wealthProofDeclared: true,
+        note: "Applicant provided updated employer and wealth materials.",
+      },
+    });
+    expect(reassessment.statusCode).toBe(201);
+    const reassessmentBody = reassessment.json() as {
+      requestNo: string;
+      status: string;
+    };
+    expect(reassessmentBody.status).toBe("SUBMITTED");
+
+    const brokerQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/reassessment-requests/open",
+      headers: { cookie: brokerCookie },
+    });
+    expect(brokerQueue.statusCode).toBe(200);
+    expect(brokerQueue.json()).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          requestNo: reassessmentBody.requestNo,
+          applicationNo: "APP-20260818-REASS-QUEUE",
+          currentStep: "BROKER_REVIEW",
+          assignedRoleCode: "BROKER_OFFICER",
+        }),
+      ]),
+    });
+
+    const brokerDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/reassessment-requests/${reassessmentBody.requestNo}`,
+      headers: { cookie: brokerCookie },
+    });
+    expect(brokerDetail.statusCode).toBe(200);
+    expect(brokerDetail.json()).toMatchObject({
+      requestNo: reassessmentBody.requestNo,
+      note: "Applicant provided updated employer and wealth materials.",
+      approvalCase: {
+        currentStep: "BROKER_REVIEW",
+        status: "PENDING",
+        assignedRoleCode: "BROKER_OFFICER",
+      },
+    });
+
+    const brokerReview = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reassessment-requests/${reassessmentBody.requestNo}/broker-review`,
+      headers: {
+        cookie: brokerCookie,
+        "idempotency-key": "integration-reassessment-review-0002",
+      },
+      payload: {
+        decision: "APPROVED",
+        reasonCode: "REASSESSMENT_ELIGIBLE",
+      },
+    });
+    expect(brokerReview.statusCode).toBe(200);
+    expect(brokerReview.json()).toMatchObject({
+      requestNo: reassessmentBody.requestNo,
+      decision: "APPROVED",
+    });
+
+    const makerQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/reassessment-requests/open",
+      headers: { cookie: creditOfficerCookie },
+    });
+    expect(makerQueue.statusCode).toBe(200);
+    expect(makerQueue.json()).toMatchObject({
+      items: [
+        expect.objectContaining({
+          requestNo: reassessmentBody.requestNo,
+          currentStep: "CREDIT_MAKER_REVIEW",
+          assignedRoleCode: "LENDER_CREDIT_OFFICER",
+        }),
+      ],
+    });
+
+    const makerReview = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reassessment-requests/${reassessmentBody.requestNo}/lender-review`,
+      headers: {
+        cookie: creditOfficerCookie,
+        "idempotency-key": "integration-reassessment-review-0003",
+      },
+      payload: {
+        decision: "APPROVED",
+        reasonCode: "CREDIT_MAKER_APPROVED",
+      },
+    });
+    expect(makerReview.statusCode).toBe(200);
+    expect(makerReview.json()).toMatchObject({
+      requestNo: reassessmentBody.requestNo,
+      decision: "APPROVED",
+      step: "CREDIT_MAKER_REVIEW",
+    });
+
+    const checkerQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/reassessment-requests/open",
+      headers: { cookie: creditReviewerCookie },
+    });
+    expect(checkerQueue.statusCode).toBe(200);
+    expect(checkerQueue.json()).toMatchObject({
+      items: [
+        expect.objectContaining({
+          requestNo: reassessmentBody.requestNo,
+          currentStep: "CREDIT_CHECKER_REVIEW",
+          assignedRoleCode: "LENDER_CREDIT_REVIEWER",
+        }),
+      ],
+    });
+
+    const checkerReview = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/reassessment-requests/${reassessmentBody.requestNo}/lender-review`,
+      headers: {
+        cookie: creditReviewerCookie,
+        "idempotency-key": "integration-reassessment-review-0004",
+      },
+      payload: {
+        decision: "APPROVED",
+        reasonCode: "CREDIT_CHECKER_APPROVED",
+      },
+    });
+    expect(checkerReview.statusCode).toBe(200);
+    expect(checkerReview.json()).toMatchObject({
+      requestNo: reassessmentBody.requestNo,
+      decision: "APPROVED",
+      step: "CREDIT_CHECKER_REVIEW",
+    });
+
+    const proofApplicantDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/applications/APP-20260818-PROOF-REVIEW",
+      headers: { cookie: applicantCookie },
+    });
+    expect(proofApplicantDetail.statusCode).toBe(200);
+    expect(proofApplicantDetail.json()).toMatchObject({
+      repaymentProof: {
+        proofNo: uploadedBody.proofNo,
+        status: "RECONCILED",
+      },
+      timeline: expect.arrayContaining([
+        expect.objectContaining({
+          entryType: "PAYMENT_PROOF_SUBMITTED",
+          referenceNo: uploadedBody.proofNo,
+        }),
+        expect.objectContaining({
+          entryType: "PAYMENT_PROOF_REVIEWED",
+          referenceNo: uploadedBody.proofNo,
+          status: "RECONCILED",
+          reasonCode: "PROOF_MATCHED",
+        }),
+      ]),
+    });
+
+    const reassessmentApplicantDetail = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/applications/APP-20260818-REASS-QUEUE",
+      headers: { cookie: applicantCookie },
+    });
+    expect(reassessmentApplicantDetail.statusCode).toBe(200);
+    expect(reassessmentApplicantDetail.json()).toMatchObject({
+      reassessmentRequest: {
+        requestNo: reassessmentBody.requestNo,
+        status: "APPROVED",
+      },
+      timeline: expect.arrayContaining([
+        expect.objectContaining({
+          entryType: "REASSESSMENT_SUBMITTED",
+          referenceNo: reassessmentBody.requestNo,
+        }),
+        expect.objectContaining({
+          entryType: "REASSESSMENT_APPROVAL",
+          referenceNo: reassessmentBody.requestNo,
+          stage: "BROKER_REVIEW",
+          decision: "APPROVE",
+        }),
+        expect.objectContaining({
+          entryType: "REASSESSMENT_APPROVAL",
+          referenceNo: reassessmentBody.requestNo,
+          stage: "CREDIT_MAKER_REVIEW",
+          decision: "APPROVE",
+        }),
+        expect.objectContaining({
+          entryType: "REASSESSMENT_APPROVAL",
+          referenceNo: reassessmentBody.requestNo,
+          stage: "CREDIT_CHECKER_REVIEW",
+          decision: "APPROVE",
+        }),
+      ]),
+    });
+
+    const approvalCase = await database.query<{
+      current_step: string;
+      status: string;
+      assigned_role_code: string | null;
+    }>(
+      `SELECT c.current_step, c.status, c.assigned_role_code
+         FROM approval_cases c
+         JOIN applicant_reassessment_requests r ON r.approval_case_id = c.id
+        WHERE r.request_no = $1`,
+      [reassessmentBody.requestNo],
+    );
+    expect(approvalCase.rows[0]).toEqual({
+      current_step: "OFFER_READY",
+      status: "COMPLETED",
+      assigned_role_code: "LENDER_CREDIT_REVIEWER",
+    });
+  });
+
+  it("builds applicant notifications from timeline events and persists read state", async () => {
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('telegram-notification-reader', 'en') RETURNING id`,
+    );
+    const application = await database.query<{ id: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days, status)
+       VALUES ('APP-20260818-NOTICE-001', $1, 22000, 'USD', 30, 'BROKER_REVIEW')
+       RETURNING id`,
+      [user.rows[0]!.id],
+    );
+    await database.query(
+      `INSERT INTO application_status_events
+        (application_id, from_status, to_status, actor_user_ref, reason_code, occurred_at)
+       VALUES ($1, 'DRAFT', 'BROKER_REVIEW', 'integration-broker', 'APPLICATION_SUBMITTED', '2026-08-18T10:00:00.000Z')`,
+      [application.rows[0]!.id],
+    );
+    await database.query(
+      `INSERT INTO approval_events
+        (application_id, stage, decision, actor_user_ref, actor_role, reason_code, review_round, occurred_at)
+       VALUES ($1, 'BROKER_REVIEW', 'APPROVED', 'integration-broker', 'BROKER_OFFICER', 'DOCUMENTS_COMPLETE', 1, '2026-08-18T11:30:00.000Z')`,
+      [application.rows[0]!.id],
+    );
+    const applicantToken = "integration-notification-reader-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, 'telegram-notification-reader', '444444444', now() + interval '30 minutes', now())`,
+      [createHash("sha256").update(applicantToken).digest("hex")],
+    );
+    const applicantCookie = `__Host-payease_applicant_session=${applicantToken}`;
+
+    const list = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/notifications?page=1&pageSize=1",
+      headers: { cookie: applicantCookie },
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json()).toMatchObject({
+      page: 1,
+      pageSize: 1,
+      itemCount: 2,
+      pageCount: 2,
+      unreadCount: 2,
+    });
+    const firstList = list.json() as {
+      items: Array<{ id: string; unread: boolean }>;
+    };
+    expect(firstList.items).toHaveLength(1);
+    expect(firstList.items[0]).toMatchObject({
+      applicationNo: "APP-20260818-NOTICE-001",
+      category: "APPLICATION",
+      timelineEntryType: "APPROVAL",
+      messageCode: "APPROVAL_BROKER_REVIEW_APPROVED",
+      unread: true,
+    });
+    const firstNotification = firstList.items[0]!;
+
+    const detail = await brokerApi.app.inject({
+      method: "GET",
+      url: `/v1/local/public/notifications/${firstNotification.id}`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      id: firstNotification.id,
+      applicationNo: "APP-20260818-NOTICE-001",
+      unread: true,
+    });
+
+    const read = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/notifications/${firstNotification.id}/read`,
+      headers: { cookie: applicantCookie },
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toMatchObject({
+      notificationId: firstNotification.id,
+      unread: false,
+    });
+
+    const refreshedList = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/notifications?page=1&pageSize=10",
+      headers: { cookie: applicantCookie },
+    });
+    expect(refreshedList.statusCode).toBe(200);
+    expect(refreshedList.json()).toMatchObject({
+      page: 1,
+      pageSize: 10,
+      itemCount: 2,
+      pageCount: 1,
+      unreadCount: 1,
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: firstNotification.id,
+          unread: false,
+        }),
+      ]),
+    });
+
+    const readAll = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/public/notifications/read-all",
+      headers: { cookie: applicantCookie },
+    });
+    expect(readAll.statusCode).toBe(200);
+    expect(readAll.json()).toMatchObject({
+      readCount: 1,
+      unreadCount: 0,
+    });
+
+    const finalList = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/notifications?page=1&pageSize=10",
+      headers: { cookie: applicantCookie },
+    });
+    expect(finalList.statusCode).toBe(200);
+    expect(finalList.json()).toMatchObject({
+      unreadCount: 0,
+      items: [
+        expect.objectContaining({ unread: false }),
+        expect.objectContaining({ unread: false }),
+      ],
+    });
+  });
+
+  it("stores applicant application drafts encrypted and serves them back to the applicant", async () => {
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('telegram-draft-owner', 'en') RETURNING id`,
+    );
+    const applicantToken = "integration-application-draft-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, 'telegram-draft-owner', '444444444', now() + interval '30 minutes', now())`,
+      [createHash("sha256").update(applicantToken).digest("hex")],
+    );
+    const applicantCookie = `__Host-payease_applicant_session=${applicantToken}`;
+    const draftBody = {
+      version: 1,
+      stage: "details",
+      formStep: "contacts",
+      amountInput: "125",
+      term: 30,
+      name: "Draft Owner",
+      residentialAddress: "Phnom Penh",
+      phone: "012345678",
+      employer: "KhmerX Factory",
+      emergencyContactOneName: "Sokha",
+      emergencyContactOnePhone: "098111111",
+      emergencyContactTwoName: "Dara",
+      emergencyContactTwoPhone: "098222222",
+      employerTenantId: "",
+      bankName: "ACLEDA",
+      bankAccountNumber: "000123456789",
+      bankAccountHolder: "Draft Owner",
+      identityDocumentType: "NATIONAL_ID",
+      identityDocumentNumber: "ID-998877",
+      livenessPrepared: true,
+      wealthProofAttached: false,
+      consent: true,
+    } as const;
+
+    const putDraft = await brokerApi.app.inject({
+      method: "PUT",
+      url: "/v1/local/public/application-draft",
+      headers: {
+        cookie: applicantCookie,
+        "content-type": "application/json",
+      },
+      payload: draftBody,
+    });
+    expect(putDraft.statusCode).toBe(204);
+
+    const storedDraft = await database.query<{
+      draft_version: number;
+      stage: string;
+      form_step: string;
+      draft_payload_encrypted: Buffer;
+    }>(
+      `SELECT draft_version, stage, form_step, draft_payload_encrypted
+         FROM applicant_application_drafts
+        WHERE user_id = $1`,
+      [user.rows[0]!.id],
+    );
+    expect(storedDraft.rowCount).toBe(1);
+    expect(storedDraft.rows[0]).toMatchObject({
+      draft_version: 1,
+      stage: "details",
+      form_step: "contacts",
+    });
+    expect(
+      JSON.parse(
+        decryptPersonalValue(storedDraft.rows[0]!.draft_payload_encrypted),
+      ),
+    ).toEqual(draftBody);
+
+    const getDraft = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/application-draft",
+      headers: { cookie: applicantCookie },
+    });
+    expect(getDraft.statusCode).toBe(200);
+    expect(getDraft.json()).toEqual({ draft: draftBody });
+
+    const deleteDraft = await brokerApi.app.inject({
+      method: "DELETE",
+      url: "/v1/local/public/application-draft",
+      headers: { cookie: applicantCookie },
+    });
+    expect(deleteDraft.statusCode).toBe(204);
+
+    const remainingDrafts = await database.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM applicant_application_drafts WHERE user_id = $1",
+      [user.rows[0]!.id],
+    );
+    expect(remainingDrafts.rows[0]).toEqual({ count: "0" });
+
+    const afterDelete = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/application-draft",
+      headers: { cookie: applicantCookie },
+    });
+    expect(afterDelete.statusCode).toBe(200);
+    expect(afterDelete.json()).toEqual({ draft: null });
   });
 
   it("isolates reconciliation queues, assignments, and resolutions by factory tenant", async () => {

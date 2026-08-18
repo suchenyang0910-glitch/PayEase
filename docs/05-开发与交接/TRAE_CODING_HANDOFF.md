@@ -57,7 +57,7 @@ https://<api-domain>/v1/local/internal/telegram-bot-updates/<botId>
 | 部署前安全校验                                        | `broker-api/src/deployment-preflight.ts`                                                                                                                                  |
 | 申请输入验证                                          | `broker-api/src/validation.ts`                                                                                                                                            |
 | 用户端电话验证 UI                                     | `user-mini-app/src/App.tsx`、`user-mini-app/src/telegram-phone-contact.ts`                                                                                                |
-| 工厂/证件匹配约束                                     | `docs/EMPLOYMENT_IDENTITY_MATCH_BOUNDARY.md`                                                                                                                              |
+| 工厂/证件匹配约束                                     | `docs/06-接口与集成/EMPLOYMENT_IDENTITY_MATCH_BOUNDARY.md`                                                                                                                |
 | 数据库迁移                                            | `broker-platform/db/migrations/V0026__employer_tenants_and_identity_documents.sql`、`V0027__employment_identity_match_gate.sql`、`V0028__telegram_phone_verification.sql` |
 
 ## 5. 建议 Trae 后续编码顺序

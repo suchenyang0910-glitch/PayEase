@@ -76,7 +76,7 @@ const labels: Readonly<
     status: {
       OPEN: "已收到",
       ACKNOWLEDGED: "处理中",
-      REFERRED_TO_LENDER: "已转交持牌机构",
+      REFERRED_TO_LENDER: "已转交处理",
       RESOLVED: "最终处理结果已记录",
     },
   },

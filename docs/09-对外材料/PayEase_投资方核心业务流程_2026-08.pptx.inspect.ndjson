@@ -1,0 +1,220 @@
+{"kind":"deck","id":"pr/y23l0d","name":"Deck"}
+{"kind":"layout","layoutId":"37a61eb0-d54d-48e2-956d-f049af2ab891","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"b0c76127-5c2b-471c-bed5-d2a7818e6dd6","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/dsy5xd","slide":1,"title":"PayEase","textShapes":6}
+{"kind":"shape","id":"sh/3mxgjqt8","slide":1,"bbox":[0,0,16,720]}
+{"kind":"textbox","id":"sh/4n6xsvut","slide":1,"text":"PayEase","textPreview":"PayEase","textChars":7,"textLines":1,"bbox":[56,52,220,34]}
+{"kind":"textbox","id":"sh/5ozyl0be","slide":1,"text":"面向柬埔寨受薪员工的\n合规薪资贷协同平台","textPreview":"面向柬埔寨受薪员工的 | 合规薪资贷协同平台","textChars":20,"textLines":2,"bbox":[56,145,570,150]}
+{"kind":"textbox","id":"sh/qp8fu5cz","slide":1,"text":"用 Telegram 降低用户门槛；以企业核验提升信息质量；\n由持牌机构独立完成授信、合同、放款与贷后。","textPreview":"用 Telegram 降低用户门槛；以企业核验提升信息质量； | 由持牌机构独立完成授信、合同、放款与贷后。","textChars":52,"textLines":2,"bbox":[56,326,560,72]}
+{"kind":"shape","id":"sh/rqhgnatk","slide":1,"bbox":[56,455,430,105]}
+{"kind":"textbox","id":"sh/srqxwfu5","slide":1,"text":"当前定位","textPreview":"当前定位","textChars":4,"textLines":1,"bbox":[80,477,100,22]}
+{"kind":"textbox","id":"sh/dszypkbq","slide":1,"text":"单国受控试点｜人工审核与人工资金操作优先","textPreview":"单国受控试点｜人工审核与人工资金操作优先","textChars":20,"textLines":1,"bbox":[80,509,365,26]}
+{"kind":"textbox","id":"sh/fuhgratg","slide":1,"text":"投资方核心业务流程","textPreview":"投资方核心业务流程","textChars":9,"textLines":1,"bbox":[56,654,450,22]}
+{"kind":"image","id":"im/rmhkne58","slide":1,"name":"","geometry":"roundRect","alt":"PayEase Telegram Mini App application screen","bbox":[795,55,310,590]}
+{"kind":"notes","id":"nt/dsy5xd","slide":1,"text":""}
+{"kind":"slide","id":"sl/z3zifx","slide":2,"title":"01｜机会","textShapes":15}
+{"kind":"textbox","id":"sh/ul8vi1kf","slide":2,"text":"01｜机会","textPreview":"01｜机会","textChars":5,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/hozutwjq","slide":2,"text":"把“薪资到账前的资金周转”变成可核验、可追溯的服务","textPreview":"把“薪资到账前的资金周转”变成可核验、可追溯的服务","textChars":25,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/gnqdkr25","slide":2,"text":"不以平台自营资金为前提，而是把用户、企业和持牌机构放在各自清晰的责任边界内。","textPreview":"不以平台自营资金为前提，而是把用户、企业和持牌机构放在各自清晰的责任边界内。","textChars":38,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/7ixcnm1o","slide":2,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/6hovehk3","slide":2,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/tkfupwju","slide":2,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"shape","id":"sh/sj6dgr29","slide":2,"bbox":[56,230,320,255]}
+{"kind":"textbox","id":"sh/juxcj2ls","slide":2,"text":"用户侧","textPreview":"用户侧","textChars":3,"textLines":1,"bbox":[80,258,260,30]}
+{"kind":"textbox","id":"sh/it4vahk7","slide":2,"text":"在熟悉的 Telegram 内发起申请\n无需安装独立 App","textPreview":"在熟悉的 Telegram 内发起申请 | 无需安装独立 App","textChars":30,"textLines":2,"bbox":[80,310,270,88]}
+{"kind":"textbox","id":"sh/gfyl8vqt","slide":2,"text":"低门槛","textPreview":"低门槛","textChars":3,"textLines":1,"bbox":[80,435,220,26]}
+{"kind":"shape","id":"sh/1gr210re","slide":2,"bbox":[430,230,320,255]}
+{"kind":"textbox","id":"sh/edg36l83","slide":2,"text":"企业侧","textPreview":"企业侧","textChars":3,"textLines":1,"bbox":[454,258,260,30]}
+{"kind":"textbox","id":"sh/fepkzq98","slide":2,"text":"仅核验员工授权范围内的\n在职与薪资结论","textPreview":"仅核验员工授权范围内的 | 在职与薪资结论","textChars":19,"textLines":2,"bbox":[454,310,270,88]}
+{"kind":"textbox","id":"sh/sby14bqx","slide":2,"text":"低摩擦","textPreview":"低摩擦","textChars":3,"textLines":1,"bbox":[454,435,220,26]}
+{"kind":"shape","id":"sh/tc72xgri","slide":2,"bbox":[804,230,320,255]}
+{"kind":"textbox","id":"sh/69gj2l8r","slide":2,"text":"机构侧","textPreview":"机构侧","textChars":3,"textLines":1,"bbox":[828,258,260,30]}
+{"kind":"textbox","id":"sh/7apkvq9c","slide":2,"text":"获得结构化申请资料与\n可回溯的核验链路","textPreview":"获得结构化申请资料与 | 可回溯的核验链路","textChars":19,"textLines":2,"bbox":[828,310,270,88]}
+{"kind":"textbox","id":"sh/c72lgfq1","slide":2,"text":"可审计","textPreview":"可审计","textChars":3,"textLines":1,"bbox":[828,435,220,26]}
+{"kind":"textbox","id":"sh/d8b29krm","slide":2,"text":"核心价值：把“获客—核验—机构决策—贷后服务”连成一条有授权、有留痕的业务链。","textPreview":"核心价值：把“获客—核验—机构决策—贷后服务”连成一条有授权、有留痕的业务链。","textChars":39,"textLines":1,"bbox":[56,560,1090,36]}
+{"kind":"notes","id":"nt/z3zifx","slide":2,"text":""}
+{"kind":"slide","id":"sl/sqnesd","slide":3,"title":"02｜责任边界","textShapes":18}
+{"kind":"textbox","id":"sh/gb6h8jmx","slide":3,"text":"02｜责任边界","textPreview":"02｜责任边界","textChars":7,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/fax0fels","slide":3,"text":"四方协同：平台做流程，持牌机构做信贷决策","textPreview":"四方协同：平台做流程，持牌机构做信贷决策","textChars":20,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/u9oz6947","slide":3,"text":"这使平台能够在扩大触达的同时，避免越过资金与授信边界。","textPreview":"这使平台能够在扩大触达的同时，避免越过资金与授信边界。","textChars":27,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/t8fid43m","slide":3,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/s7mh4zm1","slide":3,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/76d0bulg","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"shape","id":"sh/654z294v","slide":3,"bbox":[56,230,250,275]}
+{"kind":"shape","id":"sh/d4zip83q","slide":3,"bbox":[76,250,52,52]}
+{"kind":"textbox","id":"sh/c3q1g325","slide":3,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[76,258,52,36]}
+{"kind":"textbox","id":"sh/29snad4n","slide":3,"text":"员工用户","textPreview":"员工用户","textChars":4,"textLines":1,"bbox":[76,326,205,48]}
+{"kind":"textbox","id":"sh/3a1oji58","slide":3,"text":"申请、授权、签约、\n查看账单与还款","textPreview":"申请、授权、签约、 | 查看账单与还款","textChars":17,"textLines":2,"bbox":[76,390,205,74]}
+{"kind":"shape","id":"sh/4bu5cnmt","slide":3,"bbox":[340,230,250,275]}
+{"kind":"shape","id":"sh/pc36lsny","slide":3,"bbox":[360,250,52,52]}
+{"kind":"textbox","id":"sh/ulsn6d4b","slide":3,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[360,258,52,36]}
+{"kind":"textbox","id":"sh/vm1ofi5w","slide":3,"text":"企业 HR/财务","textPreview":"企业 HR/财务","textChars":8,"textLines":1,"bbox":[360,326,205,48]}
+{"kind":"textbox","id":"sh/gna58nmh","slide":3,"text":"核验在职/薪资结论\n处理异议","textPreview":"核验在职/薪资结论 | 处理异议","textChars":14,"textLines":2,"bbox":[360,390,205,74]}
+{"kind":"shape","id":"sh/h8j6hsn2","slide":3,"bbox":[624,230,250,275]}
+{"kind":"shape","id":"sh/ehcnix4v","slide":3,"bbox":[644,250,52,52]}
+{"kind":"textbox","id":"sh/zi5or2lg","slide":3,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[644,258,52,36]}
+{"kind":"textbox","id":"sh/bmxk3uls","slide":3,"text":"PayEase 助贷平台","textPreview":"PayEase 助贷平台","textChars":12,"textLines":1,"bbox":[644,326,205,48]}
+{"kind":"textbox","id":"sh/alo3apk7","slide":3,"text":"资料完整性、流程协调、\n通知、客服与审计","textPreview":"资料完整性、流程协调、 | 通知、客服与审计","textChars":20,"textLines":2,"bbox":[644,390,205,74]}
+{"kind":"shape","id":"sh/xof2543y","slide":3,"bbox":[908,230,250,275]}
+{"kind":"shape","id":"sh/wn6lcz2d","slide":3,"bbox":[928,250,52,52]}
+{"kind":"textbox","id":"sh/jqxk7elo","slide":3,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[928,258,52,36]}
+{"kind":"textbox","id":"sh/ypo3e9k3","slide":3,"text":"持牌机构","textPreview":"持牌机构","textChars":4,"textLines":1,"bbox":[928,326,205,48]}
+{"kind":"textbox","id":"sh/lsz29o3u","slide":3,"text":"KYC/AML、授信定价、\n合同、放款、催收与投诉","textPreview":"KYC/AML、授信定价、 | 合同、放款、催收与投诉","textChars":25,"textLines":2,"bbox":[928,390,205,74]}
+{"kind":"textbox","id":"sh/kr6lgj29","slide":3,"text":"关键原则：助贷平台不自营资金池，不做最终授信、定价或放款决策。","textPreview":"关键原则：助贷平台不自营资金池，不做最终授信、定价或放款决策。","textChars":31,"textLines":1,"bbox":[56,560,1120,30]}
+{"kind":"notes","id":"nt/sqnesd","slide":3,"text":""}
+{"kind":"slide","id":"sl/vuxhtq","slide":4,"title":"03｜核心业务流程","textShapes":22}
+{"kind":"textbox","id":"sh/0fqdg725","slide":4,"text":"03｜核心业务流程","textPreview":"03｜核心业务流程","textChars":9,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/fehcn21k","slide":4,"text":"一笔交易从申请到还款，形成八步闭环","textPreview":"一笔交易从申请到还款，形成八步闭环","textChars":17,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/ed8vexkf","slide":4,"text":"用户每一步都知道当前状态；持牌机构始终保留信贷决策权。","textPreview":"用户每一步都知道当前状态；持牌机构始终保留信贷决策权。","textChars":27,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/pkjudwj2","slide":4,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/ojadkr2h","slide":4,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/ni1crm1w","slide":4,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"shape","id":"sh/2hsvihkb","slide":4,"bbox":[108,352,106,0]}
+{"kind":"shape","id":"sh/5ofuhsji","slide":4,"bbox":[72,334,34,34]}
+{"kind":"textbox","id":"sh/4n6d8n2x","slide":4,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[72,335,34,30]}
+{"kind":"textbox","id":"sh/ml0j61oj","slide":4,"text":"Telegram\n登录","textPreview":"Telegram | 登录","textChars":11,"textLines":2,"bbox":[50,378,78,38]}
+{"kind":"shape","id":"sh/nm9kf6p4","slide":4,"bbox":[253,352,106,0]}
+{"kind":"shape","id":"sh/8ni18b6p","slide":4,"bbox":[217,334,34,34]}
+{"kind":"textbox","id":"sh/9or2hw7a","slide":4,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[217,335,34,30]}
+{"kind":"textbox","id":"sh/ap0ja1ov","slide":4,"text":"提交申请\n与授权","textPreview":"提交申请 | 与授权","textChars":8,"textLines":2,"bbox":[195,378,78,38]}
+{"kind":"shape","id":"sh/vq9kj6pg","slide":4,"bbox":[398,352,106,0]}
+{"kind":"shape","id":"sh/wr21cb6l","slide":4,"bbox":[362,334,34,34]}
+{"kind":"textbox","id":"sh/xsb2lg76","slide":4,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[362,335,34,30]}
+{"kind":"textbox","id":"sh/idk3elor","slide":4,"text":"企业\n核验","textPreview":"企业 | 核验","textChars":5,"textLines":2,"bbox":[340,378,78,38]}
+{"kind":"shape","id":"sh/jetknqpc","slide":4,"bbox":[543,352,106,0]}
+{"kind":"shape","id":"sh/fit0bqlk","slide":4,"bbox":[507,334,34,34]}
+{"kind":"textbox","id":"sh/uhkj2l4z","slide":4,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[507,335,34,30]}
+{"kind":"textbox","id":"sh/hkvid03a","slide":4,"text":"机构\n审批","textPreview":"机构 | 审批","textChars":5,"textLines":2,"bbox":[485,378,78,38]}
+{"kind":"shape","id":"sh/gjm14vm5","slide":4,"bbox":[688,352,106,0]}
+{"kind":"shape","id":"sh/7ut07658","slide":4,"bbox":[652,334,34,34]}
+{"kind":"textbox","id":"sh/6tkjyl4n","slide":4,"text":"5","textPreview":"5","textChars":1,"textLines":1,"bbox":[652,335,34,30]}
+{"kind":"textbox","id":"sh/tgbi9gne","slide":4,"text":"合同\n签约","textPreview":"合同 | 签约","textChars":5,"textLines":2,"bbox":[630,378,78,38]}
+{"kind":"shape","id":"sh/sf210bmt","slide":4,"bbox":[833,352,106,0]}
+{"kind":"shape","id":"sh/jq90365c","slide":4,"bbox":[797,334,34,34]}
+{"kind":"textbox","id":"sh/ip0ju14r","slide":4,"text":"6","textPreview":"6","textChars":1,"textLines":1,"bbox":[797,335,34,30]}
+{"kind":"textbox","id":"sh/ojepo3yd","slide":4,"text":"机构\n放款","textPreview":"机构 | 放款","textChars":5,"textLines":2,"bbox":[775,378,78,38]}
+{"kind":"shape","id":"sh/9kn6h8fy","slide":4,"bbox":[978,352,106,0]}
+{"kind":"shape","id":"sh/mhw7mdg7","slide":4,"bbox":[942,334,34,34]}
+{"kind":"textbox","id":"sh/ni5ofyhs","slide":4,"text":"7","textPreview":"7","textChars":1,"textLines":1,"bbox":[942,335,34,30]}
+{"kind":"textbox","id":"sh/wnypsny9","slide":4,"text":"账单与\n还款","textPreview":"账单与 | 还款","textChars":6,"textLines":2,"bbox":[920,378,78,38]}
+{"kind":"shape","id":"sh/xo7qlsfu","slide":4,"bbox":[1087,334,34,34]}
+{"kind":"textbox","id":"sh/alw7qdgj","slide":4,"text":"8","textPreview":"8","textChars":1,"textLines":1,"bbox":[1087,335,34,30]}
+{"kind":"textbox","id":"sh/bmp8jix4","slide":4,"text":"对账、客服\n与投诉","textPreview":"对账、客服 | 与投诉","textChars":9,"textLines":2,"bbox":[1065,378,78,38]}
+{"kind":"shape","id":"sh/crupgjy5","slide":4,"bbox":[72,505,1135,74]}
+{"kind":"textbox","id":"sh/ds369ozq","slide":4,"text":"贯穿全程：授权版本留痕｜状态时间线｜异常补件｜审计事件｜最小化数据共享","textPreview":"贯穿全程：授权版本留痕｜状态时间线｜异常补件｜审计事件｜最小化数据共享","textChars":35,"textLines":1,"bbox":[98,525,1080,34]}
+{"kind":"notes","id":"nt/vuxhtq","slide":4,"text":""}
+{"kind":"slide","id":"sl/6rvomy","slide":5,"title":"04｜用户体验","textShapes":9}
+{"kind":"textbox","id":"sh/dcjudo3u","slide":5,"text":"04｜用户体验","textPreview":"04｜用户体验","textChars":7,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/qpsbi9k3","slide":5,"text":"一个 Telegram Mini App 覆盖申请、订单、账单与个人中心","textPreview":"一个 Telegram Mini App 覆盖申请、订单、账单与个人中心","textChars":36,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/bq1cbelo","slide":5,"text":"三语界面（高棉语、英语、中文）降低一线员工使用门槛；语言偏好可延续。","textPreview":"三语界面（高棉语、英语、中文）降低一线员工使用门槛；语言偏好可延续。","textChars":34,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/0fadoj2l","slide":5,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/lg3uho3q","slide":5,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/ydsvm9kf","slide":5,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"textbox","id":"sh/9k3ul832","slide":5,"text":"申请额度与期限","textPreview":"申请额度与期限","textChars":7,"textLines":1,"bbox":[112,610,310,24]}
+{"kind":"textbox","id":"sh/1wbud0ry","slide":5,"text":"登录状态、语言、客服与投诉","textPreview":"登录状态、语言、客服与投诉","textChars":13,"textLines":1,"bbox":[560,610,340,24]}
+{"kind":"shape","id":"sh/0v2tkvqd","slide":5,"bbox":[910,230,255,270]}
+{"kind":"textbox","id":"sh/zutcbq9s","slide":5,"text":"用户可见的信息","textPreview":"用户可见的信息","textChars":7,"textLines":1,"bbox":[935,255,190,28]}
+{"kind":"textbox","id":"sh/etkbil87","slide":5,"text":"• 申请进度与补件\n• 审批结果与签约入口\n• 账单、已还/未还期数\n• 下一期应还日期与金额\n• 客服与投诉入口","textPreview":"• 申请进度与补件 | • 审批结果与签约入口 | • 账单、已还/未还期数 | • 下一期应还日期与金额 | • 客服与投诉入口","textChars":57,"textLines":5,"bbox":[935,310,195,160]}
+{"kind":"image","id":"im/epkzi18v","slide":5,"name":"","geometry":"roundRect","alt":"Mini App loan application interface","bbox":[90,205,360,390]}
+{"kind":"image","id":"im/lofipk7q","slide":5,"name":"","geometry":"roundRect","alt":"Mini App personal center interface","bbox":[610,205,240,390]}
+{"kind":"notes","id":"nt/6rvomy","slide":5,"text":""}
+{"kind":"slide","id":"sl/6xwwbz","slide":6,"title":"05｜管理协同","textShapes":9}
+{"kind":"textbox","id":"sh/qd0ru58r","slide":6,"text":"05｜管理协同","textPreview":"05｜管理协同","textChars":7,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/xgbqpk7i","slide":6,"text":"后台把“谁能看、谁能操作、谁负责”固化到流程中","textPreview":"后台把“谁能看、谁能操作、谁负责”固化到流程中","textChars":23,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/cf29wfqx","slide":6,"text":"首批试点先支持人工审核、人工放款和人工核销；重要动作采用指定账号与审批留痕。","textPreview":"首批试点先支持人工审核、人工放款和人工核销；重要动作采用指定账号与审批留痕。","textChars":38,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/zit8rap8","slide":6,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/yhkry583","slide":6,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/lkbqtk7e","slide":6,"text":"06","textPreview":"06","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"textbox","id":"sh/fmp8fq94","slide":6,"text":"助贷运营后台","textPreview":"助贷运营后台","textChars":6,"textLines":1,"bbox":[750,245,330,32]}
+{"kind":"textbox","id":"sh/elg7ml8j","slide":6,"text":"• 申请资料质检与补件催办\n• 企业接入与核验协调\n• 异常工单、客服、投诉、对账\n• 审计检索与安全事件处置","textPreview":"• 申请资料质检与补件催办 | • 企业接入与核验协调 | • 异常工单、客服、投诉、对账 | • 审计检索与安全事件处置","textChars":55,"textLines":4,"bbox":[750,305,360,135]}
+{"kind":"shape","id":"sh/sfy1svu9","slide":6,"bbox":[750,475,390,102]}
+{"kind":"textbox","id":"sh/tg7i10bu","slide":6,"text":"不具备的权限","textPreview":"不具备的权限","textChars":6,"textLines":1,"bbox":[775,494,140,22]}
+{"kind":"textbox","id":"sh/6dgjq5c3","slide":6,"text":"不授信｜不定价｜不放款","textPreview":"不授信｜不定价｜不放款","textChars":11,"textLines":1,"bbox":[775,527,300,28]}
+{"kind":"image","id":"im/t836xgvu","slide":6,"name":"","geometry":"roundRect","alt":"Existing PayEase broker console sign-in screen","bbox":[70,225,620,390]}
+{"kind":"notes","id":"nt/6xwwbz","slide":6,"text":""}
+{"kind":"slide","id":"sl/8rqrvy","slide":7,"title":"06｜首批产品与运营模型","textShapes":12}
+{"kind":"textbox","id":"sh/6pkruhob","slide":7,"text":"06｜首批产品与运营模型","textPreview":"06｜首批产品与运营模型","textChars":12,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/tsbqpwn2","slide":7,"text":"先用小范围、可控的人工流程验证一笔交易闭环","textPreview":"先用小范围、可控的人工流程验证一笔交易闭环","textChars":21,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/sr29wr6h","slide":7,"text":"产品规则由持牌机构版本化确认，平台只承接流程与服务。","textPreview":"产品规则由持牌机构版本化确认，平台只承接流程与服务。","textChars":26,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/fud8r65s","slide":7,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/etkry1o7","slide":7,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/1wvqtwny","slide":7,"text":"07","textPreview":"07","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"shape","id":"sh/0vm90r6d","slide":7,"bbox":[56,225,355,305]}
+{"kind":"textbox","id":"sh/vy98f2po","slide":7,"text":"首批产品边界","textPreview":"首批产品边界","textChars":6,"textLines":1,"bbox":[82,252,200,28]}
+{"kind":"textbox","id":"sh/ux07mxo3","slide":7,"text":"额度：USD 10–500\n期限：7–180 天\n费率/逾期/提前结清：\n由机构后台配置并版本化\n\n支持再次申请：满足拒贷条件后","textPreview":"额度：USD 10–500 | 期限：7–180 天 | 费率/逾期/提前结清： | 由机构后台配置并版本化 |  | 支持再次申请：满足拒贷条件后","textChars":64,"textLines":6,"bbox":[82,305,270,170]}
+{"kind":"shape","id":"sh/sz614bad","slide":7,"bbox":[462,225,355,305]}
+{"kind":"textbox","id":"sh/t0f2xgry","slide":7,"text":"首批试点规模","textPreview":"首批试点规模","textChars":6,"textLines":1,"bbox":[488,252,200,28]}
+{"kind":"textbox","id":"sh/6xoj21sn","slide":7,"text":"首家合作：兰海国际\n企业：1–3 个工厂\n覆盖员工：约 1 万\n预期申请：10–200 人\n\n放款与核销：指定账号审批","textPreview":"首家合作：兰海国际 | 企业：1–3 个工厂 | 覆盖员工：约 1 万 | 预期申请：10–200 人 |  | 放款与核销：指定账号审批","textChars":59,"textLines":6,"bbox":[488,305,270,170]}
+{"kind":"shape","id":"sh/7yxkv698","slide":7,"bbox":[868,225,355,305]}
+{"kind":"textbox","id":"sh/g3q18bap","slide":7,"text":"服务节奏","textPreview":"服务节奏","textChars":4,"textLines":1,"bbox":[894,252,200,28]}
+{"kind":"textbox","id":"sh/h4z21gra","slide":7,"text":"运营服务：资料审核、核验催办、\n异常、客服、投诉、对账\n\n工作时间：08:00–18:00\n目标响应：0–1.5 小时\n其他时段：3–5 小时","textPreview":"运营服务：资料审核、核验催办、 | 异常、客服、投诉、对账 |  | 工作时间：08:00–18:00 | 目标响应：0–1.5 小时 | 其他时段：3–5 小时","textChars":71,"textLines":6,"bbox":[894,305,270,170]}
+{"kind":"textbox","id":"sh/u18j61sj","slide":7,"text":"第一笔交易的验收：申请 → 核验 → 审批 → 签约 → 放款 → 账单 → 还款 → 对账 → 客服/投诉。","textPreview":"第一笔交易的验收：申请 → 核验 → 审批 → 签约 → 放款 → 账单 → 还款 → 对账 → 客服/投诉。","textChars":55,"textLines":1,"bbox":[56,575,1140,32]}
+{"kind":"notes","id":"nt/8rqrvy","slide":7,"text":""}
+{"kind":"slide","id":"sl/4bsyye","slide":8,"title":"07｜关键技术点","textShapes":14}
+{"kind":"textbox","id":"sh/ah83i9gv","slide":8,"text":"07｜关键技术点","textPreview":"07｜关键技术点","textChars":8,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/xkz2t4zm","slide":8,"text":"技术的作用是把协同流程做得可信、可控、可追溯","textPreview":"技术的作用是把协同流程做得可信、可控、可追溯","textChars":22,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/cjqlkzy1","slide":8,"text":"投资方无需理解全部实现细节，只需关注每项技术如何降低经营与合规风险。","textPreview":"投资方无需理解全部实现细节，只需关注每项技术如何降低经营与合规风险。","textChars":34,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/zmhkvehs","slide":8,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/yl83m9g7","slide":8,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/loj2xozi","slide":8,"text":"08","textPreview":"08","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"shape","id":"sh/knqlojyx","slide":8,"bbox":[56,220,540,135]}
+{"kind":"textbox","id":"sh/7a14zyho","slide":8,"text":"Telegram 身份","textPreview":"Telegram 身份","textChars":11,"textLines":1,"bbox":[81,243,200,26]}
+{"kind":"textbox","id":"sh/m9s3qtg3","slide":8,"text":"服务端验证 Telegram 授权信息；支持多 Bot；会话使用 HttpOnly Cookie。","textPreview":"服务端验证 Telegram 授权信息；支持多 Bot；会话使用 HttpOnly Cookie。","textChars":49,"textLines":1,"bbox":[81,282,470,48]}
+{"kind":"shape","id":"sh/kvehw7mt","slide":8,"bbox":[641,220,540,135]}
+{"kind":"textbox","id":"sh/lwnypc3e","slide":8,"text":"数据最小化","textPreview":"数据最小化","textChars":5,"textLines":1,"bbox":[666,243,200,26]}
+{"kind":"textbox","id":"sh/y9czuh4n","slide":8,"text":"企业优先返回在职与薪资区间结论，不默认共享完整工资单。","textPreview":"企业优先返回在职与薪资区间结论，不默认共享完整工资单。","textChars":27,"textLines":1,"bbox":[666,282,470,48]}
+{"kind":"shape","id":"sh/za5gnml8","slide":8,"bbox":[56,400,540,135]}
+{"kind":"textbox","id":"sh/8zeh0rm5","slide":8,"text":"三域隔离","textPreview":"三域隔离","textChars":4,"textLines":1,"bbox":[81,423,200,26]}
+{"kind":"textbox","id":"sh/t0nitw3a","slide":8,"text":"助贷、持牌机构、企业端独立责任与数据边界，跨域只走受控接口。","textPreview":"助贷、持牌机构、企业端独立责任与数据边界，跨域只走受控接口。","textChars":30,"textLines":1,"bbox":[81,462,470,48]}
+{"kind":"shape","id":"sh/6xwzyh4z","slide":8,"bbox":[641,400,540,135]}
+{"kind":"textbox","id":"sh/7y50rmlk","slide":8,"text":"审计与可靠性","textPreview":"审计与可靠性","textChars":6,"textLines":1,"bbox":[666,423,200,26]}
+{"kind":"textbox","id":"sh/g3yh4rm1","slide":8,"text":"授权、状态、核验、决策和回调均有流水；关键回调具备签名、幂等与重试。","textPreview":"授权、状态、核验、决策和回调均有流水；关键回调具备签名、幂等与重试。","textChars":34,"textLines":1,"bbox":[666,462,470,48]}
+{"kind":"textbox","id":"sh/h47ixw3m","slide":8,"text":"安全原则：Telegram 身份不是信贷实名；最终 KYC/AML、授信和资金责任仍由持牌机构承担。","textPreview":"安全原则：Telegram 身份不是信贷实名；最终 KYC/AML、授信和资金责任仍由持牌机构承担。","textChars":50,"textLines":1,"bbox":[56,590,1140,30]}
+{"kind":"notes","id":"nt/4bsyye","slide":8,"text":""}
+{"kind":"slide","id":"sl/4cbum1","slide":9,"title":"08｜试点推进路径","textShapes":18}
+{"kind":"textbox","id":"sh/s36p8fq1","slide":9,"text":"08｜试点推进路径","textPreview":"08｜试点推进路径","textChars":9,"textLines":1,"bbox":[56,42,450,22]}
+{"kind":"textbox","id":"sh/7ix8zapw","slide":9,"text":"从静态演示走向受控试点，必须逐一跨过四道门","textPreview":"从静态演示走向受控试点，必须逐一跨过四道门","textChars":21,"textLines":1,"bbox":[56,76,1100,58]}
+{"kind":"textbox","id":"sh/6h47658b","slide":9,"text":"当前可用于演示与内部验证；真实用户、真实资金与真实数据必须在门禁完成后才启动。","textPreview":"当前可用于演示与内部验证；真实用户、真实资金与真实数据必须在门禁完成后才启动。","textChars":39,"textLines":1,"bbox":[56,140,1040,36]}
+{"kind":"shape","id":"sh/5gv6xk7q","slide":9,"bbox":[56,665,1168,0]}
+{"kind":"textbox","id":"sh/kfmp4fq5","slide":9,"text":"PayEase｜投资方核心业务流程｜内部材料","textPreview":"PayEase｜投资方核心业务流程｜内部材料","textChars":22,"textLines":1,"bbox":[56,676,520,20]}
+{"kind":"textbox","id":"sh/jedovapk","slide":9,"text":"09","textPreview":"09","textChars":2,"textLines":1,"bbox":[1180,676,44,20]}
+{"kind":"shape","id":"sh/id47258z","slide":9,"bbox":[56,250,252,255]}
+{"kind":"shape","id":"sh/xcv6t07e","slide":9,"bbox":[78,272,40,40]}
+{"kind":"textbox","id":"sh/wbmp0vq9","slide":9,"text":"1","textPreview":"1","textChars":1,"textLines":1,"bbox":[78,277,40,30]}
+{"kind":"textbox","id":"sh/utsrmp0b","slide":9,"text":"合规与责任","textPreview":"合规与责任","textChars":5,"textLines":1,"bbox":[78,330,200,28]}
+{"kind":"textbox","id":"sh/vu18vu1w","slide":9,"text":"柬埔寨法务确认收费、数据、电子签约、KYC/AML、催收话术与保存期限","textPreview":"柬埔寨法务确认收费、数据、电子签约、KYC/AML、催收话术与保存期限","textChars":35,"textLines":1,"bbox":[78,375,202,92]}
+{"kind":"shape","id":"sh/wva9ozih","slide":9,"bbox":[348,250,252,255]}
+{"kind":"shape","id":"sh/hwjqx4j2","slide":9,"bbox":[370,272,40,40]}
+{"kind":"textbox","id":"sh/m587i50f","slide":9,"text":"2","textPreview":"2","textChars":1,"textLines":1,"bbox":[370,277,40,30]}
+{"kind":"textbox","id":"sh/7618ra10","slide":9,"text":"三域基础设施","textPreview":"三域基础设施","textChars":6,"textLines":1,"bbox":[370,330,200,28]}
+{"kind":"textbox","id":"sh/87apkfil","slide":9,"text":"独立账号、网络、密钥、日志与部署责任边界","textPreview":"独立账号、网络、密钥、日志与部署责任边界","textChars":20,"textLines":1,"bbox":[370,375,202,92]}
+{"kind":"shape","id":"sh/9sjqtkjq","slide":9,"bbox":[640,250,252,255]}
+{"kind":"shape","id":"sh/y187e5k3","slide":9,"bbox":[662,272,40,40]}
+{"kind":"textbox","id":"sh/z2h8na1o","slide":9,"text":"3","textPreview":"3","textChars":1,"textLines":1,"bbox":[662,277,40,30]}
+{"kind":"textbox","id":"sh/36xov6hg","slide":9,"text":"合作方联调","textPreview":"合作方联调","textChars":5,"textLines":1,"bbox":[662,330,200,28]}
+{"kind":"textbox","id":"sh/254nm10v","slide":9,"text":"机构 SOW/DPA、企业 UAT、支付/银行渠道与人工审批 SOP","textPreview":"机构 SOW/DPA、企业 UAT、支付/银行渠道与人工审批 SOP","textChars":34,"textLines":1,"bbox":[662,375,202,92]}
+{"kind":"shape","id":"sh/p8f6xgzm","slide":9,"bbox":[932,250,252,255]}
+{"kind":"shape","id":"sh/o765oby1","slide":9,"bbox":[954,272,40,40]}
+{"kind":"textbox","id":"sh/baxoz6hs","slide":9,"text":"4","textPreview":"4","textChars":1,"textLines":1,"bbox":[954,277,40,30]}
+{"kind":"textbox","id":"sh/q9onqlg7","slide":9,"text":"受控试点","textPreview":"受控试点","textChars":4,"textLines":1,"bbox":[954,330,200,28]}
+{"kind":"textbox","id":"sh/dcf61gzi","slide":9,"text":"白名单用户、小流量灰度、对账与投诉演练、Go/No-Go 决策","textPreview":"白名单用户、小流量灰度、对账与投诉演练、Go/No-Go 决策","textChars":31,"textLines":1,"bbox":[954,375,202,92]}
+{"kind":"textbox","id":"sh/cb65sbyd","slide":9,"text":"投资逻辑：先验证流程、数据质量与运营效率，再以受控试点验证规模化可行性。","textPreview":"投资逻辑：先验证流程、数据质量与运营效率，再以受控试点验证规模化可行性。","textChars":36,"textLines":1,"bbox":[56,565,1120,32]}
+{"kind":"notes","id":"nt/4cbum1","slide":9,"text":""}
+{"kind":"slide","id":"sl/55r64i","slide":10,"title":"PayEase","textShapes":12}
+{"kind":"textbox","id":"sh/9of2xwv2","slide":10,"text":"PayEase","textPreview":"PayEase","textChars":7,"textLines":1,"bbox":[56,56,220,32]}
+{"kind":"textbox","id":"sh/ml4jm1wr","slide":10,"text":"把受薪员工的短期资金需求，\n连接到合规、可运营的信贷协同网络","textPreview":"把受薪员工的短期资金需求， | 连接到合规、可运营的信贷协同网络","textChars":30,"textLines":2,"bbox":[56,152,850,145]}
+{"kind":"textbox","id":"sh/nmdkv6dw","slide":10,"text":"对投资方的核心判断","textPreview":"对投资方的核心判断","textChars":9,"textLines":1,"bbox":[56,355,300,28]}
+{"kind":"shape","id":"sh/wr61sbut","slide":10,"bbox":[56,410,515,60]}
+{"kind":"textbox","id":"sh/xsf21gve","slide":10,"text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[80,425,24,25]}
+{"kind":"textbox","id":"sh/apojq1cn","slide":10,"text":"用户入口低摩擦：Telegram 内完成","textPreview":"用户入口低摩擦：Telegram 内完成","textChars":20,"textLines":1,"bbox":[116,424,420,28]}
+{"kind":"shape","id":"sh/vqxkz6d8","slide":10,"bbox":[606,410,515,60]}
+{"kind":"textbox","id":"sh/cvm1g7e9","slide":10,"text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[630,425,24,25]}
+{"kind":"textbox","id":"sh/dwv2pcvu","slide":10,"text":"企业核验提升资料质量","textPreview":"企业核验提升资料质量","textChars":10,"textLines":1,"bbox":[666,424,420,28]}
+{"kind":"shape","id":"sh/h8f6547u","slide":10,"bbox":[56,498,515,60]}
+{"kind":"textbox","id":"sh/g76pcjq9","slide":10,"text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[80,513,24,25]}
+{"kind":"textbox","id":"sh/f6xo3e9o","slide":10,"text":"持牌机构保留信贷与资金责任","textPreview":"持牌机构保留信贷与资金责任","textChars":13,"textLines":1,"bbox":[116,512,420,28]}
+{"kind":"shape","id":"sh/ulo7a983","slide":10,"bbox":[606,498,515,60]}
+{"kind":"textbox","id":"sh/pcz69o7q","slide":10,"text":"✓","textPreview":"✓","textChars":1,"textLines":1,"bbox":[630,513,24,25]}
+{"kind":"textbox","id":"sh/4bqpgjql","slide":10,"text":"以小范围试点验证运营模型","textPreview":"以小范围试点验证运营模型","textChars":12,"textLines":1,"bbox":[666,512,420,28]}
+{"kind":"textbox","id":"sh/3aho7ep0","slide":10,"text":"下一阶段：完成合规、基础设施与合作方门槛后，启动 1 家机构、1–3 个工厂的受控试点。","textPreview":"下一阶段：完成合规、基础设施与合作方门槛后，启动 1 家机构、1–3 个工厂的受控试点。","textChars":44,"textLines":1,"bbox":[56,620,1100,30]}
+{"kind":"notes","id":"nt/55r64i","slide":10,"text":""}

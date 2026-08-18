@@ -200,7 +200,7 @@
 
 ## 最终：S0.2 三要素整体生效签字
 
-> 本页签完 → 在 `main` 分支 commit 并 push `docs/SECURITY_S0_2_CHECKLIST.md`（含签字 PDF 扫描件作为附件，或签字日期栏以电子签工具记录）。
+> 本页签完 → 在 `main` 分支 commit 并 push `docs/04-安全与合规/SECURITY_S0_2_CHECKLIST.md`（含签字 PDF 扫描件作为附件，或签字日期栏以电子签工具记录）。
 > → 签完当日：CISO 通知 Infrastructure Owner **可以**开始写 Terraform skeleton；通知产品 Owner **可以**开始规划 S1.0 MVP 真实 API 契约冻结。
 >
 > **三项任何一项未签字 = S0.2 不通过 = S1.0 真实后端 / 真实接口禁止启动。**

@@ -17,6 +17,9 @@ export type VerifiedTelegramIdentity = Readonly<{
   telegramUserRef: string;
   authenticatedBotId: string;
   initDataHash: string;
+  displayName: string | null;
+  username: string | null;
+  photoUrl: string | null;
 }>;
 
 const maxInitDataAgeSeconds = 5 * 60;
@@ -237,6 +240,39 @@ function safeEqual(left: string, right: string): boolean {
   );
 }
 
+function safeTelegramDisplayName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  return normalized.slice(0, 160);
+}
+
+function safeTelegramUsername(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9_]{5,32}$/.test(normalized)) return null;
+  return normalized;
+}
+
+function safeTelegramPhotoUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.hash
+  ) {
+    return null;
+  }
+  return parsed.toString();
+}
+
 export function verifyTelegramMiniAppInitData(
   initData: string,
   bots: readonly TelegramBotConfig[],
@@ -255,9 +291,25 @@ export function verifyTelegramMiniAppInitData(
     return undefined;
   }
   let telegramUserId: number;
+  let displayName: string | null = null;
+  let username: string | null = null;
+  let photoUrl: string | null = null;
   try {
-    const parsedUser = JSON.parse(user) as { id?: unknown };
+    const parsedUser = JSON.parse(user) as {
+      id?: unknown;
+      first_name?: unknown;
+      last_name?: unknown;
+      username?: unknown;
+      photo_url?: unknown;
+    };
     telegramUserId = Number(parsedUser.id);
+    displayName = safeTelegramDisplayName(
+      [parsedUser.first_name, parsedUser.last_name]
+        .filter((part) => typeof part === "string" && part.trim().length > 0)
+        .join(" "),
+    );
+    username = safeTelegramUsername(parsedUser.username);
+    photoUrl = safeTelegramPhotoUrl(parsedUser.photo_url);
   } catch {
     return undefined;
   }
@@ -285,6 +337,9 @@ export function verifyTelegramMiniAppInitData(
         initDataHash: createHmac("sha256", "PayEaseTelegramInitData")
           .update(initData)
           .digest("hex"),
+        displayName,
+        username,
+        photoUrl,
       };
     }
   }

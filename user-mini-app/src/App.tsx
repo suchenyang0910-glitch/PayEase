@@ -1183,7 +1183,7 @@ export function App(): JSX.Element {
         livenessPrepared,
         wealthProofAttached,
         consent,
-      } satisfies ApplicationDraftValues,
+      } as ApplicationDraftValues,
       currentFormStep: formStep,
       restoreValues: (draft) => {
         setAmountInput(draft.amountInput);

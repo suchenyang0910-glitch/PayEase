@@ -286,6 +286,25 @@ function emptyDraftResponse(): Response {
   });
 }
 
+function persistTestLanguage(language: "en" | "km" | "zh-CN"): void {
+  const storage: Record<string, string> = { "payease.language": language };
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage[key] ?? null,
+      setItem: (key: string, value: string) => {
+        storage[key] = String(value);
+      },
+      removeItem: (key: string) => {
+        delete storage[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(storage)) delete storage[key];
+      },
+    },
+  });
+}
+
 describe("applicant submission", () => {
   afterEach(() => {
     cleanup();
@@ -372,6 +391,7 @@ describe("applicant submission", () => {
   });
 
   it("requires a signed-in applicant to choose a factory and submit an identity document", async () => {
+    persistTestLanguage("en");
     Object.defineProperty(window, "Telegram", {
       configurable: true,
       value: { WebApp: { initData: "signed-init-data" } },
@@ -566,6 +586,7 @@ describe("applicant submission", () => {
   });
 
   it("shows the factory guidance when the backend rejects employerTenantId validation", async () => {
+    persistTestLanguage("en");
     Object.defineProperty(window, "Telegram", {
       configurable: true,
       value: { WebApp: { initData: "signed-init-data" } },
@@ -702,6 +723,7 @@ describe("applicant submission", () => {
   });
 
   it("allows revisiting previous steps from the confirm flow navigator", async () => {
+    persistTestLanguage("en");
     Object.defineProperty(window, "Telegram", {
       configurable: true,
       value: { WebApp: { initData: "signed-init-data" } },

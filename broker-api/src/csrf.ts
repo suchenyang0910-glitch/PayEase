@@ -43,7 +43,7 @@ export function csrfCompatibilityCookie(
   maxAgeSeconds: number,
 ): string | undefined {
   if (scope !== "applicant") return undefined;
-  return `${applicantCompatibilityCookieName}=${token}; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=${maxAgeSeconds}`;
+  return `${applicantCompatibilityCookieName}=${token}; Secure; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}`;
 }
 
 export function expiredCsrfCookie(scope: CsrfScope): string {
@@ -55,7 +55,7 @@ export function expiredCsrfCompatibilityCookie(
   scope: CsrfScope,
 ): string | undefined {
   if (scope !== "applicant") return undefined;
-  return `${applicantCompatibilityCookieName}=; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=0`;
+  return `${applicantCompatibilityCookieName}=; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
 export function hasValidDoubleSubmitCsrf(

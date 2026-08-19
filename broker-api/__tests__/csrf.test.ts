@@ -19,7 +19,7 @@ describe("double-submit CSRF helpers", () => {
       "SameSite=None; Partitioned",
     );
     expect(csrfCompatibilityCookie("applicant", "abc", 900)).toBe(
-      "payease_applicant_csrf=abc; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=900",
+      "payease_applicant_csrf=abc; Secure; SameSite=Lax; Path=/; Max-Age=900",
     );
     expect(csrfCompatibilityCookie("admin", "abc", 1800)).toBeUndefined();
     expect(expiredCsrfCookie("applicant")).toContain("Max-Age=0");

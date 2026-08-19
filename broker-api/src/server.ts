@@ -2769,19 +2769,21 @@ app.get("/v1/local/public/profile/view", async (request, reply) => {
        u.telegram_username,
        u.telegram_photo_url,
        u.telegram_phone_verified_at,
-       app.employer_tenant_display_name AS employer_display_name,
+       employer_tenant.display_name AS employer_display_name,
        app.application_no AS active_application_no,
        app.status AS active_application_status,
        bill.application_no AS bill_application_no,
        bill.status AS bill_status
      FROM users u
      LEFT JOIN LATERAL (
-       SELECT a.application_no, a.status, a.employer_tenant_display_name
+       SELECT a.application_no, a.status, a.employer_tenant_id
          FROM applications a
         WHERE a.user_id = u.id
         ORDER BY a.created_at DESC
         LIMIT 1
      ) app ON true
+     LEFT JOIN employer_tenants employer_tenant
+       ON employer_tenant.id = app.employer_tenant_id
      LEFT JOIN LATERAL (
        SELECT a.application_no, a.status
          FROM applications a

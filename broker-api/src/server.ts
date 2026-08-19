@@ -84,7 +84,9 @@ import { applicantRejectionNoticeCode } from "./applicant-rejection-notice.js";
 import {
   cookieValue,
   csrfCookie,
+  csrfCompatibilityCookie,
   expiredCsrfCookie,
+  expiredCsrfCompatibilityCookie,
   hasValidDoubleSubmitCsrf,
 } from "./csrf.js";
 
@@ -2594,6 +2596,7 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
       ],
     );
     await client.query("COMMIT");
+    const applicantCsrfToken = randomBytes(32).toString("base64url");
     reply.header("Set-Cookie", [
       `__Host-payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=900`,
       // Telegram's embedded iOS WebView can reject a Partitioned cookie on
@@ -2603,7 +2606,8 @@ app.post("/v1/local/public/telegram-sessions", async (request, reply) => {
       // same short lifetime; the server accepts either name and logout clears
       // both.
       `payease_applicant_session=${sessionToken}; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=900`,
-      csrfCookie("applicant", randomBytes(32).toString("base64url"), 900),
+      csrfCookie("applicant", applicantCsrfToken, 900),
+      csrfCompatibilityCookie("applicant", applicantCsrfToken, 900)!,
     ]);
     return reply.code(201).send({ authenticated: true });
   } catch (error) {
@@ -2969,6 +2973,7 @@ app.post(
       "__Host-payease_applicant_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0",
       "payease_applicant_session=; HttpOnly; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=0",
       expiredCsrfCookie("applicant"),
+      expiredCsrfCompatibilityCookie("applicant")!,
     ]);
     return { loggedOut: true };
   },

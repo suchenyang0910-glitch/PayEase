@@ -232,7 +232,7 @@ export function useApplicationDraft({
         body: JSON.stringify(serverDraft),
       },
     );
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       await recoverApplicantSessionRef.current();
     }
   }
@@ -249,7 +249,7 @@ export function useApplicationDraft({
         "/api/v1/local/public/application-draft",
         { method: "DELETE", credentials: "include" },
       );
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
         await recoverApplicantSessionRef.current();
       }
     } catch {

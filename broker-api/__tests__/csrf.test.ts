@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   cookieValue,
   csrfCookie,
+  csrfCompatibilityCookie,
   csrfCookieName,
   expiredCsrfCookie,
+  expiredCsrfCompatibilityCookie,
   hasValidDoubleSubmitCsrf,
 } from "../src/csrf.js";
 
@@ -16,7 +18,14 @@ describe("double-submit CSRF helpers", () => {
     expect(csrfCookie("applicant", "abc", 900)).toContain(
       "SameSite=None; Partitioned",
     );
+    expect(csrfCompatibilityCookie("applicant", "abc", 900)).toBe(
+      "payease_applicant_csrf=abc; Secure; SameSite=Lax; Path=/api/v1/local/; Max-Age=900",
+    );
+    expect(csrfCompatibilityCookie("admin", "abc", 1800)).toBeUndefined();
     expect(expiredCsrfCookie("applicant")).toContain("Max-Age=0");
+    expect(expiredCsrfCompatibilityCookie("applicant")).toContain(
+      "payease_applicant_csrf=;",
+    );
   });
 
   it("requires an exact same-scope cookie and header", () => {
@@ -28,5 +37,12 @@ describe("double-submit CSRF helpers", () => {
       false,
     );
     expect(hasValidDoubleSubmitCsrf("admin", header, ["token-1"])).toBe(false);
+    expect(
+      hasValidDoubleSubmitCsrf(
+        "applicant",
+        "payease_applicant_csrf=token-2; payease_applicant_session=session",
+        "token-2",
+      ),
+    ).toBe(true);
   });
 });

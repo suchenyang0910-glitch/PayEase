@@ -1111,11 +1111,15 @@ export function App(): JSX.Element {
         (init?.method ?? "GET").toUpperCase(),
       )
     ) {
-      const token = document.cookie
+      const csrfCookie = document.cookie
         .split(";")
         .map((part) => part.trim())
-        .find((part) => part.startsWith("__Host-payease_applicant_csrf="))
-        ?.slice("__Host-payease_applicant_csrf=".length);
+        .find(
+          (part) =>
+            part.startsWith("__Host-payease_applicant_csrf=") ||
+            part.startsWith("payease_applicant_csrf="),
+        );
+      const token = csrfCookie?.slice(csrfCookie.indexOf("=") + 1);
       if (token) headers = { ...existingHeaders, "X-CSRF-Token": token };
     }
     return fetch(input, {

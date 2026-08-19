@@ -194,6 +194,7 @@ type Props = Readonly<{
   showPreviewBadge?: boolean;
   applicantSession?: boolean;
   loading?: boolean;
+  requiresInitialLanguageSelection?: boolean;
   onLanguageChange?: (next: LanguageCode) => void;
   onLogout?: () => void;
   borrowEntryLabel?: string;
@@ -216,6 +217,7 @@ export function HomePage({
   showPreviewBadge = false,
   applicantSession = false,
   loading = false,
+  requiresInitialLanguageSelection = false,
   onLanguageChange,
   onLogout,
   borrowEntryLabel,
@@ -478,6 +480,42 @@ export function HomePage({
               {USER_SKELETON_COPY[language].home.title}
             </h2>
           </section>
+
+          {requiresInitialLanguageSelection &&
+          typeof onLanguageChange === "function" ? (
+            <section
+              className="kx-initial-language"
+              aria-label="Choose your language"
+            >
+              <div>
+                <strong>សូមជ្រើសរើសភាសា</strong>
+                <span>Choose your language · 选择语言</span>
+              </div>
+              <div className="kx-initial-language__choices">
+                <button
+                  type="button"
+                  onClick={() => onLanguageChange("km")}
+                  aria-label="Select Khmer language"
+                >
+                  ខ្មែរ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onLanguageChange("en")}
+                  aria-label="Select English language"
+                >
+                  English
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onLanguageChange("zh-CN")}
+                  aria-label="Select Chinese language"
+                >
+                  中文
+                </button>
+              </div>
+            </section>
+          ) : null}
 
           {/* Module 2: Credit Card (unique primary focus) */}
           <section className="kx-credit" aria-labelledby="kx-credit-title">

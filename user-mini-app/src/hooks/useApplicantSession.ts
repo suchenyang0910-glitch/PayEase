@@ -32,9 +32,7 @@ type UseApplicantSessionArgs = Readonly<{
   setError: (value: string) => void;
   setRecoveryEntryPoints: (value: string[]) => void;
   setApplicationHistory: (value: ApplicationHistoryEntry[]) => void;
-  setCurrentPage: (value: "profile") => void;
   currentLanguageRef: MutableRefObject<LanguageCode>;
-  currentPageRef: MutableRefObject<string>;
   languageChangedByApplicantRef: MutableRefObject<boolean>;
   getTelegramInitData: () => string | undefined;
   readStoredLanguagePreference: () => LanguageCode | undefined;
@@ -53,9 +51,7 @@ export function useApplicantSession({
   setError,
   setRecoveryEntryPoints,
   setApplicationHistory,
-  setCurrentPage,
   currentLanguageRef,
-  currentPageRef,
   languageChangedByApplicantRef,
   getTelegramInitData,
   readStoredLanguagePreference,
@@ -176,13 +172,6 @@ export function useApplicantSession({
       const requestedApplicationNo = new URLSearchParams(
         window.location.search,
       ).get("application");
-      if (
-        profile &&
-        !requestedApplicationNo &&
-        currentPageRef.current === "home"
-      ) {
-        setCurrentPage("profile");
-      }
       const restored =
         restoredApplications.find(
           (item) => item.applicationNo === requestedApplicationNo,
@@ -211,12 +200,10 @@ export function useApplicantSession({
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [
-    currentPageRef,
     languageChangedByApplicantRef,
     recoverApplicantSession,
     setApplicantSession,
     setApplicationHistory,
-    setCurrentPage,
     setError,
     setLanguage,
     setRecoveryEntryPoints,

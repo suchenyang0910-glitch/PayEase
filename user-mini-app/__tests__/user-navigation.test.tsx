@@ -93,6 +93,25 @@ describe("user-mini-app P0 skeleton navigation", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
+  it("asks a first-time visitor to choose a language on Home", () => {
+    render(<App />);
+
+    expect(
+      screen.getByRole("button", { name: "Select English language" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select English language" }),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Select English language" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("tab", { name: USER_SKELETON_COPY.en.tabs.home }),
+    ).toBeInTheDocument();
+  });
+
   it("can navigate Orders → Repayment → Profile and render each page heading", async () => {
     await renderEnglishApp();
     const tabs = USER_SKELETON_COPY.en.tabs;

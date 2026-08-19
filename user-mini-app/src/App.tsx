@@ -995,9 +995,16 @@ function readStoredLanguagePreference(): LanguageCode | undefined {
 }
 
 export function App(): JSX.Element {
-  const [language, setLanguage] = useState<LanguageCode>(
-    () => readStoredLanguagePreference() ?? "km",
+  const [initialLanguagePreference] = useState<LanguageCode | undefined>(() =>
+    readStoredLanguagePreference(),
   );
+  const [language, setLanguage] = useState<LanguageCode>(
+    () => initialLanguagePreference ?? "km",
+  );
+  const [
+    requiresInitialLanguageSelection,
+    setRequiresInitialLanguageSelection,
+  ] = useState(() => !initialLanguagePreference);
   const currentLanguage = useRef<LanguageCode>("km");
   const languageChangedByApplicant = useRef(false);
   const [stage, setStage] = useState<Stage>("welcome");
@@ -1093,14 +1100,6 @@ export function App(): JSX.Element {
   }, [language]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem("payease.language", language);
-    } catch {
-      /* ignore storage access failures in embedded webviews */
-    }
-  }, [language]);
-
-  useEffect(() => {
     currentPageRef.current = currentPage;
   }, [currentPage]);
 
@@ -1135,9 +1134,7 @@ export function App(): JSX.Element {
     setError,
     setRecoveryEntryPoints,
     setApplicationHistory,
-    setCurrentPage,
     currentLanguageRef: currentLanguage,
-    currentPageRef,
     languageChangedByApplicantRef: languageChangedByApplicant,
     getTelegramInitData: telegramInitData,
     readStoredLanguagePreference,
@@ -2052,6 +2049,12 @@ export function App(): JSX.Element {
   function changeLanguage(nextLanguage: LanguageCode) {
     languageChangedByApplicant.current = true;
     setLanguage(nextLanguage);
+    setRequiresInitialLanguageSelection(false);
+    try {
+      window.localStorage.setItem("payease.language", nextLanguage);
+    } catch {
+      /* storage access failures do not prevent a language change */
+    }
   }
 
   function startNewApplication() {
@@ -4923,6 +4926,9 @@ export function App(): JSX.Element {
                 showPreviewBadge={showPreviewBadge}
                 applicantSession={applicantSession}
                 loading={loading}
+                requiresInitialLanguageSelection={
+                  requiresInitialLanguageSelection
+                }
                 onLanguageChange={changeLanguage}
                 onLogout={() => void logoutApplicant()}
                 borrowEntryLabel={borrowEntryUi.cta}

@@ -546,7 +546,10 @@ select {
   min-height: 100vh;
   margin: auto;
   padding: 0;
-  background: var(--kx-bg, linear-gradient(180deg, #f8fbf7 0, #f4f8f3 48%, #edf3ed 100%));
+  background: var(
+    --kx-bg,
+    linear-gradient(180deg, #f8fbf7 0, #f4f8f3 48%, #edf3ed 100%)
+  );
 }
 .topbar,
 .top-actions,
@@ -1805,6 +1808,53 @@ html[data-theme="dark"],
   color: var(--kx-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.kx-initial-language {
+  display: grid;
+  gap: 12px;
+  margin: 0 var(--kx-page-x) 20px;
+  padding: 16px;
+  border: 1px solid var(--kx-info-border);
+  border-radius: var(--kx-radius-card);
+  background: var(--kx-primary-soft);
+}
+
+.kx-initial-language strong,
+.kx-initial-language span {
+  display: block;
+}
+
+.kx-initial-language strong {
+  color: var(--kx-text);
+  font-size: 16px;
+}
+
+.kx-initial-language span {
+  margin-top: 4px;
+  color: var(--kx-muted);
+  font-size: 12px;
+}
+
+.kx-initial-language__choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kx-initial-language__choices button {
+  min-height: var(--kx-hit-min);
+  border: 1px solid var(--kx-info-border);
+  border-radius: var(--kx-radius-button);
+  background: var(--kx-surface);
+  color: var(--kx-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.kx-initial-language__choices button:active {
+  transform: scale(0.98);
 }
 
 .kx-language-sync {

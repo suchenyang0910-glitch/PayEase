@@ -737,9 +737,19 @@ export const DEFAULT_EMPLOYER_REVENUE_SHARE_RULE_V2: EmployerRevenueShareRuleVer
     effectiveFrom: "2026-08-21T00:00:00.000Z",
   };
 
+const QUOTE_FIXTURE_PRINCIPAL_15_DAYS: Money = {
+  amountMinor: "10000",
+  currency: "USD",
+};
+
+const QUOTE_FIXTURE_PRINCIPAL_30_DAYS: Money = {
+  amountMinor: "10000",
+  currency: "USD",
+};
+
 export const SALARY_LOAN_V2_QUOTE_FIXTURES = [
   {
-    principal: { amountMinor: "10000", currency: "USD" } satisfies Money,
+    principal: QUOTE_FIXTURE_PRINCIPAL_15_DAYS,
     tenorDays: 15 as const,
     expected: {
       lenderInterestMinor: "75",
@@ -748,7 +758,7 @@ export const SALARY_LOAN_V2_QUOTE_FIXTURES = [
     },
   },
   {
-    principal: { amountMinor: "10000", currency: "USD" } satisfies Money,
+    principal: QUOTE_FIXTURE_PRINCIPAL_30_DAYS,
     tenorDays: 30 as const,
     expected: {
       lenderInterestMinor: "150",

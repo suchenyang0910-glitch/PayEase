@@ -111,7 +111,6 @@ jobs:
             --timeout 30 \
             --max-memory 4096 \
             --no-rewrite-rule-ids \
-            --verbose \
             --strict
 
       - name: CI-04 Sast Semgrep upstream owasp-top-ten + typescript ERROR strict

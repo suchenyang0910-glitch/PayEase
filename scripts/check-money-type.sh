@@ -46,7 +46,7 @@ trap 'rm -f "${TMP_OUT}"' EXIT
 # recursively traversing local caches, build output and Windows junctions while
 # preserving the exact source set that can be committed or evaluated by CI.
 while IFS= read -r -d '' source_file; do
-  grep -n -E "${VIOLATION_RE}" -- "${source_file}" >>"${TMP_OUT}" 2>/dev/null || true
+  grep -Hn -E "${VIOLATION_RE}" -- "${source_file}" >>"${TMP_OUT}" 2>/dev/null || true
 done < <(
   git ls-files -z --cached --others --exclude-standard -- \
     '*.ts' '*.tsx' '*.js' '*.jsx'

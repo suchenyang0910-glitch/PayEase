@@ -16,6 +16,13 @@ import {
   parseLenderApplicationSummary,
   type LenderApplicationSummary,
 } from "./lender-application-summary.ts";
+import {
+  applyRepaymentWorkItemSelection,
+  canResolveCollectionException,
+  LENDER_REPAYMENT_QUEUE_AUTO_REFRESH_MS,
+  type CollectionExceptionItem,
+  type RepaymentWorkItem,
+} from "./lender-repayment-queue.ts";
 import { lenderServiceFeeSummaryLabel } from "./lender-summary-label.ts";
 import { lenderServiceCaseTypeLabel } from "./lender-service-case-label.ts";
 import { formatHuman } from "@payease/shared-money";
@@ -66,6 +73,42 @@ function isServiceCaseDetail(payload: unknown): payload is ServiceCaseDetail {
       "string" &&
     typeof (payload as { message?: unknown }).message === "string" &&
     typeof (payload as { status?: unknown }).status === "string"
+  );
+}
+
+function isRepaymentWorkItemQueue(
+  payload: unknown,
+): payload is { items: RepaymentWorkItem[] } {
+  if (!payload || typeof payload !== "object") return false;
+  const items = (payload as { items?: unknown }).items;
+  return (
+    Array.isArray(items) &&
+    items.every(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as { workItemId?: unknown }).workItemId === "string" &&
+        typeof (entry as { applicationNo?: unknown }).applicationNo ===
+          "string",
+    )
+  );
+}
+
+function isCollectionExceptionQueue(
+  payload: unknown,
+): payload is { items: CollectionExceptionItem[] } {
+  if (!payload || typeof payload !== "object") return false;
+  const items = (payload as { items?: unknown }).items;
+  return (
+    Array.isArray(items) &&
+    items.every(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        typeof (entry as { exceptionId?: unknown }).exceptionId === "string" &&
+        typeof (entry as { applicationNo?: unknown }).applicationNo ===
+          "string",
+    )
   );
 }
 const shell = {
@@ -236,6 +279,23 @@ export function App(): JSX.Element {
   );
   const [serviceCaseBusy, setServiceCaseBusy] = useState(false);
   const [serviceCaseNotice, setServiceCaseNotice] = useState("");
+  const [repaymentWorkItems, setRepaymentWorkItems] = useState<
+    RepaymentWorkItem[]
+  >([]);
+  const [repaymentQueueBusy, setRepaymentQueueBusy] = useState(false);
+  const [repaymentQueueNotice, setRepaymentQueueNotice] = useState("");
+  const [collectionExceptions, setCollectionExceptions] = useState<
+    CollectionExceptionItem[]
+  >([]);
+  const [collectionExceptionBusy, setCollectionExceptionBusy] = useState(false);
+  const [collectionExceptionNotice, setCollectionExceptionNotice] =
+    useState("");
+  const [exceptionReasonCode, setExceptionReasonCode] = useState(
+    "ALTERNATE_COLLECTION_RECORDED",
+  );
+  const [exceptionEvidenceReference, setExceptionEvidenceReference] = useState(
+    "EXCEPTION-RESOLUTION-",
+  );
   useEffect(() => {
     api("/v1/local/auth/me")
       .then(async (r) => {
@@ -333,8 +393,8 @@ export function App(): JSX.Element {
           allowedLenderActionRoutes(applicationSummary).includes(item.route),
       )
     : [];
-  const loadApplication = async () => {
-    const target = applicationNo.trim();
+  const loadApplication = async (applicationNoOverride?: string) => {
+    const target = (applicationNoOverride ?? applicationNo).trim();
     if (!target) return;
     setApplicationLoading(true);
     setApplicationNotice("");
@@ -404,6 +464,15 @@ export function App(): JSX.Element {
       setNotice(result.notice);
       if (!result.deliveryUncertain && !result.sessionExpired) {
         await loadApplication();
+        if (
+          ["repayment-write-off", "repayment-confirmation"].includes(
+            action.route,
+          ) &&
+          hasLenderRepaymentRole
+        ) {
+          await loadRepaymentWorkItems();
+          await loadCollectionExceptions();
+        }
       }
     } finally {
       // A client-side error after the request must not permanently lock the
@@ -427,9 +496,52 @@ export function App(): JSX.Element {
         current ? { ...current, preferredLanguage } : current,
       );
   };
+  const hasLenderRepaymentRole = identity.roles.some((role) =>
+    ["LENDER_REPAYMENT_MAKER", "LENDER_REPAYMENT_CHECKER"].includes(role),
+  );
   const hasLenderComplaintRole = identity.roles.includes(
     "LENDER_COMPLAINT_OFFICER",
   );
+  const loadRepaymentWorkItems = async () => {
+    setRepaymentQueueBusy(true);
+    setRepaymentQueueNotice("");
+    try {
+      const response = await api("/v1/local/lender-repayment-work-items/open");
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (!response.ok || !isRepaymentWorkItemQueue(payload)) {
+        setRepaymentQueueNotice(copy.queueLoadFailed);
+        return;
+      }
+      setRepaymentWorkItems(payload.items);
+    } finally {
+      setRepaymentQueueBusy(false);
+    }
+  };
+  const loadCollectionExceptions = async () => {
+    setCollectionExceptionBusy(true);
+    setCollectionExceptionNotice("");
+    try {
+      const response = await api("/v1/local/lender-collection-exceptions/open");
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (!response.ok || !isCollectionExceptionQueue(payload)) {
+        setCollectionExceptionNotice(copy.exceptionLoadFailed);
+        return;
+      }
+      setCollectionExceptions(payload.items);
+    } finally {
+      setCollectionExceptionBusy(false);
+    }
+  };
   const loadReferredServiceCases = async () => {
     setServiceCaseBusy(true);
     setServiceCaseNotice("");
@@ -508,6 +620,64 @@ export function App(): JSX.Element {
       setServiceCaseBusy(false);
     }
   };
+  const useRepaymentWorkItem = async (item: RepaymentWorkItem) => {
+    const next = applyRepaymentWorkItemSelection(item);
+    setApplicationNo(next.applicationNo);
+    setReasonCode(next.reasonCode);
+    setEvidenceReference(next.evidenceReference);
+    setNotice(`${copy.recorded}: ${item.workItemId}`);
+    await loadApplication(next.applicationNo);
+  };
+  const resolveCollectionException = async (
+    exception: CollectionExceptionItem,
+  ) => {
+    setCollectionExceptionBusy(true);
+    setCollectionExceptionNotice("");
+    try {
+      const response = await api(
+        `/v1/local/lender-collection-exceptions/${encodeURIComponent(exception.exceptionId)}/resolve`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            reasonCode: exceptionReasonCode,
+            evidenceReference: exceptionEvidenceReference,
+          }),
+        },
+      );
+      if (response.status === 401) {
+        setSignInError(copy.sessionExpired);
+        setIdentity(undefined);
+        return;
+      }
+      const payload: unknown = await response.json().catch(() => undefined);
+      if (
+        !response.ok ||
+        !payload ||
+        typeof payload !== "object" ||
+        (payload as { status?: unknown }).status !== "RESOLVED"
+      ) {
+        setCollectionExceptionNotice(copy.exceptionLoadFailed);
+        return;
+      }
+      setCollectionExceptionNotice(
+        `${copy.exceptionResolved}: ${exception.exceptionId}`,
+      );
+      await loadCollectionExceptions();
+      await loadRepaymentWorkItems();
+    } finally {
+      setCollectionExceptionBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (!hasLenderRepaymentRole) return;
+    void loadRepaymentWorkItems();
+    void loadCollectionExceptions();
+    const timer = window.setInterval(() => {
+      void loadRepaymentWorkItems();
+      void loadCollectionExceptions();
+    }, LENDER_REPAYMENT_QUEUE_AUTO_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [hasLenderRepaymentRole, identity?.loginName]);
   return (
     <main style={shell}>
       <header
@@ -737,6 +907,108 @@ export function App(): JSX.Element {
           </pre>
         ) : null}
       </section>
+      {hasLenderRepaymentRole ? (
+        <>
+          <section style={card} aria-label={copy.repaymentQueue}>
+            <h2>{copy.repaymentQueue}</h2>
+            <p>{copy.repaymentQueueDescription}</p>
+            <button
+              disabled={repaymentQueueBusy}
+              onClick={() => void loadRepaymentWorkItems()}
+            >
+              {repaymentQueueBusy ? "…" : copy.refreshRepaymentQueue}
+            </button>
+            {repaymentWorkItems.length === 0 ? (
+              <p>{copy.noRepaymentWorkItems}</p>
+            ) : (
+              <ul>
+                {repaymentWorkItems.map((item) => (
+                  <li key={item.workItemId} style={{ marginTop: 10 }}>
+                    <button
+                      disabled={repaymentQueueBusy}
+                      onClick={() => void useRepaymentWorkItem(item)}
+                    >
+                      {copy.useWorkItem}: {item.applicationNo}
+                    </button>{" "}
+                    <small>
+                      #{item.collectionSequence} ·{" "}
+                      {item.selectedRepaymentMethod} · {item.collectionResult} ·{" "}
+                      {item.workItemStatus} · {item.reportedAmountMinor}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {repaymentQueueNotice ? (
+              <p role="status">{repaymentQueueNotice}</p>
+            ) : null}
+          </section>
+          <section style={card} aria-label={copy.collectionExceptions}>
+            <h2>{copy.collectionExceptions}</h2>
+            <p>{copy.collectionExceptionsDescription}</p>
+            <button
+              disabled={collectionExceptionBusy}
+              onClick={() => void loadCollectionExceptions()}
+            >
+              {collectionExceptionBusy ? "…" : copy.refreshCollectionExceptions}
+            </button>
+            <div style={{ ...form, marginTop: 12 }}>
+              <label>
+                {copy.exceptionReasonCode}
+                <input
+                  value={exceptionReasonCode}
+                  onChange={(event) =>
+                    setExceptionReasonCode(event.target.value.toUpperCase())
+                  }
+                  pattern="[A-Z0-9_]{3,64}"
+                  required
+                />
+              </label>
+              <label>
+                {copy.exceptionEvidenceReference}
+                <input
+                  value={exceptionEvidenceReference}
+                  onChange={(event) =>
+                    setExceptionEvidenceReference(event.target.value)
+                  }
+                  required
+                />
+              </label>
+            </div>
+            {collectionExceptions.length === 0 ? (
+              <p>{copy.noCollectionExceptions}</p>
+            ) : (
+              <ul>
+                {collectionExceptions.map((exception) => (
+                  <li key={exception.exceptionId} style={{ marginTop: 10 }}>
+                    <button
+                      disabled={
+                        collectionExceptionBusy ||
+                        !canResolveCollectionException({
+                          roles: identity.roles,
+                          reasonCode: exceptionReasonCode,
+                          evidenceReference: exceptionEvidenceReference,
+                        })
+                      }
+                      onClick={() => void resolveCollectionException(exception)}
+                    >
+                      {copy.resolveException}: {exception.applicationNo}
+                    </button>{" "}
+                    <small>
+                      #{exception.collectionSequence} ·{" "}
+                      {exception.selectedRepaymentMethod} ·{" "}
+                      {exception.exceptionType} · {exception.reasonCode}
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {collectionExceptionNotice ? (
+              <p role="status">{collectionExceptionNotice}</p>
+            ) : null}
+          </section>
+        </>
+      ) : null}
       {hasLenderComplaintRole ? (
         <section style={card} aria-label={copy.complaintResolution}>
           <h2>{copy.complaintResolution}</h2>

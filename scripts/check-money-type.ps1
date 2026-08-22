@@ -39,6 +39,7 @@ if ([string]::IsNullOrWhiteSpace($RootDir)) {
 
 $MoneyKeywords = @('amount','fee','total','price','principal','interest','balance','repay','discount','refund','rebate','tax','charge','commission','quota','credit','debit','settledAmount','settledFee','settlementAmount')
 $KeywordRe = ($MoneyKeywords | ForEach-Object { [regex]::Escape($_) }) -join '|'
+$NonMoneyNumberFieldRe = '(?i)\b(repaymentGraceDays|repayment_grace_days|repayment_installment_no)\b[\t ]*[:!?][\t ]*number\b'
 
 $Pattern = "(?i)(?<!\()([\t ]*)(($KeywordRe)[A-Za-z0-9_]*)[\t ]*[:!?][\t ]*number[\t ]*(?![A-Za-z_\[])"
 $Exts = @('.ts','.tsx','.js','.jsx','.mts','.cts','.mjs','.cjs')
@@ -99,6 +100,7 @@ try {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             if ($line.Length -gt 20000) { continue }
             if ($line -match 'IGNORE-MONEY-NUMBER') { continue }
+            if ([regex]::IsMatch($line, $NonMoneyNumberFieldRe)) { continue }
             if (-not ([regex]::IsMatch($line, $Pattern))) { continue }
             $allowedParam = $false
             foreach ($fn in $ParamNumberAllowedFns) {

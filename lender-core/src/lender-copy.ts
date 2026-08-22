@@ -63,6 +63,21 @@ export type LenderCopy = Readonly<{
   complaintContentAudited: string;
   complaintLoadFailed: string;
   complaintResolveFailed: string;
+  repaymentQueue: string;
+  repaymentQueueDescription: string;
+  refreshRepaymentQueue: string;
+  noRepaymentWorkItems: string;
+  queueLoadFailed: string;
+  useWorkItem: string;
+  collectionExceptions: string;
+  collectionExceptionsDescription: string;
+  refreshCollectionExceptions: string;
+  noCollectionExceptions: string;
+  exceptionLoadFailed: string;
+  resolveException: string;
+  exceptionReasonCode: string;
+  exceptionEvidenceReference: string;
+  exceptionResolved: string;
   actions: Readonly<Record<LenderActionKey, string>>;
 }>;
 
@@ -78,6 +93,21 @@ type ComplaintCopy = Pick<
   | "complaintContentAudited"
   | "complaintLoadFailed"
   | "complaintResolveFailed"
+  | "repaymentQueue"
+  | "repaymentQueueDescription"
+  | "refreshRepaymentQueue"
+  | "noRepaymentWorkItems"
+  | "queueLoadFailed"
+  | "useWorkItem"
+  | "collectionExceptions"
+  | "collectionExceptionsDescription"
+  | "refreshCollectionExceptions"
+  | "noCollectionExceptions"
+  | "exceptionLoadFailed"
+  | "resolveException"
+  | "exceptionReasonCode"
+  | "exceptionEvidenceReference"
+  | "exceptionResolved"
 >;
 
 const COMPLAINT_COPY: Readonly<Record<LenderLanguage, ComplaintCopy>> = {
@@ -94,6 +124,23 @@ const COMPLAINT_COPY: Readonly<Record<LenderLanguage, ComplaintCopy>> = {
     complaintLoadFailed: "Complaint details are currently unavailable.",
     complaintResolveFailed:
       "The complaint could not be resolved. No final decision was recorded.",
+    repaymentQueue: "Repayment reconciliation queue",
+    repaymentQueueDescription:
+      "Review broker-side collection facts before the maker/checker write-off flow closes an installment.",
+    refreshRepaymentQueue: "Refresh repayment queue",
+    noRepaymentWorkItems: "No repayment work items are currently open.",
+    queueLoadFailed: "The repayment queue could not be loaded.",
+    useWorkItem: "Use work item",
+    collectionExceptions: "Collection exceptions",
+    collectionExceptionsDescription:
+      "Partial deductions, failed direct debit, expired authorization, and reversals stay open until a lender checker resolves them.",
+    refreshCollectionExceptions: "Refresh exception queue",
+    noCollectionExceptions: "No collection exceptions are currently open.",
+    exceptionLoadFailed: "The collection exception queue is unavailable.",
+    resolveException: "Resolve exception",
+    exceptionReasonCode: "Exception resolution reason code",
+    exceptionEvidenceReference: "Resolution evidence reference",
+    exceptionResolved: "Exception resolved",
   },
   "zh-CN": {
     complaintResolution: "助贷转交的客户投诉",
@@ -107,6 +154,23 @@ const COMPLAINT_COPY: Readonly<Record<LenderLanguage, ComplaintCopy>> = {
     complaintContentAudited: "工单内容（访问已留痕）",
     complaintLoadFailed: "暂时无法读取投诉详情。",
     complaintResolveFailed: "暂时无法完成投诉处理，未记录最终决定。",
+    repaymentQueue: "还款核销待办",
+    repaymentQueueDescription:
+      "先核对助贷域回传的回收事实，再进入持牌经办/复核核销流程。",
+    refreshRepaymentQueue: "刷新核销待办",
+    noRepaymentWorkItems: "当前没有待处理的还款核销事项。",
+    queueLoadFailed: "暂时无法读取还款核销待办。",
+    useWorkItem: "载入待办",
+    collectionExceptions: "回收异常工单",
+    collectionExceptionsDescription:
+      "部分扣款、代扣失败、授权过期和冲回异常会持续留在队列中，直到持牌复核人显式解决。",
+    refreshCollectionExceptions: "刷新异常工单",
+    noCollectionExceptions: "当前没有待处理的回收异常。",
+    exceptionLoadFailed: "暂时无法读取回收异常队列。",
+    resolveException: "解决异常",
+    exceptionReasonCode: "异常解决原因代码",
+    exceptionEvidenceReference: "解决凭证编号",
+    exceptionResolved: "异常已解决",
   },
   km: {
     complaintResolution: "បណ្តឹងអតិថិជនដែលបានបញ្ជូនដោយក្រុមសេវាកម្ម",
@@ -121,6 +185,23 @@ const COMPLAINT_COPY: Readonly<Record<LenderLanguage, ComplaintCopy>> = {
     complaintLoadFailed: "មិនអាចអានព័ត៌មានលម្អិតនៃបណ្តឹងបានទេ។",
     complaintResolveFailed:
       "មិនអាចដោះស្រាយបណ្តឹងបានទេ ហើយមិនមានកំណត់ត្រាសេចក្តីសម្រេចចុងក្រោយទេ។",
+    repaymentQueue: "ជួរការកត់ត្រាសងប្រាក់",
+    repaymentQueueDescription:
+      "ពិនិត្យព្រឹត្តិការណ៍ប្រមូលប្រាក់ពីដែនជំនួយឥណទាន មុនពេលបិទវគ្គសងដោយដំណើរការអ្នករៀបចំ និងអ្នកត្រួតពិនិត្យ។",
+    refreshRepaymentQueue: "ផ្ទុកជួរការសងប្រាក់ឡើងវិញ",
+    noRepaymentWorkItems: "បច្ចុប្បន្នមិនមានកិច្ចការកត់ត្រាសងប្រាក់បើកចំហទេ។",
+    queueLoadFailed: "មិនអាចផ្ទុកជួរការកត់ត្រាសងប្រាក់បានទេ។",
+    useWorkItem: "ប្រើកិច្ចការ",
+    collectionExceptions: "ករណីលើកលែងនៃការប្រមូលប្រាក់",
+    collectionExceptionsDescription:
+      "ការកាត់ប្រាក់មិនពេញ ការដកប្រាក់បរាជ័យ សិទ្ធិអនុញ្ញាតផុតកំណត់ និងការបង្វិលត្រឡប់ នឹងនៅបើករហូតដល់អ្នកត្រួតពិនិត្យរបស់ស្ថាប័នដោះស្រាយ។",
+    refreshCollectionExceptions: "ផ្ទុកជួរករណីលើកលែងឡើងវិញ",
+    noCollectionExceptions: "បច្ចុប្បន្នមិនមានករណីលើកលែងបើកចំហទេ។",
+    exceptionLoadFailed: "មិនអាចផ្ទុកជួរករណីលើកលែងនៃការប្រមូលប្រាក់បានទេ។",
+    resolveException: "ដោះស្រាយករណីលើកលែង",
+    exceptionReasonCode: "កូដមូលហេតុដោះស្រាយ",
+    exceptionEvidenceReference: "លេខយោងភស្តុតាងដោះស្រាយ",
+    exceptionResolved: "ករណីលើកលែងត្រូវបានដោះស្រាយ",
   },
 };
 

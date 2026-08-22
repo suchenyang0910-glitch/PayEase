@@ -68,6 +68,21 @@ function pickCheckbox(): HTMLElement {
   return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
 }
 
+function clickConsentLabel(name: RegExp): void {
+  const label = screen
+    .queryAllByText(name)
+    .map((element) => element.closest("label"))
+    .find(Boolean);
+  if (!label) return;
+  const checkbox = label.querySelector<HTMLInputElement>(
+    'input[type="checkbox"]',
+  );
+  if (checkbox && !checkbox.checked) {
+    fireEvent.click(label);
+    expect(checkbox.checked).toBe(true);
+  }
+}
+
 function toggleConsentCheckbox(): void {
   const checkbox = screen
     .getAllByRole("checkbox")
@@ -76,6 +91,15 @@ function toggleConsentCheckbox(): void {
     ) as HTMLInputElement;
   fireEvent.click(checkbox.closest("label") ?? checkbox);
   expect(checkbox.checked).toBe(true);
+  clickConsentLabel(
+    /employer verification|企业仅核验在职状态|ក្រុមហ៊ុនផ្ទៀងផ្ទាត់ស្ថានភាពការងារ/i,
+  );
+  clickConsentLabel(
+    /broker service agreement|助贷服务协议|កិច្ចព្រមព្រៀងសេវាភ្នាក់ងារ/i,
+  );
+  clickConsentLabel(
+    /brokerage remuneration becomes due only after disbursement|放款后形成应收|កម្រៃជើងសារ KhmerX/i,
+  );
 }
 
 function pickLanguage(): HTMLElement {
@@ -550,8 +574,16 @@ describe("applicant submission", () => {
         (init as RequestInit | undefined)?.method === "POST",
     ) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toMatchObject({
+      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
       employerTenantId: TEST_EMPLOYER_TENANT_ID,
       identityDocument: { type: "NATIONAL_ID", number: "KH-ID-10001" },
+      authorizationSnapshot: {
+        employerVerificationAuthorized: true,
+        serviceAgreementAuthorized: true,
+        postDisbursementBrokerageAuthorized: true,
+        payrollDeductionAuthorized: false,
+        directDebitAuthorized: false,
+      },
     });
   });
 
@@ -1854,13 +1886,13 @@ describe("applicant submission", () => {
     expect(await screen.findByLabelText("Loan dashboard")).toBeVisible();
     expect(pickRoleLiteral("heading", "Repayment in progress")).toBeVisible();
     expect(queryHeading("heading", "Offer result")).toBeNull();
-    expect(screen.getByText("Approved").parentElement).toHaveTextContent(
+    expect(screen.getByText("Principal").parentElement).toHaveTextContent(
       "$250.00",
     );
-    expect(screen.getByText("Service fee").parentElement).toHaveTextContent(
+    expect(screen.getByText("Lender interest").parentElement).toHaveTextContent(
       "$5.00",
     );
-    expect(screen.getByText("Total repayable").parentElement).toHaveTextContent(
+    expect(screen.getByText("Total repayment").parentElement).toHaveTextContent(
       "$255.00",
     );
     expect(screen.getByText("Installments")).toBeVisible();

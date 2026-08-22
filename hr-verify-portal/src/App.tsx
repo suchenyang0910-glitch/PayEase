@@ -11,10 +11,9 @@ type Identity = {
 };
 type VerificationQueueItem = {
   applicationNo: string;
-  requestedAmountMinor: string;
-  currency: string;
-  tenorDays: number;
   stage: string;
+  createdAt: string;
+  employerTenantId: string;
   identityDocumentType: "NATIONAL_ID" | "PASSPORT" | null;
   identityMatchStatus: "PENDING" | "MATCHED" | "NOT_MATCHED";
 };
@@ -189,7 +188,16 @@ export function App(): JSX.Element {
       }
       const payload = (await response.json().catch(() => undefined)) as
         { items?: VerificationQueueItem[] } | undefined;
-      if (response.ok && Array.isArray(payload?.items)) setQueue(payload.items);
+      if (response.ok && Array.isArray(payload?.items)) {
+        setQueue(payload.items);
+        if (
+          applicationNo &&
+          !payload.items.some((item) => item.applicationNo === applicationNo)
+        ) {
+          setApplicationNo("");
+          setFactoryRecordIdentityNumber("");
+        }
+      }
     } finally {
       setQueueLoading(false);
     }
@@ -269,7 +277,13 @@ export function App(): JSX.Element {
       }
       if (response.ok) {
         identityMatchIdempotencyKey.current = undefined;
-        setNotice(JSON.stringify(payload));
+        setNotice(
+          language === "zh-CN"
+            ? `已记录证件匹配：${applicationNo}`
+            : language === "km"
+              ? `បានកត់ត្រាការផ្គូផ្គងអត្តសញ្ញាណ៖ ${applicationNo}`
+              : `Identity match recorded: ${applicationNo}`,
+        );
         await loadQueue();
       } else {
         setNotice(JSON.stringify(payload));
@@ -298,6 +312,43 @@ export function App(): JSX.Element {
   };
   if (checking) return <main style={layout}>{copy.checking}</main>;
   if (!identity) return <Login done={setIdentity} initialError={signInError} />;
+  const selectVerification = (item: VerificationQueueItem) => {
+    setApplicationNo(item.applicationNo);
+    setNotice("");
+  };
+  const stageLabel = (stage: string) => {
+    if (stage === "EMPLOYER_VERIFICATION") {
+      return language === "zh-CN"
+        ? "企业 HR 核验中"
+        : language === "km"
+          ? "កំពុងផ្ទៀងផ្ទាត់ដោយ HR"
+          : "HR verification pending";
+    }
+    return stage;
+  };
+  const identityLabel = (
+    value: VerificationQueueItem["identityMatchStatus"],
+  ) => {
+    if (value === "MATCHED") {
+      return language === "zh-CN"
+        ? "证件已匹配"
+        : language === "km"
+          ? "អត្តសញ្ញាណត្រូវគ្នា"
+          : "Identity matched";
+    }
+    if (value === "NOT_MATCHED") {
+      return language === "zh-CN"
+        ? "证件不匹配"
+        : language === "km"
+          ? "អត្តសញ្ញាណមិនត្រូវគ្នា"
+          : "Identity not matched";
+    }
+    return language === "zh-CN"
+      ? "待核对证件"
+      : language === "km"
+        ? "រង់ចាំផ្ទៀងផ្ទាត់អត្តសញ្ញាណ"
+        : "Identity check pending";
+  };
   return (
     <main style={layout}>
       <header style={{ display: "flex", justifyContent: "space-between" }}>
@@ -355,13 +406,11 @@ export function App(): JSX.Element {
                 <ul>
                   {queue.map((item) => (
                     <li key={item.applicationNo}>
-                      <button
-                        onClick={() => setApplicationNo(item.applicationNo)}
-                      >
-                        {item.applicationNo} · {item.currency}{" "}
-                        {item.requestedAmountMinor} · {item.tenorDays}d ·{" "}
+                      <button onClick={() => selectVerification(item)}>
+                        {item.applicationNo} · {stageLabel(item.stage)} ·{" "}
+                        {new Date(item.createdAt).toLocaleDateString()} ·{" "}
                         {item.identityDocumentType ?? "—"} ·{" "}
-                        {item.identityMatchStatus}
+                        {identityLabel(item.identityMatchStatus)}
                       </button>
                     </li>
                   ))}
@@ -376,6 +425,29 @@ export function App(): JSX.Element {
                 </p>
               )}
             </div>
+            {selectedVerification ? (
+              <section
+                style={{
+                  marginTop: 12,
+                  padding: 12,
+                  borderRadius: 8,
+                  background: "#f8fafc",
+                }}
+              >
+                <strong>
+                  {language === "zh-CN"
+                    ? "当前待办"
+                    : language === "km"
+                      ? "កិច្ចការបច្ចុប្បន្ន"
+                      : "Selected case"}
+                </strong>
+                <div style={{ marginTop: 6 }}>
+                  {selectedVerification.applicationNo} ·{" "}
+                  {stageLabel(selectedVerification.stage)} ·{" "}
+                  {identityLabel(selectedVerification.identityMatchStatus)}
+                </div>
+              </section>
+            ) : null}
             <label>
               {copy.applicationNumber}
               <input
@@ -391,6 +463,13 @@ export function App(): JSX.Element {
                 onChange={(e) => setReasonCode(e.target.value)}
               />
             </label>
+            <p style={{ marginTop: 10, color: "#555" }}>
+              {language === "zh-CN"
+                ? "HR 端仅核验在职状态、工资区间与合同状态，不显示申请金额、期限、费用或持牌机构信息。"
+                : language === "km"
+                  ? "ផ្នែក HR ផ្ទៀងផ្ទាត់តែស្ថានភាពការងារ ជួរប្រាក់ខែ និងស្ថានភាពកិច្ចសន្យា ប៉ុណ្ណោះ។"
+                  : "HR sees only employment status, salary band and contract status. Loan amount, tenor, fee and lender details stay hidden."}
+            </p>
             {identity.roles.includes("EMPLOYER_HR") ? (
               <label style={{ display: "block", marginTop: 10 }}>
                 {identityRecordCopy.label}

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { formatHuman } from "@payease/shared-money";
 import { MOCK_EMPLOYMENT_DETAILS } from "../mocks/hr-mocks.static";
 import type {
   EmploymentDetailMock,
@@ -76,28 +75,6 @@ export function EmploymentDetailPage(): JSX.Element {
         <dd>{detail.hiredAt}</dd>
         <dt>Employer tax ID</dt>
         <dd style={{ fontFamily: "monospace" }}>{detail.employerTaxId}</dd>
-        <dt>Monthly base salary</dt>
-        <dd
-          data-testid="monthly-salary-formatted"
-          style={{ textAlign: "right", fontFamily: "monospace" }}
-        >
-          {formatHuman({
-            amountMinor: detail.monthlyBaseSalaryAmountMinor,
-            currency: detail.monthlyBaseSalaryCurrency,
-          })}
-        </dd>
-        <dt>Requested loan amount</dt>
-        <dd
-          data-testid="loan-amount-formatted"
-          style={{ textAlign: "right", fontFamily: "monospace" }}
-        >
-          {formatHuman({
-            amountMinor: detail.requestedLoanAmountMinor,
-            currency: detail.requestedLoanCurrency,
-          })}
-        </dd>
-        <dt>Tenor</dt>
-        <dd>{detail.tenorDays} calendar days</dd>
         <dt>Requested at</dt>
         <dd>{detail.requestedAt}</dd>
         <dt>HR verification status</dt>
@@ -106,6 +83,11 @@ export function EmploymentDetailPage(): JSX.Element {
         </dd>
         <dt>Notes</dt>
         <dd style={{ color: "#555" }}>{detail.notes}</dd>
+        <dt>HR boundary</dt>
+        <dd>
+          Employment status, salary band and contract status only. Loan amount,
+          tenor, fee and lender details are intentionally hidden.
+        </dd>
       </dl>
       <section style={{ marginTop: 24, display: "flex", gap: 12 }}>
         <button

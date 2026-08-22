@@ -135,6 +135,25 @@ async function grantEmployerTenantMember(
   );
 }
 
+function day2ApplicationPayload(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    preferredLanguage: "en",
+    requestedAmount: { amountMinor: "10000", currency: "USD" },
+    tenorDays: 30,
+    selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+    authorizationSnapshot: {
+      employerVerificationAuthorized: true,
+      serviceAgreementAuthorized: true,
+      postDisbursementBrokerageAuthorized: true,
+      payrollDeductionAuthorized: false,
+      directDebitAuthorized: false,
+    },
+    ...overrides,
+  };
+}
+
 integration("public applicant access", () => {
   let database: Pool;
   let brokerApi: BrokerApi;
@@ -149,7 +168,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0035__seed_prelaunch_test_employer_tenant.sql",
+      filename: "V0042__lender_collection_work_items_and_exceptions.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -308,10 +327,7 @@ integration("public applicant access", () => {
         headers: {
           cookie: `__Host-payease_applicant_session=${unverifiedSessionToken}`,
         },
-        payload: {
-          preferredLanguage: "en",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
+        payload: day2ApplicationPayload({
           employerTenantId: tenant.rows[0]!.id,
           identityDocument: { type: "NATIONAL_ID", number: "ID-88776-655" },
           personalProfile: {
@@ -320,7 +336,7 @@ integration("public applicant access", () => {
             employerName: "Phone gate factory",
           },
           personalDataAndPhoneConsent: true,
-        },
+        }),
       });
       expect(unverifiedUser.rows[0]?.id).toBeTruthy();
       expect(blockedSubmission.statusCode).toBe(422);
@@ -391,14 +407,14 @@ integration("public applicant access", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      tenants: expect.arrayContaining([
-        {
+    expect(response.json().tenants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
           id: active.rows[0]!.id,
           displayName: "Lanhai Factory A",
-        },
+        }),
       ]),
-    });
+    );
     expect(
       response
         .json()
@@ -503,12 +519,9 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "deactivated-factory-review-user",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -552,14 +565,11 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "identity-mismatch-user",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
         identityDocument: { type: "PASSPORT", number: "P-100 001" },
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -1089,12 +1099,11 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-user-001",
-        preferredLanguage: "en",
         requestedAmount: { amountMinor: "25000", currency: "USD" },
         tenorDays: 30,
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -1118,14 +1127,30 @@ integration("public applicant access", () => {
       [applicationId],
     );
     await database.query(
+      `INSERT INTO application_v2_quote_snapshots
+        (application_id, workflow_version, principal_amount_minor,
+         actual_disbursement_amount_minor, lender_interest_minor,
+         total_repayment_amount_minor,
+         brokerage_remuneration_receivable_minor, product_rule_version,
+         brokerage_remuneration_rule_version, lender_interest_rule_version,
+         installment_count, first_due_date, created_by_user_ref)
+       VALUES (
+         $1, 'SALARY_LOAN_V2', 25000, 25000, 500, 25500, 3500,
+         'PRODUCT-RULE-V2-20260821', 'BROKERAGE-RULE-V2-20260821',
+         'LENDER-INTEREST-V2-20260821', 2, '2026-09-15', 'integration-lender'
+       )`,
+      [applicationId],
+    );
+    await database.query(
       "UPDATE applications SET approved_amount_minor = 25000 WHERE id = $1",
       [applicationId],
     );
     await database.query(
       `INSERT INTO repayment_installments
-        (application_id, installment_no, due_date, amount_due_minor)
-       VALUES ($1, 1, '2026-09-15', 12750),
-              ($1, 2, '2026-10-15', 12750)`,
+        (application_id, installment_no, due_date, amount_due_minor,
+         principal_due_minor, lender_interest_due_minor, payroll_node_ref)
+       VALUES ($1, 1, '2026-09-15', 12750, 12500, 250, 'PAYDAY-1'),
+              ($1, 2, '2026-10-15', 12750, 12500, 250, 'PAYDAY-2')`,
       [applicationId],
     );
     await database.query(
@@ -1153,11 +1178,30 @@ integration("public applicant access", () => {
         requestedAmountMinor: "25000",
         approvedAmountMinor: "25000",
       },
-      terms: {
-        approvedAmountMinor: "25000",
-        serviceFeeMinor: "500",
-        totalRepayableMinor: "25500",
+      workflow: {
+        workflowVersion: "SALARY_LOAN_V2",
+        selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+        availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
+        collectionScope: "PRINCIPAL_AND_INTEREST",
+        employerVerificationAuthorized: true,
+        serviceAgreementAuthorized: true,
+        postDisbursementBrokerageAuthorized: true,
+        payrollDeductionAuthorized: false,
+        directDebitAuthorized: false,
+      },
+      terms: null,
+      quote: {
+        principalAmountMinor: "25000",
+        actualDisbursementAmountMinor: "25000",
+        lenderInterestMinor: "500",
+        totalRepaymentAmountMinor: "25500",
+        brokerageRemunerationReceivableMinor: "3500",
         installmentCount: 2,
+        firstDueDate: "2026-09-15",
+        productRuleVersion: "PRODUCT-RULE-V2-20260821",
+        brokerageRemunerationRuleVersion: "BROKERAGE-RULE-V2-20260821",
+        lenderInterestRuleVersion: "LENDER-INTEREST-V2-20260821",
+        repaymentGraceDays: 3,
       },
       repayment: {
         periodCount: 2,
@@ -1190,12 +1234,11 @@ integration("public applicant access", () => {
     const otherUser = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-user-002",
-        preferredLanguage: "en",
         requestedAmount: { amountMinor: "1000", currency: "USD" },
-        tenorDays: 7,
-      },
+        tenorDays: 15,
+      }),
     });
     const otherCookie = String(otherUser.headers["set-cookie"]).split(";")[0]!;
     const otherUserView = await brokerApi.app.inject({
@@ -1215,13 +1258,10 @@ integration("public applicant access", () => {
     const missingConsent = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-user-missing-consent",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
         personalProfile: profile,
-      },
+      }),
     });
     expect(missingConsent.statusCode).toBe(400);
     expect(missingConsent.json()).toMatchObject({
@@ -1237,16 +1277,13 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-user-private-profile",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
         identityDocument,
         personalProfile: profile,
         personalDataAndPhoneConsent: true,
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -1312,10 +1349,21 @@ integration("public applicant access", () => {
       currency: "USD",
       tenorDays: 30,
       employerTenantSelected: true,
+      workflowVersion: "SALARY_LOAN_V2",
+      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
+      collectionScope: "PRINCIPAL_AND_INTEREST",
       identityDocumentProvided: true,
       personalDataAndPhoneConsent: true,
       personalDataConsentVersion: "PAYEASE-PERSONAL-DATA-v1",
       personalDataConsentLanguage: "en",
+      authorizationSnapshot: {
+        employerVerificationAuthorized: true,
+        serviceAgreementAuthorized: true,
+        postDisbursementBrokerageAuthorized: true,
+        payrollDeductionAuthorized: false,
+        directDebitAuthorized: false,
+      },
     };
     expect(submittedAudit.rows[0]!.payload_hash).toBe(
       createHash("sha256")
@@ -1359,14 +1407,11 @@ integration("public applicant access", () => {
     const first = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "identity-collision-first-account",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
         identityDocument: { type: "PASSPORT", number: "P-77 001" },
-      },
+      }),
     });
     expect(first.statusCode).toBe(201);
     const firstApplicationNo = (first.json() as { applicationNo: string })
@@ -1375,15 +1420,12 @@ integration("public applicant access", () => {
     const second = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "identity-collision-second-account",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
         // Normalization must make spacing and case irrelevant to matching.
         identityDocument: { type: "PASSPORT", number: "p-77001" },
-      },
+      }),
     });
     expect(second.statusCode).toBe(409);
     expect(second.json()).toEqual({
@@ -1402,12 +1444,9 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-user-supplement",
-        preferredLanguage: "en",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -1742,11 +1781,7 @@ integration("public applicant access", () => {
         method: "POST",
         url: "/v1/local/applications",
         headers: { cookie: firstCookie },
-        payload: {
-          preferredLanguage: "en",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
-        },
+        payload: day2ApplicationPayload(),
       });
       expect(missingProfile.statusCode).toBe(422);
       expect(missingProfile.json()).toEqual({
@@ -1760,14 +1795,11 @@ integration("public applicant access", () => {
         method: "POST",
         url: "/v1/local/applications",
         headers: { cookie: firstCookie },
-        payload: {
-          preferredLanguage: "en",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
+        payload: day2ApplicationPayload({
           identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
           personalProfile,
           personalDataAndPhoneConsent: true,
-        },
+        }),
       });
       expect(missingFactory.statusCode).toBe(422);
       expect(missingFactory.json()).toEqual({
@@ -1778,16 +1810,13 @@ integration("public applicant access", () => {
         method: "POST",
         url: "/v1/local/applications",
         headers: { cookie: firstCookie },
-        payload: {
+        payload: day2ApplicationPayload({
           telegramUserRef: "spoofed-user-ref-is-ignored",
-          preferredLanguage: "en",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
           employerTenantId: authenticatedTenant.rows[0]!.id,
           identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
           personalProfile,
           personalDataAndPhoneConsent: true,
-        },
+        }),
       });
       expect(created.statusCode).toBe(201);
       const applicationNo = (created.json() as { applicationNo: string })
@@ -1936,15 +1965,13 @@ integration("public applicant access", () => {
         method: "POST",
         url: "/v1/local/applications",
         headers: { cookie: secondCookie },
-        payload: {
+        payload: day2ApplicationPayload({
           preferredLanguage: "zh-CN",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
           employerTenantId: authenticatedTenant.rows[0]!.id,
           identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
           personalProfile,
           personalDataAndPhoneConsent: true,
-        },
+        }),
       });
       expect(activeApplicationRetry.statusCode).toBe(409);
       expect(activeApplicationRetry.json()).toMatchObject({
@@ -1981,15 +2008,13 @@ integration("public applicant access", () => {
         method: "POST",
         url: "/v1/local/applications",
         headers: { cookie: secondCookie },
-        payload: {
+        payload: day2ApplicationPayload({
           preferredLanguage: "zh-CN",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
           employerTenantId: authenticatedTenant.rows[0]!.id,
           identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
           personalProfile,
           personalDataAndPhoneConsent: true,
-        },
+        }),
       });
       expect(unresolvedRejectionRetry.statusCode).toBe(409);
       expect(unresolvedRejectionRetry.json()).toMatchObject({
@@ -2023,15 +2048,13 @@ integration("public applicant access", () => {
         method: "POST",
         url: "/v1/local/applications",
         headers: { cookie: secondCookie },
-        payload: {
+        payload: day2ApplicationPayload({
           preferredLanguage: "zh-CN",
-          requestedAmount: { amountMinor: "10000", currency: "USD" },
-          tenorDays: 30,
           employerTenantId: authenticatedTenant.rows[0]!.id,
           identityDocument: { type: "NATIONAL_ID", number: "ID-2026-0001" },
           personalProfile,
           personalDataAndPhoneConsent: true,
-        },
+        }),
       });
       expect(eligibleRetry.statusCode).toBe(201);
 
@@ -2127,12 +2150,11 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-withdrawal-user",
-        preferredLanguage: "en",
         requestedAmount: { amountMinor: "25000", currency: "USD" },
         tenorDays: 30,
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -2191,14 +2213,13 @@ integration("public applicant access", () => {
     const created = await brokerApi.app.inject({
       method: "POST",
       url: "/v1/local/applications",
-      payload: {
+      payload: day2ApplicationPayload({
         telegramUserRef: "integration-lifecycle-user",
-        preferredLanguage: "en",
         requestedAmount: { amountMinor: "25000", currency: "USD" },
         tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
         identityDocument: { type: "NATIONAL_ID", number: "KH-ID-10001" },
-      },
+      }),
     });
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
@@ -2277,9 +2298,10 @@ integration("public applicant access", () => {
       items: [
         {
           applicationNo,
-          requestedAmountMinor: "25000",
           stage: "EMPLOYER_VERIFICATION",
           employerTenantId: tenant.rows[0]!.id,
+          identityDocumentType: "NATIONAL_ID",
+          identityMatchStatus: "PENDING",
         },
       ],
     });
@@ -2387,7 +2409,7 @@ integration("public applicant access", () => {
       "employer-verification",
       employerHrCookie,
       { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
-      "EMPLOYER_FINANCE_VERIFICATION",
+      "LENDER_INITIAL_REVIEW",
     );
     const financeQueue = await brokerApi.app.inject({
       method: "GET",
@@ -2395,17 +2417,9 @@ integration("public applicant access", () => {
       headers: { cookie: employerFinanceCookie },
     });
     expect(financeQueue.statusCode).toBe(200);
-    expect(financeQueue.json()).toMatchObject({
-      items: [{ applicationNo, stage: "EMPLOYER_FINANCE_VERIFICATION" }],
-    });
+    expect(financeQueue.json()).toEqual({ items: [] });
     expect(JSON.stringify(financeQueue.json())).not.toContain("NATIONAL_ID");
     expect(JSON.stringify(financeQueue.json())).not.toContain("MATCHED");
-    await call(
-      "employer-finance-verification",
-      employerFinanceCookie,
-      { decision: "APPROVED", reasonCode: "SALARY_RANGE_CONFIRMED" },
-      "LENDER_INITIAL_REVIEW",
-    );
     await call(
       "lender-initial-review",
       await adminCookieForRole(database, "LENDER_CREDIT_OFFICER", "LENDER"),
@@ -2419,10 +2433,15 @@ integration("public applicant access", () => {
         decision: "APPROVED",
         reasonCode: "FINAL_CREDIT_APPROVED",
         approvedAmountMinor: "25000",
-        serviceFeeMinor: "500",
-        totalRepayableMinor: "25500",
+        actualDisbursementAmountMinor: "25000",
+        lenderInterestMinor: "500",
+        totalRepaymentAmountMinor: "25500",
+        brokerageRemunerationReceivableMinor: "3500",
         installmentCount: 2,
         firstDueDate: "2026-09-15",
+        productRuleVersion: "PRODUCT-RULE-V2-20260821",
+        brokerageRemunerationRuleVersion: "BROKERAGE-RULE-V2-20260821",
+        lenderInterestRuleVersion: "LENDER-INTEREST-V2-20260821",
       },
       "CONTRACT_PENDING",
     );
@@ -2660,7 +2679,7 @@ integration("public applicant access", () => {
       payload: { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
     });
     expect(repeatedFirstRepaymentWriteOff.statusCode).toBe(200);
-    expect(repeatedFirstRepaymentWriteOff.json()).toEqual({
+    expect(repeatedFirstRepaymentWriteOff.json()).toMatchObject({
       applicationNo,
       status: "REPAYMENT_ACTIVE",
       approval: "MAKER_RECORDED",
@@ -2727,7 +2746,7 @@ integration("public applicant access", () => {
       },
     });
     expect(repeatedFirstRepaymentConfirmation.statusCode).toBe(200);
-    expect(repeatedFirstRepaymentConfirmation.json()).toEqual({
+    expect(repeatedFirstRepaymentConfirmation.json()).toMatchObject({
       applicationNo,
       status: "REPAYMENT_ACTIVE",
     });
@@ -2796,13 +2815,378 @@ integration("public applicant access", () => {
     });
     expect(lenderFullDetail.statusCode).toBe(200);
     expect(lenderFullDetail.json()).toMatchObject({
-      terms: { serviceFeeMinor: "500", totalRepayableMinor: "25500" },
+      terms: null,
+      quote: {
+        principalAmountMinor: "25000",
+        actualDisbursementAmountMinor: "25000",
+        lenderInterestMinor: "500",
+        totalRepaymentAmountMinor: "25500",
+        brokerageRemunerationReceivableMinor: "3500",
+      },
+      workflow: { workflowVersion: "SALARY_LOAN_V2" },
     });
     const auditEvents = await database.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM audit_events WHERE entity_id = (SELECT id FROM applications WHERE application_no = $1)",
       [applicationNo],
     );
     expect(Number(auditEvents.rows[0]?.count)).toBeGreaterThanOrEqual(11);
+  });
+
+  it("projects employer payroll collection instructions from disbursement and advances them after lender reconciliation", async () => {
+    const tenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('PAYROLL_PROJECTION_FACTORY', 'Payroll projection factory') RETURNING id`,
+    );
+    await database.query(
+      `INSERT INTO employer_payroll_rules
+        (employer_tenant_id, rule_code, workflow_version, collection_currency,
+         collection_day_of_month, collection_type, partial_collection_allowed,
+         allowed_repayment_methods, default_repayment_method,
+         published_by_user_ref)
+       VALUES (
+         $1, 'EMPLOYER-PAYROLL-V2-PROJECTION', 'SALARY_LOAN_V2', 'USD',
+         15, 'PRINCIPAL_AND_INTEREST', true,
+         ARRAY['EMPLOYER_PAYROLL_DEDUCTION']::text[],
+         'EMPLOYER_PAYROLL_DEDUCTION', 'integration-seed'
+       )`,
+      [tenant.rows[0]!.id],
+    );
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications",
+      payload: day2ApplicationPayload({
+        telegramUserRef: "integration-payroll-projection-user",
+        requestedAmount: { amountMinor: "25000", currency: "USD" },
+        tenorDays: 30,
+        employerTenantId: tenant.rows[0]!.id,
+        selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+        authorizationSnapshot: {
+          employerVerificationAuthorized: true,
+          serviceAgreementAuthorized: true,
+          postDisbursementBrokerageAuthorized: true,
+          payrollDeductionAuthorized: true,
+          directDebitAuthorized: false,
+        },
+        identityDocument: { type: "NATIONAL_ID", number: "KH-ID-20001" },
+      }),
+    });
+    expect(created.statusCode).toBe(201);
+    const applicationNo = (created.json() as { applicationNo: string })
+      .applicationNo;
+    const applicantSessionToken = "integration-payroll-projection-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, '444444444', now() + interval '30 minutes')`,
+      [
+        createHash("sha256").update(applicantSessionToken).digest("hex"),
+        "integration-payroll-projection-user",
+      ],
+    );
+    const telegramApplicantCookie = `payease_applicant_session=${applicantSessionToken}`;
+    const employerHrCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_HR",
+      "EMPLOYER",
+    );
+    const employerFinanceCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_FINANCE",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(
+      database,
+      tenant.rows[0]!.id,
+      employerHrCookie,
+    );
+    await grantEmployerTenantMember(
+      database,
+      tenant.rows[0]!.id,
+      employerFinanceCookie,
+    );
+    const call = async (
+      route: string,
+      cookie: string,
+      payload: Record<string, unknown>,
+      expectedStatus: string,
+    ) => {
+      const response = await brokerApi.app.inject({
+        method: "POST",
+        url: `/v1/local/applications/${applicationNo}/${route}`,
+        headers: {
+          cookie,
+          "idempotency-key": `integration-${route}-${Math.random().toString(16).slice(2)}`,
+        },
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        applicationNo,
+        status: expectedStatus,
+      });
+      return response;
+    };
+
+    await call(
+      "broker-review",
+      await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      { decision: "APPROVED", reasonCode: "DOCUMENTS_COMPLETE" },
+      "EMPLOYER_VERIFICATION",
+    );
+    await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-identity-match`,
+      headers: {
+        cookie: employerHrCookie,
+        "idempotency-key": "integration-payroll-identity-match",
+      },
+      payload: {
+        identityDocumentNumber: "KHID20001",
+        reasonCode: "FACTORY_EMPLOYEE_IDENTITY_MATCHED",
+      },
+    });
+    await call(
+      "employer-verification",
+      employerHrCookie,
+      { decision: "APPROVED", reasonCode: "EMPLOYMENT_CONFIRMED" },
+      "LENDER_INITIAL_REVIEW",
+    );
+    await call(
+      "lender-initial-review",
+      await adminCookieForRole(database, "LENDER_CREDIT_OFFICER", "LENDER"),
+      { decision: "APPROVED", reasonCode: "INITIAL_CREDIT_APPROVED" },
+      "LENDER_FINAL_REVIEW",
+    );
+    await call(
+      "lender-final-review",
+      await adminCookieForRole(database, "LENDER_CREDIT_REVIEWER", "LENDER"),
+      {
+        decision: "APPROVED",
+        reasonCode: "FINAL_CREDIT_APPROVED",
+        approvedAmountMinor: "25000",
+        actualDisbursementAmountMinor: "25000",
+        lenderInterestMinor: "500",
+        totalRepaymentAmountMinor: "25500",
+        brokerageRemunerationReceivableMinor: "3500",
+        installmentCount: 2,
+        firstDueDate: "2026-09-15",
+        productRuleVersion: "PRODUCT-RULE-V2-20260821",
+        brokerageRemunerationRuleVersion: "BROKERAGE-RULE-V2-20260821",
+        lenderInterestRuleVersion: "LENDER-INTEREST-V2-20260821",
+      },
+      "CONTRACT_PENDING",
+    );
+    const publicConfirmation = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/contract-confirmation`,
+      headers: { cookie: telegramApplicantCookie },
+    });
+    expect(publicConfirmation.statusCode).toBe(200);
+    await call(
+      "contract-confirmation",
+      await adminCookieForRole(database, "LENDER_CONTRACT_OFFICER", "LENDER"),
+      { evidenceReference: "PAYROLL-CONTRACT-001" },
+      "CONTRACT_CONFIRMED",
+    );
+    const disbursementMaker = await adminCookieForRole(
+      database,
+      "LENDER_DISBURSEMENT_MAKER",
+      "LENDER",
+    );
+    const disbursementChecker = await adminCookieForRole(
+      database,
+      "LENDER_DISBURSEMENT_CHECKER",
+      "LENDER",
+    );
+    await call(
+      "open-disbursement",
+      disbursementMaker,
+      { reasonCode: "MANUAL_DISBURSEMENT_OPENED" },
+      "DISBURSEMENT_PENDING",
+    );
+    await call(
+      "disbursement-release",
+      disbursementMaker,
+      { reasonCode: "MANUAL_DISBURSEMENT_RECORDED" },
+      "DISBURSEMENT_PENDING",
+    );
+    await call(
+      "disbursement-confirmation",
+      disbursementChecker,
+      {
+        reasonCode: "MANUAL_DISBURSEMENT_CONFIRMED",
+        evidenceReference: "PAYROLL-DISBURSEMENT-001",
+      },
+      "DISBURSED",
+    );
+
+    const financeQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/employer/verifications/open",
+      headers: { cookie: employerFinanceCookie },
+    });
+    expect(financeQueue.statusCode).toBe(200);
+    expect(financeQueue.json()).toEqual({
+      items: [
+        expect.objectContaining({
+          applicationNo,
+          stage: "PAYROLL_COLLECTION_PENDING",
+          collectionSequence: 1,
+          scheduledAmountMinor: "12750",
+          selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+          payrollDeductionAuthorized: true,
+          collectionScope: "PRINCIPAL_AND_INTEREST",
+        }),
+      ],
+    });
+
+    const employerCollection = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/applications/${applicationNo}/employer-finance-verification`,
+      headers: {
+        cookie: employerFinanceCookie,
+        "idempotency-key": "integration-payroll-finance-report",
+      },
+      payload: {
+        collectionResult: "COLLECTED",
+        reasonCode: "PAYROLL_INSTALLMENT_COLLECTION_REPORTED",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "12750",
+        evidenceReference: "PAYROLL-EVIDENCE-001",
+      },
+    });
+    expect(employerCollection.statusCode).toBe(200);
+    expect(employerCollection.json()).toEqual({
+      applicationNo,
+      status: "COLLECTION_RECONCILIATION_PENDING",
+      collectionSequence: 1,
+      actualCollectedAmountMinor: "12750",
+      lenderCollectionWorkItemId: expect.any(String),
+      lenderCollectionExceptionId: null,
+    });
+    const employerCollectionResponse = employerCollection.json() as {
+      lenderCollectionWorkItemId: string;
+    };
+
+    const scheduledAndReported = await database.query<{
+      event_type: string;
+      count: string;
+    }>(
+      `SELECT event_type, count(*)::text AS count
+         FROM payroll_collection_events
+        WHERE application_id = (
+          SELECT id FROM applications WHERE application_no = $1
+        )
+        GROUP BY event_type
+        ORDER BY event_type`,
+      [applicationNo],
+    );
+    expect(scheduledAndReported.rows).toEqual(
+      expect.arrayContaining([
+        { event_type: "PAYROLL_COLLECTION_REPORTED", count: "1" },
+        { event_type: "PAYROLL_COLLECTION_SCHEDULED", count: "2" },
+      ]),
+    );
+    const lenderQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/lender-repayment-work-items/open",
+      headers: {
+        cookie: await adminCookieForRole(
+          database,
+          "LENDER_REPAYMENT_MAKER",
+          "LENDER",
+        ),
+      },
+    });
+    expect(lenderQueue.statusCode).toBe(200);
+    expect(lenderQueue.json()).toEqual({
+      items: [
+        expect.objectContaining({
+          workItemId: employerCollectionResponse.lenderCollectionWorkItemId,
+          applicationNo,
+          collectionSequence: 1,
+          selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+          sourceType: "EMPLOYER_PAYROLL_REPORT",
+          collectionResult: "COLLECTED",
+          workItemStatus: "OPEN",
+        }),
+      ],
+    });
+    const outboxEvent = await database.query<{
+      event_type: string;
+      external_application_ref: string;
+    }>(
+      `SELECT event_type, external_application_ref
+         FROM domain_event_outbox
+        WHERE external_application_ref = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [applicationNo],
+    );
+    expect(outboxEvent.rows[0]).toEqual({
+      event_type: "COLLECTION_ACCEPTED",
+      external_application_ref: applicationNo,
+    });
+
+    await call(
+      "activate-repayment",
+      await adminCookieForRole(database, "LENDER_REPAYMENT_MAKER", "LENDER"),
+      { reasonCode: "REPAYMENT_OPENED" },
+      "REPAYMENT_ACTIVE",
+    );
+    await call(
+      "repayment-write-off",
+      await adminCookieForRole(database, "LENDER_REPAYMENT_MAKER", "LENDER"),
+      { reasonCode: "MANUAL_PAYMENT_RECEIVED" },
+      "REPAYMENT_ACTIVE",
+    );
+    await call(
+      "repayment-confirmation",
+      await adminCookieForRole(database, "LENDER_REPAYMENT_CHECKER", "LENDER"),
+      {
+        reasonCode: "MANUAL_PAYMENT_CONFIRMED",
+        evidenceReference: "PAYROLL-REPAYMENT-001",
+      },
+      "REPAYMENT_ACTIVE",
+    );
+    const lenderWorkItemAfterConfirmation = await database.query<{
+      work_item_status: string;
+      confirmed_by_user_ref: string | null;
+    }>(
+      `SELECT work_item_status, confirmed_by_user_ref
+         FROM lender_collection_work_items
+        WHERE id = $1`,
+      [employerCollectionResponse.lenderCollectionWorkItemId],
+    );
+    expect(lenderWorkItemAfterConfirmation.rows[0]?.work_item_status).toBe(
+      "CONFIRMED",
+    );
+    expect(
+      lenderWorkItemAfterConfirmation.rows[0]?.confirmed_by_user_ref,
+    ).toContain("integration-lender_repayment_checker-");
+
+    const instructionStatuses = await database.query<{
+      repayment_installment_no: number;
+      projection_status: string;
+    }>(
+      `SELECT repayment_installment_no, projection_status
+         FROM employer_payroll_collection_instructions
+        WHERE application_id = (
+          SELECT id FROM applications WHERE application_no = $1
+        )
+        ORDER BY repayment_installment_no ASC`,
+      [applicationNo],
+    );
+    expect(instructionStatuses.rows).toEqual([
+      {
+        repayment_installment_no: 1,
+        projection_status: "RECONCILED",
+      },
+      {
+        repayment_installment_no: 2,
+        projection_status: "PAYROLL_COLLECTION_PENDING",
+      },
+    ]);
   });
 
   it("persists applicant payment proof uploads and reassessment requests in the public detail DTO", async () => {
@@ -3412,6 +3796,7 @@ integration("public applicant access", () => {
       formStep: "contacts",
       amountInput: "125",
       term: 30,
+      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
       name: "Draft Owner",
       residentialAddress: "Phnom Penh",
       phone: "012345678",
@@ -3429,6 +3814,11 @@ integration("public applicant access", () => {
       livenessPrepared: true,
       wealthProofAttached: false,
       consent: true,
+      employerVerificationAuthorized: true,
+      serviceAgreementAuthorized: true,
+      postDisbursementBrokerageAuthorized: true,
+      payrollDeductionAuthorized: false,
+      directDebitAuthorized: false,
     } as const;
 
     const putDraft = await brokerApi.app.inject({
@@ -3632,6 +4022,317 @@ integration("public applicant access", () => {
     expect(closed.json()).toEqual({
       workItemId: workItem.rows[0]!.id,
       status: "CLOSED",
+    });
+  });
+
+  it("builds Day 3 lender collection UAT fixtures across payroll, direct debit, and manual payment flows", async () => {
+    async function seedRepaymentApplication(args: {
+      applicationNo: string;
+      telegramUserRef: string;
+      selectedRepaymentMethod:
+        | "EMPLOYER_PAYROLL_DEDUCTION"
+        | "USER_DIRECT_DEBIT"
+        | "USER_MANUAL_PAYMENT";
+      employerTenantId?: string;
+      scheduledAmountMinor: string;
+    }): Promise<void> {
+      const user = await database.query<{ id: string }>(
+        `INSERT INTO users (telegram_user_ref, preferred_language)
+         VALUES ($1, 'en') RETURNING id`,
+        [args.telegramUserRef],
+      );
+      const application = await database.query<{ id: string }>(
+        `INSERT INTO applications
+          (application_no, user_id, employer_tenant_id, requested_amount_minor,
+           currency, tenor_days, status, workflow_version)
+         VALUES (
+           $1, $2, $3, 25000, 'USD', 30, 'REPAYMENT_ACTIVE', 'SALARY_LOAN_V2'
+         )
+         RETURNING id`,
+        [args.applicationNo, user.rows[0]!.id, args.employerTenantId ?? null],
+      );
+      await database.query(
+        `INSERT INTO application_repayment_preferences
+          (application_id, workflow_version, selected_repayment_method,
+           available_repayment_methods, employer_payroll_rule_version,
+           collection_mode, collection_payee_ref)
+         VALUES (
+           $1, 'SALARY_LOAN_V2', $2, ARRAY[$2]::text[], $3,
+           'PRINCIPAL_AND_INTEREST', 'UAT-COLLECTION-PAYEE'
+         )`,
+        [
+          application.rows[0]!.id,
+          args.selectedRepaymentMethod,
+          args.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION"
+            ? "EMPLOYER-UAT-RULE"
+            : null,
+        ],
+      );
+      await database.query(
+        `INSERT INTO repayment_installments
+          (application_id, installment_no, due_date, amount_due_minor,
+           principal_due_minor, lender_interest_due_minor, payroll_node_ref)
+         VALUES
+          ($1, 1, '2026-09-15', $2, 12500, 250, 'PAYDAY-1'),
+          ($1, 2, '2026-09-30', 12750, 12500, 250, 'PAYDAY-2')`,
+        [application.rows[0]!.id, args.scheduledAmountMinor],
+      );
+      if (args.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION") {
+        await database.query(
+          `INSERT INTO employer_payroll_collection_instructions
+            (application_id, workflow_version, employer_tenant_id,
+             repayment_installment_no, selected_repayment_method,
+             collection_scope, projection_status, scheduled_due_date,
+             scheduled_amount_minor, currency, lender_event_ref,
+             payroll_schedule_snapshot)
+           VALUES (
+             $1, 'SALARY_LOAN_V2', $2, 1, 'EMPLOYER_PAYROLL_DEDUCTION',
+             'PRINCIPAL_AND_INTEREST', 'PAYROLL_COLLECTION_PENDING',
+             '2026-09-15', $3, 'USD', 'UAT-PAYROLL-SCHEDULED-001',
+             '{"fixture":"DAY3"}'::jsonb
+           )`,
+          [
+            application.rows[0]!.id,
+            args.employerTenantId,
+            args.scheduledAmountMinor,
+          ],
+        );
+      }
+    }
+
+    const employerTenant = await database.query<{ id: string }>(
+      `INSERT INTO employer_tenants (external_ref, display_name)
+       VALUES ('UAT_DAY3_PAYROLL', 'Day 3 payroll UAT') RETURNING id`,
+    );
+    const employerFinanceCookie = await adminCookieForRole(
+      database,
+      "EMPLOYER_FINANCE",
+      "EMPLOYER",
+    );
+    await grantEmployerTenantMember(
+      database,
+      employerTenant.rows[0]!.id,
+      employerFinanceCookie,
+    );
+    await seedRepaymentApplication({
+      applicationNo: "APP-20260822-UAT-PAYROLL",
+      telegramUserRef: "telegram-uat-payroll",
+      selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+      employerTenantId: employerTenant.rows[0]!.id,
+      scheduledAmountMinor: "12750",
+    });
+    await seedRepaymentApplication({
+      applicationNo: "APP-20260822-UAT-DD",
+      telegramUserRef: "telegram-uat-direct-debit",
+      selectedRepaymentMethod: "USER_DIRECT_DEBIT",
+      scheduledAmountMinor: "12750",
+    });
+    await seedRepaymentApplication({
+      applicationNo: "APP-20260822-UAT-MANUAL",
+      telegramUserRef: "telegram-uat-manual",
+      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      scheduledAmountMinor: "12750",
+    });
+
+    const payrollPartial = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications/APP-20260822-UAT-PAYROLL/employer-finance-verification",
+      headers: {
+        cookie: employerFinanceCookie,
+        "idempotency-key": "uat-payroll-partial-0001",
+      },
+      payload: {
+        collectionResult: "PARTIALLY_COLLECTED",
+        reasonCode: "PAYROLL_PARTIAL_DEDUCTION",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "10000",
+        evidenceReference: "PAYROLL-PARTIAL-UAT-001",
+      },
+    });
+    expect(payrollPartial.statusCode).toBe(200);
+    expect(payrollPartial.json()).toEqual({
+      applicationNo: "APP-20260822-UAT-PAYROLL",
+      status: "COLLECTION_EXCEPTION",
+      collectionSequence: 1,
+      actualCollectedAmountMinor: "10000",
+      lenderCollectionWorkItemId: expect.any(String),
+      lenderCollectionExceptionId: expect.any(String),
+    });
+
+    const directDebitExpired = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications/APP-20260822-UAT-DD/lender-collection-work-items",
+      headers: {
+        cookie: await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      },
+      payload: {
+        sourceType: "USER_DIRECT_DEBIT_REPORT",
+        collectionResult: "AUTHORIZATION_EXPIRED",
+        reasonCode: "DIRECT_DEBIT_AUTHORIZATION_EXPIRED",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "0",
+        evidenceReference: "DD-AUTH-EXPIRED-UAT-001",
+        sourceReference: "DD-AUTH-EXPIRED-UAT-001",
+      },
+    });
+    expect(directDebitExpired.statusCode).toBe(201);
+    expect(directDebitExpired.json()).toEqual({
+      applicationNo: "APP-20260822-UAT-DD",
+      collectionSequence: 1,
+      selectedRepaymentMethod: "USER_DIRECT_DEBIT",
+      workItemId: expect.any(String),
+      workItemStatus: "EXCEPTION",
+      exceptionId: expect.any(String),
+    });
+
+    const manualCollected = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications/APP-20260822-UAT-MANUAL/lender-collection-work-items",
+      headers: {
+        cookie: await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      },
+      payload: {
+        sourceType: "USER_MANUAL_PAYMENT_PROOF",
+        collectionResult: "COLLECTED",
+        reasonCode: "MANUAL_PAYMENT_RECONCILED",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "12750",
+        evidenceReference: "MANUAL-UAT-001",
+        sourceReference: "MANUAL-UAT-001",
+      },
+    });
+    expect(manualCollected.statusCode).toBe(201);
+    expect(manualCollected.json()).toEqual({
+      applicationNo: "APP-20260822-UAT-MANUAL",
+      collectionSequence: 1,
+      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      workItemId: expect.any(String),
+      workItemStatus: "OPEN",
+      exceptionId: null,
+    });
+
+    const duplicateManualCollected = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications/APP-20260822-UAT-MANUAL/lender-collection-work-items",
+      headers: {
+        cookie: await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      },
+      payload: {
+        sourceType: "USER_MANUAL_PAYMENT_PROOF",
+        collectionResult: "COLLECTED",
+        reasonCode: "MANUAL_PAYMENT_RECONCILED",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "12750",
+        evidenceReference: "MANUAL-UAT-001",
+        sourceReference: "MANUAL-UAT-001",
+      },
+    });
+    expect(duplicateManualCollected.statusCode).toBe(409);
+    expect(duplicateManualCollected.json()).toEqual({
+      code: "DUPLICATE_COLLECTION_SOURCE_REFERENCE",
+    });
+
+    const methodMismatch = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/applications/APP-20260822-UAT-MANUAL/lender-collection-work-items",
+      headers: {
+        cookie: await adminCookieForRole(database, "BROKER_OFFICER", "BROKER"),
+      },
+      payload: {
+        sourceType: "USER_DIRECT_DEBIT_REPORT",
+        collectionResult: "DIRECT_DEBIT_FAILED",
+        reasonCode: "WRONG_METHOD",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "0",
+        evidenceReference: "WRONG-METHOD-UAT-001",
+        sourceReference: "WRONG-METHOD-UAT-001",
+      },
+    });
+    expect(methodMismatch.statusCode).toBe(409);
+    expect(methodMismatch.json()).toEqual({
+      code: "COLLECTION_SOURCE_REPAYMENT_METHOD_MISMATCH",
+    });
+
+    const repaymentQueue = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/lender-repayment-work-items/open",
+      headers: {
+        cookie: await adminCookieForRole(
+          database,
+          "LENDER_REPAYMENT_MAKER",
+          "LENDER",
+        ),
+      },
+    });
+    expect(repaymentQueue.statusCode).toBe(200);
+    expect((repaymentQueue.json() as { items: unknown[] }).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          applicationNo: "APP-20260822-UAT-PAYROLL",
+          selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+          workItemStatus: "EXCEPTION",
+          collectionResult: "PARTIALLY_COLLECTED",
+        }),
+        expect.objectContaining({
+          applicationNo: "APP-20260822-UAT-DD",
+          selectedRepaymentMethod: "USER_DIRECT_DEBIT",
+          workItemStatus: "EXCEPTION",
+          collectionResult: "AUTHORIZATION_EXPIRED",
+        }),
+        expect.objectContaining({
+          applicationNo: "APP-20260822-UAT-MANUAL",
+          selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+          workItemStatus: "OPEN",
+          collectionResult: "COLLECTED",
+        }),
+      ]),
+    );
+
+    const openExceptions = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/lender-collection-exceptions/open",
+      headers: {
+        cookie: await adminCookieForRole(
+          database,
+          "LENDER_REPAYMENT_CHECKER",
+          "LENDER",
+        ),
+      },
+    });
+    expect(openExceptions.statusCode).toBe(200);
+    const exceptions = openExceptions.json() as {
+      items: Array<{ exceptionId: string; applicationNo: string }>;
+    };
+    expect(exceptions.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          applicationNo: "APP-20260822-UAT-PAYROLL",
+        }),
+        expect.objectContaining({
+          applicationNo: "APP-20260822-UAT-DD",
+        }),
+      ]),
+    );
+
+    const resolved = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/lender-collection-exceptions/${exceptions.items[0]!.exceptionId}/resolve`,
+      headers: {
+        cookie: await adminCookieForRole(
+          database,
+          "LENDER_REPAYMENT_CHECKER",
+          "LENDER",
+        ),
+      },
+      payload: {
+        reasonCode: "ALTERNATE_COLLECTION_RECORDED",
+        evidenceReference: "EXCEPTION-RESOLVED-UAT-001",
+      },
+    });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json()).toEqual({
+      exceptionId: exceptions.items[0]!.exceptionId,
+      status: "RESOLVED",
     });
   });
 

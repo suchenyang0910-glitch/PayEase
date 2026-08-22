@@ -4,17 +4,23 @@
 
 ## 快速入口
 
-| 目的                                 | 首先阅读                                                                 |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| 了解 KhmerX 平台定位、品牌与责任边界 | [KhmerX 平台理念](02-品牌与官网/KHMERX_PLATFORM_PHILOSOPHY.md)           |
-| 获取可分享的 KhmerX 理念 PDF         | [KhmerX 平台理念 PDF](02-品牌与官网/KHMERX_PLATFORM_PHILOSOPHY.pdf)      |
-| 了解 PayEase V1 产品规则             | [V1 薪资贷产品规则](01-产品与业务/V1_SALARY_LOAN_PRODUCT_RULES.md)       |
-| 了解用户端 UI 与交互                 | [PayEase UI/UX 总规](02-品牌与官网/TRAE_KHMERX_PAYEASE_V1_UI_UX_SPEC.md) |
-| 开发 KhmerX 官网                     | [官网开发交接](02-品牌与官网/TRAE_KHMERX_OFFICIAL_WEBSITE_BUILD.md)      |
-| 开发完整 V1 业务                     | [Trae V1 开发授权](05-开发与交接/TRAE_V1_FULL_BUILD_AUTHORIZATION.md)    |
-| 实现三端审批流                       | [管理端与审批流规格](05-开发与交接/TRAE_ADMIN_APPROVAL_WORKFLOW_SPEC.md) |
-| 查看安全 / 合规上线边界              | [安全基线与验收清单](04-安全与合规/安全基线与上线验收清单.md)            |
-| 准备试点上线                         | [V1 上线运营实施路线图](07-运营与上线/V1上线运营实施路线图.md)           |
+> **V1 规范优先级**：凡涉及两域边界、薪资贷业务、回收、分润、技术实现或跨域接口，必须先读
+> [V1 两域薪资贷规范基线](00-导航与治理/V1_两域薪资贷_规范基线.md)。
+> 该基线优先于所有旧 PRD、旧流程图、旧任务书与旧接口草案；旧文档仅保留历史与审计参考，不能单独作为编码依据。
+
+| 目的                                 | 首先阅读                                                                          |
+| ------------------------------------ | --------------------------------------------------------------------------------- |
+| 了解 KhmerX 平台定位、品牌与责任边界 | [KhmerX 平台理念](02-品牌与官网/KHMERX_PLATFORM_PHILOSOPHY.md)                    |
+| 获取可分享的 KhmerX 理念 PDF         | [KhmerX 平台理念 PDF](02-品牌与官网/KHMERX_PLATFORM_PHILOSOPHY.pdf)               |
+| 开发两域薪资贷 V1                    | [V1 两域薪资贷实施任务与验收](05-开发与交接/TRAE_V1_两域薪资贷_实施任务与验收.md) |
+| 三天交付新规范 P0 垂直切片           | [Trae 三天编码冲刺任务](05-开发与交接/TRAE_V1_两域薪资贷_三天编码冲刺任务.md)     |
+| 了解 V1 完整产品与流程               | [V1 两域薪资贷需求与业务流程](01-产品与业务/V1_两域薪资贷_需求与业务流程.md)      |
+| 了解用户端 UI 与交互                 | [PayEase UI/UX 总规](02-品牌与官网/TRAE_KHMERX_PAYEASE_V1_UI_UX_SPEC.md)          |
+| 开发 KhmerX 官网                     | [官网开发交接](02-品牌与官网/TRAE_KHMERX_OFFICIAL_WEBSITE_BUILD.md)               |
+| 开发完整 V1 业务                     | [Trae V1 开发授权](05-开发与交接/TRAE_V1_FULL_BUILD_AUTHORIZATION.md)             |
+| 实现三端审批流                       | [管理端与审批流规格](05-开发与交接/TRAE_ADMIN_APPROVAL_WORKFLOW_SPEC.md)          |
+| 查看安全 / 合规上线边界              | [安全基线与验收清单](04-安全与合规/安全基线与上线验收清单.md)                     |
+| 准备试点上线                         | [V1 上线运营实施路线图](07-运营与上线/V1上线运营实施路线图.md)                    |
 
 ## 分类目录
 

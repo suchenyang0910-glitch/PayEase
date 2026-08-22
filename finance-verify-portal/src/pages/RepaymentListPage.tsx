@@ -1,12 +1,8 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { formatHuman } from "@payease/shared-money";
-import type { Currency } from "@payease/shared-money";
 import { MOCK_REPAYMENT_ROWS } from "../mocks/fin-mocks.static";
-import type {
-  RepaymentRowMock,
-  RepaymentStatusMock,
-} from "../mocks/fin-mocks.static";
+import type { RepaymentRowMock } from "../mocks/fin-mocks.static";
 
 export function RepaymentListPage(): JSX.Element {
   const rows = useMemo(
@@ -15,15 +11,7 @@ export function RepaymentListPage(): JSX.Element {
         ...r,
         _principal: formatHuman({
           amountMinor: r.principalDueAmountMinor,
-          currency: r.currency as Currency,
-        }),
-        _interest: formatHuman({
-          amountMinor: r.interestDueAmountMinor,
-          currency: r.currency as Currency,
-        }),
-        _total: formatHuman({
-          amountMinor: r.totalDueAmountMinor,
-          currency: r.currency as Currency,
+          currency: r.currency,
         }),
       })),
     [],
@@ -42,10 +30,9 @@ export function RepaymentListPage(): JSX.Element {
             Finance Repayment Schedule — list (S0.5 mock only, no real bank API)
           </h1>
           <p style={{ color: "#555", maxWidth: 920 }}>
-            Frontend placeholder. Real bank reconciliation / GL posting deferred
-            until S1.0 MVP (after S0.2 isolation accounts sign off). All amount
-            fields are string minor units rendered via shared-money formatHuman
-            so CI-10 (never JS number for KHR/USD) holds.
+            Finance sees only principal collection execution data. Borrower PII,
+            lender identifiers, interest and full bill breakdown stay outside
+            the employer finance boundary.
           </p>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
@@ -64,11 +51,7 @@ export function RepaymentListPage(): JSX.Element {
           <tr style={{ borderBottom: "2px solid #333", textAlign: "left" }}>
             <th style={{ padding: 10 }}>Due Date</th>
             <th style={{ padding: 10 }}>App ID</th>
-            <th style={{ padding: 10 }}>Borrower</th>
-            <th style={{ padding: 10 }}>Lender</th>
             <th style={{ padding: 10, textAlign: "right" }}>Principal</th>
-            <th style={{ padding: 10, textAlign: "right" }}>Interest</th>
-            <th style={{ padding: 10, textAlign: "right" }}>Total Due</th>
             <th style={{ padding: 10 }}>Status</th>
           </tr>
         </thead>
@@ -79,10 +62,6 @@ export function RepaymentListPage(): JSX.Element {
               <td style={{ padding: 10, fontFamily: "monospace" }}>
                 {r.applicationId}
               </td>
-              <td style={{ padding: 10 }}>{r.borrowerName}</td>
-              <td style={{ padding: 10, fontFamily: "monospace" }}>
-                {r.lenderPartnerId}
-              </td>
               <td
                 data-testid={`principal-${r.id}`}
                 style={{
@@ -92,25 +71,6 @@ export function RepaymentListPage(): JSX.Element {
                 }}
               >
                 {r._principal}
-              </td>
-              <td
-                style={{
-                  padding: 10,
-                  textAlign: "right",
-                  fontFamily: "monospace",
-                }}
-              >
-                {r._interest}
-              </td>
-              <td
-                data-testid={`total-${r.id}`}
-                style={{
-                  padding: 10,
-                  textAlign: "right",
-                  fontFamily: "monospace",
-                }}
-              >
-                {r._total}
               </td>
               <td data-testid={`repay-status-${r.id}`} style={{ padding: 10 }}>
                 <span

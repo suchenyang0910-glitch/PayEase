@@ -23,9 +23,12 @@ import {
   contractConfirmationSchema,
   createApplicationSchema,
   disbursementDualControlSchema,
+  employerCollectionVerificationSchema,
   employerVerificationSchema,
   employerTenantCreateSchema,
   lenderFinalReviewSchema,
+  lenderCollectionExceptionResolutionSchema,
+  lenderCollectionWorkItemCreateSchema,
   lenderInitialReviewSchema,
   lifecycleActorSchema,
   loginSchema,
@@ -39,11 +42,24 @@ import {
 } from "./validation.js";
 import { hashPassword, verifyLoginPassword } from "./passwords.js";
 import {
+  buildSalaryLoanV2RepaymentSchedule,
   buildRepaymentSchedule,
   formatApplicantLoanSummary,
   summarizeRepaymentSchedule,
   type RepaymentScheduleItem,
 } from "./repayment.js";
+import {
+  createOutgoingDomainEvent,
+  configuredDomainEventSharedSecrets,
+  domainEventEnvelopeSchema,
+  domainEventHeadersSchema,
+  DOMAIN_EVENT_TYPES,
+  isDomainEventTimestampWithinWindow,
+  sha256Hex,
+  signDomainEventRequest,
+  stableJson,
+  verifyDomainEventSignature,
+} from "./domain-events.js";
 import {
   buildApplicantNotification,
   buildApplicantNotificationId,
@@ -346,6 +362,41 @@ async function authenticatedApplicantUser(
 type ApplicantApplicationDraft = z.infer<
   typeof applicantApplicationDraftSchema
 >;
+type RepaymentMethod =
+  "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
+const SALARY_LOAN_V2_COLLECTION_SCOPE = "PRINCIPAL_AND_INTEREST" as const;
+type SalaryLoanV2CollectionScope = typeof SALARY_LOAN_V2_COLLECTION_SCOPE;
+type LenderCollectionSourceType =
+  | "EMPLOYER_PAYROLL_REPORT"
+  | "USER_DIRECT_DEBIT_REPORT"
+  | "USER_MANUAL_PAYMENT_PROOF"
+  | "REFUND_REVERSAL";
+type LenderCollectionResult =
+  | "COLLECTED"
+  | "PARTIALLY_COLLECTED"
+  | "NOT_COLLECTED"
+  | "DIRECT_DEBIT_FAILED"
+  | "AUTHORIZATION_EXPIRED"
+  | "REFUND_REVERSED";
+type LenderCollectionWorkItemStatus =
+  "OPEN" | "PROCESSING" | "CONFIRMED" | "EXCEPTION";
+type LenderCollectionExceptionType =
+  | "PARTIALLY_COLLECTED"
+  | "NOT_COLLECTED"
+  | "DIRECT_DEBIT_FAILED"
+  | "AUTHORIZATION_EXPIRED"
+  | "REFUND_REVERSED";
+type EmployerPayrollInstructionStatus =
+  | "SCHEDULED"
+  | "PAYROLL_COLLECTION_PENDING"
+  | "COLLECTION_RECONCILIATION_PENDING"
+  | "RECONCILED"
+  | "COLLECTION_EXCEPTION";
+type EmployerRepaymentConfig = Readonly<{
+  availableRepaymentMethods: readonly RepaymentMethod[];
+  defaultRepaymentMethod: RepaymentMethod;
+  employerPayrollRuleVersion: string | null;
+}>;
 
 function serializeApplicantApplicationDraft(
   draft: ApplicantApplicationDraft,
@@ -359,6 +410,53 @@ function parseApplicantApplicationDraft(
   return applicantApplicationDraftSchema.parse(
     JSON.parse(decryptPersonalValue(ciphertext)) as unknown,
   );
+}
+
+async function loadEmployerRepaymentConfig(
+  client: PoolClient,
+  employerTenantId: string | undefined,
+): Promise<EmployerRepaymentConfig> {
+  if (!employerTenantId) {
+    return {
+      availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
+      defaultRepaymentMethod: "USER_MANUAL_PAYMENT",
+      employerPayrollRuleVersion: null,
+    };
+  }
+  const rule = await client.query<{
+    rule_code: string;
+    allowed_repayment_methods: RepaymentMethod[];
+    default_repayment_method: RepaymentMethod;
+  }>(
+    `SELECT rule_code, allowed_repayment_methods, default_repayment_method
+               FROM employer_payroll_rules
+              WHERE employer_tenant_id = $1
+                AND workflow_version = 'SALARY_LOAN_V2'
+                AND retired_at IS NULL
+              ORDER BY published_at DESC
+              LIMIT 1`,
+    [employerTenantId],
+  );
+  if (!rule.rowCount) {
+    return {
+      availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
+      defaultRepaymentMethod: "USER_MANUAL_PAYMENT",
+      employerPayrollRuleVersion: null,
+    };
+  }
+  const availableRepaymentMethods =
+    rule.rows[0]!.allowed_repayment_methods.length > 0
+      ? rule.rows[0]!.allowed_repayment_methods
+      : (["USER_MANUAL_PAYMENT"] as const);
+  return {
+    availableRepaymentMethods,
+    defaultRepaymentMethod: rule.rows[0]!.default_repayment_method,
+    employerPayrollRuleVersion: rule.rows[0]!.rule_code,
+  };
+}
+
+function authorizationReference(prefix: string): string {
+  return `${prefix}-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
 function maskedApplicationReference(
@@ -640,6 +738,21 @@ function requireLenderRole(
   return true;
 }
 
+function requireLenderRepaymentRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  const roles = request.adminIdentity?.roles ?? [];
+  if (
+    !roles.includes("LENDER_REPAYMENT_MAKER") &&
+    !roles.includes("LENDER_REPAYMENT_CHECKER")
+  ) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
 function requireServiceCaseReadRole(
   request: { adminIdentity?: { roles: string[] } },
   reply: any,
@@ -714,9 +827,11 @@ function eventHash(parts: readonly string[]): string {
 
 type ApplicationRow = Readonly<{
   id: string;
+  application_no: string;
   status: string;
   review_round: number;
   employer_tenant_id: string | null;
+  workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
 }>;
 
 type SingleApproval = Readonly<{
@@ -738,10 +853,15 @@ type EmploymentIdentityMatchCommand = Readonly<{
 
 type FinalReviewTerms = Readonly<{
   approvedAmountMinor?: string;
-  serviceFeeMinor?: string;
-  totalRepayableMinor?: string;
+  actualDisbursementAmountMinor?: string;
+  lenderInterestMinor?: string;
+  totalRepaymentAmountMinor?: string;
+  brokerageRemunerationReceivableMinor?: string;
   installmentCount?: number;
   firstDueDate?: string;
+  productRuleVersion?: string;
+  brokerageRemunerationRuleVersion?: string;
+  lenderInterestRuleVersion?: string;
 }>;
 
 class DualControlConflictError extends Error {}
@@ -784,6 +904,12 @@ function manualActionIdempotencyKey(
     .string()
     .regex(/^[A-Za-z0-9._:-]{16,128}$/)
     .safeParse(value).data;
+}
+
+function requestHeaderValue(
+  header: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(header) ? undefined : header?.trim();
 }
 
 async function manualActionReplay(
@@ -847,7 +973,10 @@ async function lockApplication(
   applicationNo: string,
 ): Promise<ApplicationRow | undefined> {
   const result = await client.query<ApplicationRow>(
-    "SELECT id, status, review_round, employer_tenant_id FROM applications WHERE application_no = $1 FOR UPDATE",
+    `SELECT id, application_no, status, review_round, employer_tenant_id, workflow_version
+       FROM applications
+      WHERE application_no = $1
+      FOR UPDATE`,
     [applicationNo],
   );
   return result.rows[0];
@@ -859,7 +988,9 @@ async function lockApplicantOwnedApplication(
   telegramUserRef: string,
 ): Promise<ApplicationRow | undefined> {
   const result = await client.query<ApplicationRow>(
-    `SELECT applications.id, applications.status, applications.review_round, applications.employer_tenant_id
+    `SELECT applications.id, applications.application_no, applications.status,
+            applications.review_round, applications.employer_tenant_id,
+            applications.workflow_version
        FROM applications
        JOIN users ON users.id = applications.user_id
       WHERE applications.application_no = $1
@@ -875,7 +1006,7 @@ async function lockApplicationById(
   applicationId: string,
 ): Promise<ApplicationRow | undefined> {
   const result = await client.query<ApplicationRow>(
-    `SELECT id, status, review_round, employer_tenant_id
+    `SELECT id, application_no, status, review_round, employer_tenant_id, workflow_version
        FROM applications
       WHERE id = $1
       FOR UPDATE`,
@@ -1099,6 +1230,121 @@ async function createRepaymentSchedule(
   client: PoolClient,
   applicationId: string,
 ): Promise<void> {
+  const existing = await client.query(
+    "SELECT 1 FROM repayment_installments WHERE application_id = $1 LIMIT 1",
+    [applicationId],
+  );
+  if (existing.rowCount) return;
+
+  const application = await client.query<{
+    workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
+  }>(
+    `SELECT workflow_version
+       FROM applications
+      WHERE id = $1`,
+    [applicationId],
+  );
+  const workflowVersion = application.rows[0]?.workflow_version;
+  if (!workflowVersion) throw new Error("application not found");
+
+  if (workflowVersion === "SALARY_LOAN_V2") {
+    const v2Context = await client.query<{
+      principal_amount_minor: string;
+      lender_interest_minor: string;
+      tenor_days: 15 | 30;
+      installment_count: 1 | 2;
+      first_due_date: string;
+      product_rule_version: string;
+      lender_interest_rule_version: string;
+      selected_repayment_method: RepaymentMethod;
+      employer_payroll_rule_version: string;
+      payroll_nodes: Array<
+        | { nodeRef: string; scheduleType: "FIXED_DAY"; dayOfMonth: number }
+        | { nodeRef: string; scheduleType: "LAST_DAY_OF_MONTH" }
+      >;
+      collection_payee_ref: string;
+      payroll_deduction_authorization_ref: string | null;
+      direct_debit_authorization_ref: string | null;
+    }>(
+      `SELECT quote.principal_amount_minor::text,
+              quote.lender_interest_minor::text,
+              application_row.tenor_days,
+              quote.installment_count,
+              quote.first_due_date::text,
+              quote.product_rule_version,
+              quote.lender_interest_rule_version,
+              preference.selected_repayment_method,
+              COALESCE(preference.employer_payroll_rule_version, rule.rule_code)
+                AS employer_payroll_rule_version,
+              rule.payroll_nodes,
+              preference.collection_payee_ref,
+              auth_snapshot.payroll_deduction_authorization_ref,
+              auth_snapshot.direct_debit_authorization_ref
+         FROM application_v2_quote_snapshots quote
+         JOIN applications application_row
+           ON application_row.id = quote.application_id
+         JOIN application_repayment_preferences preference
+           ON preference.application_id = quote.application_id
+         LEFT JOIN application_authorization_snapshots auth_snapshot
+           ON auth_snapshot.application_id = quote.application_id
+         LEFT JOIN LATERAL (
+           SELECT rule_code, payroll_nodes
+             FROM employer_payroll_rules
+            WHERE employer_tenant_id = (
+              SELECT employer_tenant_id FROM applications WHERE id = quote.application_id
+            )
+              AND workflow_version = 'SALARY_LOAN_V2'
+              AND retired_at IS NULL
+            ORDER BY published_at DESC
+            LIMIT 1
+         ) AS rule ON true
+        WHERE quote.application_id = $1`,
+      [applicationId],
+    );
+    const row = v2Context.rows[0];
+    if (!row) {
+      throw new Error(
+        "V2 quote snapshot and repayment preferences are required",
+      );
+    }
+    for (const installment of buildSalaryLoanV2RepaymentSchedule({
+      principalAmountMinor: row.principal_amount_minor,
+      lenderInterestMinor: row.lender_interest_minor,
+      contractualTermDays: row.tenor_days,
+      installmentCount: row.installment_count,
+      firstDueDate: row.first_due_date,
+      selectedRepaymentMethod: row.selected_repayment_method,
+      employerPayrollRuleVersion: row.employer_payroll_rule_version,
+      payrollNodes: row.payroll_nodes,
+      payrollDeductionAuthorizationRef:
+        row.selected_repayment_method === "EMPLOYER_PAYROLL_DEDUCTION"
+          ? row.payroll_deduction_authorization_ref
+          : row.selected_repayment_method === "USER_DIRECT_DEBIT"
+            ? row.direct_debit_authorization_ref
+            : null,
+      collectionPayeeRef: row.collection_payee_ref,
+      productRuleVersion: row.product_rule_version,
+      lenderInterestRuleVersion: row.lender_interest_rule_version,
+    })) {
+      await client.query(
+        `INSERT INTO repayment_installments
+          (application_id, installment_no, due_date, amount_due_minor,
+           principal_due_minor, lender_interest_due_minor, payroll_node_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          applicationId,
+          installment.installmentNo,
+          installment.dueDate,
+          installment.amountDueMinor,
+          installment.principalDueMinor,
+          installment.lenderInterestDueMinor,
+          installment.payrollNodeRef ?? null,
+        ],
+      );
+    }
+    return;
+  }
+
   const terms = await client.query<{
     total_repayable_minor: string;
     installment_count: number;
@@ -1110,19 +1356,16 @@ async function createRepaymentSchedule(
   );
   const term = terms.rows[0];
   if (!term) throw new Error("contractual loan terms are required");
-  const existing = await client.query(
-    "SELECT 1 FROM repayment_installments WHERE application_id = $1 LIMIT 1",
-    [applicationId],
-  );
-  if (existing.rowCount) return;
   for (const installment of buildRepaymentSchedule(
     term.total_repayable_minor,
     term.installment_count,
     term.first_due_date,
   )) {
     await client.query(
-      `INSERT INTO repayment_installments (application_id, installment_no, due_date, amount_due_minor)
-       VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO repayment_installments
+        (application_id, installment_no, due_date, amount_due_minor,
+         principal_due_minor, lender_interest_due_minor, payroll_node_ref)
+       VALUES ($1, $2, $3, $4, $4, 0, NULL)`,
       [
         applicationId,
         installment.installmentNo,
@@ -1133,13 +1376,528 @@ async function createRepaymentSchedule(
   }
 }
 
-async function loadLoanDetails(applicationId: string): Promise<{
+async function ensureEmployerPayrollCollectionInstructions(
+  client: PoolClient,
+  applicationId: string,
+  actorUserRef: string,
+): Promise<void> {
+  const existing = await client.query(
+    `SELECT 1 FROM employer_payroll_collection_instructions
+      WHERE application_id = $1
+      LIMIT 1`,
+    [applicationId],
+  );
+  if (existing.rowCount) return;
+
+  const context = await client.query<{
+    employer_tenant_id: string | null;
+    employer_payroll_rule_version: string | null;
+    selected_repayment_method: RepaymentMethod | null;
+    collection_mode: SalaryLoanV2CollectionScope | null;
+    payroll_deduction_authorized: boolean | null;
+    product_rule_version: string | null;
+    installment_count: number | null;
+    disbursed_at: string | null;
+  }>(
+    `SELECT application_row.employer_tenant_id,
+            preference.employer_payroll_rule_version,
+            preference.selected_repayment_method,
+            preference.collection_mode,
+            auth_snapshot.payroll_deduction_authorized,
+            quote.product_rule_version,
+            quote.installment_count,
+            status_event.occurred_at::text AS disbursed_at
+       FROM applications application_row
+       LEFT JOIN application_repayment_preferences preference
+         ON preference.application_id = application_row.id
+       LEFT JOIN application_authorization_snapshots auth_snapshot
+         ON auth_snapshot.application_id = application_row.id
+       LEFT JOIN application_v2_quote_snapshots quote
+         ON quote.application_id = application_row.id
+       LEFT JOIN LATERAL (
+         SELECT occurred_at
+           FROM application_status_events
+           WHERE application_id = application_row.id
+            AND to_status = 'DISBURSED'
+          ORDER BY occurred_at DESC
+          LIMIT 1
+       ) AS status_event ON true
+      WHERE application_row.id = $1`,
+    [applicationId],
+  );
+  const row = context.rows[0];
+  if (
+    !row?.employer_tenant_id ||
+    row.selected_repayment_method !== "EMPLOYER_PAYROLL_DEDUCTION" ||
+    row.payroll_deduction_authorized !== true
+  ) {
+    return;
+  }
+
+  const installments = await client.query<{
+    installment_no: number;
+    due_date: string;
+    amount_due_minor: string;
+  }>(
+    `SELECT installment_no, due_date::text, amount_due_minor::text
+       FROM repayment_installments
+      WHERE application_id = $1
+      ORDER BY installment_no ASC`,
+    [applicationId],
+  );
+  if (!installments.rowCount) return;
+
+  for (const installment of installments.rows) {
+    const lenderEventRef = `PAYROLL-SCHEDULED-${applicationId}-${installment.installment_no}`;
+    await client.query(
+      `INSERT INTO employer_payroll_collection_instructions
+        (application_id, workflow_version, employer_tenant_id,
+         repayment_installment_no, selected_repayment_method, collection_scope,
+         projection_status, scheduled_due_date, scheduled_amount_minor,
+         currency, lender_event_ref, payroll_schedule_snapshot)
+       VALUES (
+         $1, 'SALARY_LOAN_V2', $2, $3, 'EMPLOYER_PAYROLL_DEDUCTION', $4,
+         $5, $6, $7, 'USD', $8, $9::jsonb
+       )`,
+      [
+        applicationId,
+        row.employer_tenant_id,
+        installment.installment_no,
+        SALARY_LOAN_V2_COLLECTION_SCOPE,
+        installment.installment_no === 1
+          ? "PAYROLL_COLLECTION_PENDING"
+          : "SCHEDULED",
+        installment.due_date,
+        installment.amount_due_minor,
+        lenderEventRef,
+        JSON.stringify({
+          employerTenantId: row.employer_tenant_id,
+          employerPayrollRuleVersion: row.employer_payroll_rule_version,
+          collectionSequence: installment.installment_no,
+          scheduledDueDate: installment.due_date,
+          actualDisbursedAt: row.disbursed_at,
+          productRuleVersion: row.product_rule_version,
+          installmentCount: row.installment_count,
+          collectionScope:
+            row.collection_mode ?? SALARY_LOAN_V2_COLLECTION_SCOPE,
+        }),
+      ],
+    );
+    await client.query(
+      `INSERT INTO payroll_collection_events
+        (application_id, workflow_version, event_type, source_domain,
+         actor_user_ref, payroll_run_date, amount_minor, currency,
+         evidence_reference, reason_code, occurred_at)
+       VALUES (
+         $1, 'SALARY_LOAN_V2', 'PAYROLL_COLLECTION_SCHEDULED', 'LENDER',
+         $2, $3, $4, 'USD', $5, 'INSTALLMENT_SCHEDULED', now()
+       )`,
+      [
+        applicationId,
+        actorUserRef,
+        installment.due_date,
+        installment.amount_due_minor,
+        lenderEventRef,
+      ],
+    );
+  }
+}
+
+async function promoteNextEmployerPayrollCollectionInstruction(
+  client: PoolClient,
+  applicationId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE employer_payroll_collection_instructions
+        SET projection_status = 'PAYROLL_COLLECTION_PENDING',
+            updated_at = now()
+      WHERE id = (
+        SELECT id
+          FROM employer_payroll_collection_instructions
+         WHERE application_id = $1
+           AND projection_status = 'SCHEDULED'
+         ORDER BY repayment_installment_no ASC
+         LIMIT 1
+      )`,
+    [applicationId],
+  );
+}
+
+async function loadEmployerPayrollCollectionInstructionForUpdate(
+  client: PoolClient,
+  applicationId: string,
+  collectionSequence?: number,
+): Promise<
+  | undefined
+  | Readonly<{
+      id: string;
+      repayment_installment_no: number;
+      projection_status: EmployerPayrollInstructionStatus;
+      scheduled_amount_minor: string;
+      scheduled_due_date: string;
+      collection_scope: SalaryLoanV2CollectionScope;
+    }>
+> {
+  const result = await client.query<{
+    id: string;
+    repayment_installment_no: number;
+    projection_status: EmployerPayrollInstructionStatus;
+    scheduled_amount_minor: string;
+    scheduled_due_date: string;
+    collection_scope: SalaryLoanV2CollectionScope;
+  }>(
+    `SELECT id,
+            repayment_installment_no,
+            projection_status,
+            scheduled_amount_minor::text,
+            scheduled_due_date::text,
+            collection_scope
+       FROM employer_payroll_collection_instructions
+      WHERE application_id = $1
+        AND projection_status = 'PAYROLL_COLLECTION_PENDING'
+        AND ($2::int IS NULL OR repayment_installment_no = $2)
+      ORDER BY repayment_installment_no ASC
+      LIMIT 1
+      FOR UPDATE`,
+    [applicationId, collectionSequence ?? null],
+  );
+  return result.rows[0];
+}
+
+async function markEmployerPayrollInstructionReconciled(
+  client: PoolClient,
+  applicationId: string,
+  collectionSequence: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE employer_payroll_collection_instructions
+        SET projection_status = 'RECONCILED',
+            updated_at = now()
+      WHERE application_id = $1
+        AND repayment_installment_no = $2`,
+    [applicationId, collectionSequence],
+  );
+}
+
+function lenderCollectionWorkItemStatusForResult(
+  collectionResult: LenderCollectionResult,
+): LenderCollectionWorkItemStatus {
+  return collectionResult === "COLLECTED" ? "OPEN" : "EXCEPTION";
+}
+
+function lenderCollectionExceptionTypeForResult(
+  collectionResult: LenderCollectionResult,
+): LenderCollectionExceptionType | null {
+  switch (collectionResult) {
+    case "PARTIALLY_COLLECTED":
+      return "PARTIALLY_COLLECTED";
+    case "NOT_COLLECTED":
+      return "NOT_COLLECTED";
+    case "DIRECT_DEBIT_FAILED":
+      return "DIRECT_DEBIT_FAILED";
+    case "AUTHORIZATION_EXPIRED":
+      return "AUTHORIZATION_EXPIRED";
+    case "REFUND_REVERSED":
+      return "REFUND_REVERSED";
+    default:
+      return null;
+  }
+}
+
+async function loadRepaymentPreferenceForUpdate(
+  client: PoolClient,
+  applicationId: string,
+): Promise<
+  | undefined
+  | Readonly<{
+      workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
+      selected_repayment_method: RepaymentMethod;
+    }>
+> {
+  const result = await client.query<{
+    workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
+    selected_repayment_method: RepaymentMethod;
+  }>(
+    `SELECT workflow_version, selected_repayment_method
+       FROM application_repayment_preferences
+      WHERE application_id = $1
+      FOR UPDATE`,
+    [applicationId],
+  );
+  return result.rows[0];
+}
+
+async function loadRepaymentInstallmentForCollection(
+  client: PoolClient,
+  applicationId: string,
+  collectionSequence?: number,
+): Promise<
+  | undefined
+  | Readonly<{
+      installment_no: number;
+      status: string;
+      amount_due_minor: string;
+    }>
+> {
+  const result = await client.query<{
+    installment_no: number;
+    status: string;
+    amount_due_minor: string;
+  }>(
+    `SELECT installment_no, status, amount_due_minor::text
+       FROM repayment_installments
+      WHERE application_id = $1
+        AND ($2::int IS NULL OR installment_no = $2)
+      ORDER BY CASE WHEN status = 'PENDING' THEN 0 ELSE 1 END,
+               installment_no ASC
+      LIMIT 1
+      FOR UPDATE`,
+    [applicationId, collectionSequence ?? null],
+  );
+  return result.rows[0];
+}
+
+async function queueBrokerToLenderCollectionEvent(
+  client: PoolClient,
+  application: ApplicationRow,
+  args: Readonly<{
+    sourceType: LenderCollectionSourceType;
+    collectionResult: LenderCollectionResult;
+    collectionSequence: number;
+    selectedRepaymentMethod: RepaymentMethod;
+    actualCollectedAmountMinor: string;
+    evidenceReference: string;
+    sourceReference: string;
+    reasonCode: string;
+  }>,
+): Promise<void> {
+  const eventType =
+    args.collectionResult === "COLLECTED"
+      ? "COLLECTION_ACCEPTED"
+      : "COLLECTION_EXCEPTION";
+  const envelope = createOutgoingDomainEvent({
+    eventId: `evt_${randomUUID()}`,
+    eventType,
+    sourceDomain: "BROKER",
+    occurredAt: new Date().toISOString(),
+    idempotencyKey: `idem_${randomUUID()}`,
+    externalApplicationRef: application.application_no,
+    payload: {
+      applicationNo: application.application_no,
+      collectionSequence: args.collectionSequence,
+      selectedRepaymentMethod: args.selectedRepaymentMethod,
+      sourceType: args.sourceType,
+      collectionResult: args.collectionResult,
+      actualCollectedAmountMinor: args.actualCollectedAmountMinor,
+      evidenceReference: args.evidenceReference,
+      sourceReference: args.sourceReference,
+      reasonCode: args.reasonCode,
+    },
+  });
+  await client.query(
+    `INSERT INTO domain_event_outbox
+      (event_id, event_type, source_domain, target_domain, external_application_ref,
+       idempotency_key, occurred_at, payload, payload_sha256,
+       signature_algorithm, signature_key_id)
+     VALUES ($1, $2, 'BROKER', 'LENDER', $3, $4, $5, $6::jsonb, $7, 'HMAC-SHA256', 'broker-hmac-v1')`,
+    [
+      envelope.eventId,
+      envelope.eventType,
+      envelope.externalApplicationRef,
+      envelope.idempotencyKey,
+      envelope.occurredAt,
+      JSON.stringify(envelope.payload),
+      envelope.payloadSha256,
+    ],
+  );
+}
+
+async function createLenderCollectionWorkItem(
+  client: PoolClient,
+  application: ApplicationRow,
+  actorUserRef: string,
+  args: Readonly<{
+    sourceType: LenderCollectionSourceType;
+    collectionResult: LenderCollectionResult;
+    actualCollectedAmountMinor: string;
+    evidenceReference: string;
+    sourceReference: string;
+    reasonCode: string;
+    collectionSequence?: number;
+    metadata?: Record<string, unknown>;
+  }>,
+): Promise<
+  Readonly<{
+    workItemId: string;
+    collectionSequence: number;
+    workItemStatus: LenderCollectionWorkItemStatus;
+    exceptionId: string | null;
+    selectedRepaymentMethod: RepaymentMethod;
+  }>
+> {
+  const preference = await loadRepaymentPreferenceForUpdate(
+    client,
+    application.id,
+  );
+  if (
+    !preference ||
+    preference.workflow_version !== "SALARY_LOAN_V2" ||
+    application.workflow_version !== "SALARY_LOAN_V2"
+  ) {
+    throw new Error("V2 repayment preference is required for collection work");
+  }
+  if (
+    (args.sourceType === "EMPLOYER_PAYROLL_REPORT" &&
+      preference.selected_repayment_method !== "EMPLOYER_PAYROLL_DEDUCTION") ||
+    (args.sourceType === "USER_DIRECT_DEBIT_REPORT" &&
+      preference.selected_repayment_method !== "USER_DIRECT_DEBIT") ||
+    (args.sourceType === "USER_MANUAL_PAYMENT_PROOF" &&
+      preference.selected_repayment_method !== "USER_MANUAL_PAYMENT")
+  ) {
+    throw new Error("COLLECTION_SOURCE_REPAYMENT_METHOD_MISMATCH");
+  }
+  const installment = await loadRepaymentInstallmentForCollection(
+    client,
+    application.id,
+    args.collectionSequence,
+  );
+  if (!installment) {
+    throw new Error("COLLECTION_INSTALLMENT_NOT_FOUND");
+  }
+  const workItemStatus = lenderCollectionWorkItemStatusForResult(
+    args.collectionResult,
+  );
+  const exceptionType = lenderCollectionExceptionTypeForResult(
+    args.collectionResult,
+  );
+  const inserted = await client.query<{
+    id: string;
+    repayment_installment_no: number;
+    work_item_status: LenderCollectionWorkItemStatus;
+  }>(
+    `INSERT INTO lender_collection_work_items
+      (application_id, workflow_version, repayment_installment_no,
+       selected_repayment_method, source_type, source_reference, source_domain,
+       collection_result, reported_amount_minor, currency, work_item_status,
+       exception_code, evidence_reference, metadata)
+     VALUES (
+       $1, 'SALARY_LOAN_V2', $2, $3, $4, $5, 'BROKER',
+       $6, $7, 'USD', $8, $9, $10, $11::jsonb
+     )
+     RETURNING id, repayment_installment_no, work_item_status`,
+    [
+      application.id,
+      installment.installment_no,
+      preference.selected_repayment_method,
+      args.sourceType,
+      args.sourceReference,
+      args.collectionResult,
+      args.actualCollectedAmountMinor,
+      workItemStatus,
+      exceptionType,
+      args.evidenceReference,
+      JSON.stringify({
+        actorUserRef,
+        reasonCode: args.reasonCode,
+        installmentStatus: installment.status,
+        ...args.metadata,
+      }),
+    ],
+  );
+  let exceptionId: string | null = null;
+  if (exceptionType) {
+    const exception = await client.query<{ id: string }>(
+      `INSERT INTO lender_collection_exceptions
+        (work_item_id, application_id, workflow_version,
+         repayment_installment_no, selected_repayment_method, exception_type,
+         reason_code, evidence_reference, reported_amount_minor, currency)
+       VALUES (
+         $1, $2, 'SALARY_LOAN_V2', $3, $4, $5, $6, $7, $8, 'USD'
+       )
+       RETURNING id`,
+      [
+        inserted.rows[0]!.id,
+        application.id,
+        installment.installment_no,
+        preference.selected_repayment_method,
+        exceptionType,
+        args.reasonCode,
+        args.evidenceReference,
+        args.actualCollectedAmountMinor,
+      ],
+    );
+    exceptionId = exception.rows[0]!.id;
+  }
+  await queueBrokerToLenderCollectionEvent(client, application, {
+    sourceType: args.sourceType,
+    collectionResult: args.collectionResult,
+    collectionSequence: installment.installment_no,
+    selectedRepaymentMethod: preference.selected_repayment_method,
+    actualCollectedAmountMinor: args.actualCollectedAmountMinor,
+    evidenceReference: args.evidenceReference,
+    sourceReference: args.sourceReference,
+    reasonCode: args.reasonCode,
+  });
+  return {
+    workItemId: inserted.rows[0]!.id,
+    collectionSequence: inserted.rows[0]!.repayment_installment_no,
+    workItemStatus: inserted.rows[0]!.work_item_status,
+    exceptionId,
+    selectedRepaymentMethod: preference.selected_repayment_method,
+  };
+}
+
+async function loadActiveLenderCollectionWorkItemForInstallment(
+  client: PoolClient,
+  applicationId: string,
+  collectionSequence: number,
+): Promise<
+  | undefined
+  | Readonly<{
+      id: string;
+      work_item_status: LenderCollectionWorkItemStatus;
+    }>
+> {
+  const result = await client.query<{
+    id: string;
+    work_item_status: LenderCollectionWorkItemStatus;
+  }>(
+    `SELECT id, work_item_status
+       FROM lender_collection_work_items
+      WHERE application_id = $1
+        AND repayment_installment_no = $2
+        AND work_item_status IN ('OPEN', 'PROCESSING')
+      ORDER BY created_at DESC
+      LIMIT 1
+      FOR UPDATE`,
+    [applicationId, collectionSequence],
+  );
+  return result.rows[0];
+}
+
+async function loadLoanDetails(
+  applicationId: string,
+  workflowVersion?: "LEGACY_V1" | "SALARY_LOAN_V2",
+): Promise<{
   terms: null | {
     approvedAmountMinor: string;
     serviceFeeMinor: string;
     totalRepayableMinor: string;
     installmentCount: number;
     firstDueDate: string;
+  };
+  quote: null | {
+    principalAmountMinor: string;
+    actualDisbursementAmountMinor: string;
+    lenderInterestMinor: string;
+    totalRepaymentAmountMinor: string;
+    brokerageRemunerationReceivableMinor: string;
+    productRuleVersion: string;
+    brokerageRemunerationRuleVersion: string;
+    lenderInterestRuleVersion: string;
+    installmentCount: number;
+    firstDueDate: string;
+    repaymentGraceDays: number;
   };
   repayment: ReturnType<typeof summarizeRepaymentSchedule>;
 }> {
@@ -1159,30 +1917,80 @@ async function loadLoanDetails(applicationId: string): Promise<{
     installment_no: number;
     due_date: string;
     amount_due_minor: string;
+    principal_due_minor: string;
+    lender_interest_due_minor: string;
+    payroll_node_ref: string | null;
     amount_paid_minor: string;
     status: "PENDING" | "PAID";
   }>(
     `SELECT installment_no, due_date::text, amount_due_minor::text,
-            amount_paid_minor::text, status
+            principal_due_minor::text, lender_interest_due_minor::text,
+            payroll_node_ref, amount_paid_minor::text, status
        FROM repayment_installments WHERE application_id = $1 ORDER BY installment_no ASC`,
+    [applicationId],
+  );
+  const quoteSnapshots = await pool.query<{
+    principal_amount_minor: string;
+    actual_disbursement_amount_minor: string;
+    lender_interest_minor: string;
+    total_repayment_amount_minor: string;
+    brokerage_remuneration_receivable_minor: string;
+    product_rule_version: string;
+    brokerage_remuneration_rule_version: string;
+    lender_interest_rule_version: string;
+    installment_count: number;
+    first_due_date: string;
+    repayment_grace_days: number;
+  }>(
+    `SELECT principal_amount_minor::text, actual_disbursement_amount_minor::text,
+            lender_interest_minor::text, total_repayment_amount_minor::text,
+            brokerage_remuneration_receivable_minor::text, product_rule_version,
+            brokerage_remuneration_rule_version, lender_interest_rule_version,
+            installment_count, first_due_date::text, repayment_grace_days
+       FROM application_v2_quote_snapshots
+      WHERE application_id = $1`,
     [applicationId],
   );
   const schedule: RepaymentScheduleItem[] = installments.rows.map((item) => ({
     installmentNo: item.installment_no,
     dueDate: item.due_date,
     amountDueMinor: item.amount_due_minor,
+    principalDueMinor: item.principal_due_minor,
+    lenderInterestDueMinor: item.lender_interest_due_minor,
+    payrollNodeRef: item.payroll_node_ref,
     amountPaidMinor: item.amount_paid_minor,
     status: item.status,
   }));
   const term = terms.rows[0];
+  const quote = quoteSnapshots.rows[0];
   return {
-    terms: term
+    terms:
+      workflowVersion === "SALARY_LOAN_V2" && quote
+        ? null
+        : term
+          ? {
+              approvedAmountMinor: term.approved_amount_minor,
+              serviceFeeMinor: term.service_fee_minor,
+              totalRepayableMinor: term.total_repayable_minor,
+              installmentCount: term.installment_count,
+              firstDueDate: term.first_due_date,
+            }
+          : null,
+    quote: quote
       ? {
-          approvedAmountMinor: term.approved_amount_minor,
-          serviceFeeMinor: term.service_fee_minor,
-          totalRepayableMinor: term.total_repayable_minor,
-          installmentCount: term.installment_count,
-          firstDueDate: term.first_due_date,
+          principalAmountMinor: quote.principal_amount_minor,
+          actualDisbursementAmountMinor: quote.actual_disbursement_amount_minor,
+          lenderInterestMinor: quote.lender_interest_minor,
+          totalRepaymentAmountMinor: quote.total_repayment_amount_minor,
+          brokerageRemunerationReceivableMinor:
+            quote.brokerage_remuneration_receivable_minor,
+          productRuleVersion: quote.product_rule_version,
+          brokerageRemunerationRuleVersion:
+            quote.brokerage_remuneration_rule_version,
+          lenderInterestRuleVersion: quote.lender_interest_rule_version,
+          installmentCount: quote.installment_count,
+          firstDueDate: quote.first_due_date,
+          repaymentGraceDays: quote.repayment_grace_days,
         }
       : null,
     repayment: summarizeRepaymentSchedule(schedule),
@@ -1522,6 +2330,87 @@ async function lockReassessmentRequest(
   return result.rows[0];
 }
 
+async function recordDomainEventDeadLetter(
+  client: PoolClient,
+  args: {
+    eventId: string;
+    eventType: string;
+    sourceDomain: "BROKER" | "LENDER";
+    targetDomain: "BROKER" | "LENDER";
+    externalApplicationRef: string;
+    failureStage: "VALIDATION" | "AUTHENTICATION" | "ORDERING" | "PROCESSING";
+    failureCode: string;
+    payloadSha256: string;
+    payload: Record<string, unknown>;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO domain_event_dead_letters
+      (event_id, event_type, source_domain, target_domain,
+       external_application_ref, failure_stage, failure_code,
+       payload_sha256, payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+    [
+      args.eventId,
+      args.eventType,
+      args.sourceDomain,
+      args.targetDomain,
+      args.externalApplicationRef,
+      args.failureStage,
+      args.failureCode,
+      args.payloadSha256,
+      JSON.stringify(args.payload),
+    ],
+  );
+}
+
+async function lookupApplicationProjectionForDomainEvent(
+  client: PoolClient,
+  externalApplicationRef: string,
+): Promise<
+  | undefined
+  | Readonly<{
+      id: string;
+      status: string;
+      workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
+    }>
+> {
+  const result = await client.query<{
+    id: string;
+    status: string;
+    workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
+  }>(
+    `SELECT id, status, workflow_version
+       FROM applications
+      WHERE application_no = $1
+      LIMIT 1`,
+    [externalApplicationRef],
+  );
+  return result.rows[0];
+}
+
+function incomingDomainEventOrderingError(
+  eventType: string,
+  applicationStatus: string | undefined,
+): string | undefined {
+  if (eventType === "DISBURSEMENT_CONFIRMED") {
+    return applicationStatus === "DISBURSEMENT_PENDING"
+      ? undefined
+      : "EVENT_OUT_OF_ORDER__DISBURSEMENT";
+  }
+  if (
+    eventType === "COLLECTION_ACCEPTED" ||
+    eventType === "COLLECTION_EXCEPTION"
+  ) {
+    return ["DISBURSED", "REPAYMENT_ACTIVE", "COLLECTION_EXCEPTION"].includes(
+      applicationStatus ?? "",
+    )
+      ? undefined
+      : "EVENT_OUT_OF_ORDER__COLLECTION";
+  }
+  return undefined;
+}
+
 app.get("/health/live", async () => {
   return { status: "live", service: "broker-api" };
 });
@@ -1535,6 +2424,253 @@ async function readinessPayload() {
 // Docker, or external monitors; new deployments should use the explicit path.
 app.get("/health", readinessPayload);
 app.get("/health/ready", readinessPayload);
+
+app.get("/v1/local/domain-events/outbox", async (request, reply) => {
+  if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+  const rows = await pool.query<{
+    event_id: string;
+    event_type: string;
+    target_domain: string;
+    external_application_ref: string;
+    delivery_status: string;
+    delivery_attempt_count: number;
+    occurred_at: string;
+    created_at: string;
+  }>(
+    `SELECT event_id, event_type, target_domain, external_application_ref,
+            delivery_status, delivery_attempt_count, occurred_at::text,
+            created_at::text
+       FROM domain_event_outbox
+      ORDER BY created_at DESC
+      LIMIT 50`,
+  );
+  return { items: rows.rows };
+});
+
+app.post("/v1/local/domain-events/outbox", async (request, reply) => {
+  if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+  const domainEventOutboxCreateSchema = z.object({
+    eventId: z.string().min(8).max(80).optional(),
+    eventType: z.enum(DOMAIN_EVENT_TYPES),
+    externalApplicationRef: z.string().min(3).max(128),
+    payload: z.record(z.string(), z.unknown()),
+    idempotencyKey: z.string().min(8).max(128).optional(),
+  });
+  const input = domainEventOutboxCreateSchema.parse(request.body);
+  const envelope = createOutgoingDomainEvent({
+    eventId: input.eventId ?? `evt_${randomUUID()}`,
+    eventType: input.eventType,
+    sourceDomain: "BROKER",
+    occurredAt: new Date().toISOString(),
+    idempotencyKey: input.idempotencyKey ?? `idem_${randomUUID()}`,
+    externalApplicationRef: input.externalApplicationRef,
+    payload: input.payload,
+  });
+  const secret = configuredDomainEventSharedSecrets()["broker-hmac-v1"]!;
+  const timestampMillis = String(Date.now());
+  const nonce = `nonce_${randomUUID()}`;
+  const transportBodySha256 = sha256Hex(stableJson(envelope));
+  const signature = signDomainEventRequest({
+    method: "POST",
+    path: "/v1/local/domain-events/inbox/receive",
+    timestampMillis,
+    nonce,
+    keyId: "broker-hmac-v1",
+    bodySha256: transportBodySha256,
+    secret: secret.secret,
+  });
+  await pool.query(
+    `INSERT INTO domain_event_outbox
+      (event_id, event_type, source_domain, target_domain, external_application_ref,
+       idempotency_key, occurred_at, payload, payload_sha256,
+       signature_algorithm, signature_key_id)
+     VALUES ($1, $2, 'BROKER', 'LENDER', $3, $4, $5, $6::jsonb, $7, 'HMAC-SHA256', 'broker-hmac-v1')`,
+    [
+      envelope.eventId,
+      envelope.eventType,
+      envelope.externalApplicationRef,
+      envelope.idempotencyKey,
+      envelope.occurredAt,
+      JSON.stringify(envelope.payload),
+      envelope.payloadSha256,
+    ],
+  );
+  return reply.code(201).send({
+    event: envelope,
+    transport: {
+      method: "POST",
+      path: "/v1/local/domain-events/inbox/receive",
+      headers: {
+        "x-payease-algo": "HMAC-SHA256",
+        "x-payease-key-id": "broker-hmac-v1",
+        "x-payease-timestamp-millis": timestampMillis,
+        "x-payease-nonce": nonce,
+        "x-payease-signature": signature,
+      },
+    },
+  });
+});
+
+app.get("/v1/local/domain-events/inbox", async (request, reply) => {
+  if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+  const rows = await pool.query<{
+    event_id: string;
+    event_type: string;
+    source_domain: string;
+    external_application_ref: string;
+    processing_status: string;
+    processing_error_code: string | null;
+    received_at: string;
+  }>(
+    `SELECT event_id, event_type, source_domain, external_application_ref,
+            processing_status, processing_error_code, received_at::text
+       FROM domain_event_inbox
+      ORDER BY received_at DESC
+      LIMIT 50`,
+  );
+  return { items: rows.rows };
+});
+
+app.post("/v1/local/domain-events/inbox/receive", async (request, reply) => {
+  const envelope = domainEventEnvelopeSchema.parse(request.body);
+  const headers = domainEventHeadersSchema.parse({
+    algorithm: requestHeaderValue(request.headers["x-payease-algo"]),
+    keyId: requestHeaderValue(request.headers["x-payease-key-id"]),
+    nonce: requestHeaderValue(request.headers["x-payease-nonce"]),
+    timestampMillis: requestHeaderValue(
+      request.headers["x-payease-timestamp-millis"],
+    ),
+    signature: requestHeaderValue(request.headers["x-payease-signature"]),
+  });
+  if (envelope.sourceDomain !== "LENDER") {
+    return reply.code(403).send({ code: "DOMAIN_EVENT_SOURCE_FORBIDDEN" });
+  }
+  if (
+    !isDomainEventTimestampWithinWindow({
+      timestampMillis: headers.timestampMillis,
+    })
+  ) {
+    return reply.code(408).send({ code: "DOMAIN_EVENT_STALE_TIMESTAMP" });
+  }
+  const transportBodySha256 = sha256Hex(stableJson(envelope));
+  if (
+    !verifyDomainEventSignature({
+      method: "POST",
+      path: "/v1/local/domain-events/inbox/receive",
+      headers,
+      bodySha256: transportBodySha256,
+      sourceDomain: envelope.sourceDomain,
+    })
+  ) {
+    return reply.code(401).send({ code: "DOMAIN_EVENT_BAD_SIGNATURE" });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const duplicate = await client.query<{
+      payload_sha256: string;
+      processing_status: string;
+    }>(
+      `SELECT payload_sha256, processing_status
+         FROM domain_event_inbox
+        WHERE event_id = $1`,
+      [envelope.eventId],
+    );
+    if (duplicate.rowCount) {
+      if (duplicate.rows[0]!.payload_sha256 !== envelope.payloadSha256) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "DOMAIN_EVENT_ID_REUSED" });
+      }
+      await client.query("ROLLBACK");
+      return reply.code(202).send({
+        accepted: true,
+        duplicate: true,
+        processingStatus: duplicate.rows[0]!.processing_status,
+      });
+    }
+    const nonceGuard = await client.query(
+      `INSERT INTO domain_event_nonce_guards
+        (source_domain, nonce, event_id, expires_at)
+       VALUES ($1, $2, $3, now() + interval '5 minutes')
+       ON CONFLICT DO NOTHING`,
+      [envelope.sourceDomain, headers.nonce, envelope.eventId],
+    );
+    if (!nonceGuard.rowCount) {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({ code: "DOMAIN_EVENT_NONCE_REPLAY" });
+    }
+    const application = await lookupApplicationProjectionForDomainEvent(
+      client,
+      envelope.externalApplicationRef,
+    );
+    const orderingError = !application
+      ? "DOMAIN_EVENT_APPLICATION_NOT_FOUND"
+      : incomingDomainEventOrderingError(
+          envelope.eventType,
+          application.status,
+        );
+    const processingStatus = orderingError ? "DEAD_LETTER" : "RECEIVED";
+    await client.query(
+      `INSERT INTO domain_event_inbox
+        (event_id, event_type, event_version, source_domain, target_domain,
+         external_application_ref, idempotency_key, occurred_at, payload,
+         payload_sha256, signature_algorithm, signature_key_id,
+         transport_timestamp_millis, transport_nonce, processing_status,
+         processing_error_code, raw_headers)
+       VALUES (
+         $1, $2, $3, $4, 'BROKER', $5, $6, $7, $8::jsonb, $9, $10, $11,
+         $12, $13, $14, $15, $16::jsonb
+       )`,
+      [
+        envelope.eventId,
+        envelope.eventType,
+        envelope.eventVersion,
+        envelope.sourceDomain,
+        envelope.externalApplicationRef,
+        envelope.idempotencyKey,
+        envelope.occurredAt,
+        JSON.stringify(envelope.payload),
+        envelope.payloadSha256,
+        headers.algorithm,
+        headers.keyId,
+        Number(headers.timestampMillis),
+        headers.nonce,
+        processingStatus,
+        orderingError ?? null,
+        JSON.stringify({
+          algorithm: headers.algorithm,
+          keyId: headers.keyId,
+          nonce: headers.nonce,
+          timestampMillis: headers.timestampMillis,
+        }),
+      ],
+    );
+    if (orderingError) {
+      await recordDomainEventDeadLetter(client, {
+        eventId: envelope.eventId,
+        eventType: envelope.eventType,
+        sourceDomain: envelope.sourceDomain,
+        targetDomain: "BROKER",
+        externalApplicationRef: envelope.externalApplicationRef,
+        failureStage: !application ? "VALIDATION" : "ORDERING",
+        failureCode: orderingError,
+        payloadSha256: envelope.payloadSha256,
+        payload: envelope.payload,
+      });
+    }
+    await client.query("COMMIT");
+    return reply.code(202).send({
+      accepted: true,
+      processingStatus,
+      ...(orderingError ? { failureCode: orderingError } : {}),
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
 
 app.post("/v1/local/auth/bootstrap", async (request, reply) => {
   const input = bootstrapAdminSchema.parse(request.body);
@@ -2370,7 +3506,12 @@ app.put("/v1/local/admin/accounts/:loginName/roles", async (request, reply) => {
 const createStageHandler = (
   expectedStatus: string,
   stage: string,
-  approvedStatus: string,
+  approvedStatus:
+    | string
+    | ((
+        application: ApplicationRow,
+        input: ApprovalCommand & FinalReviewTerms,
+      ) => string),
   requiredRole: string,
   schema: z.ZodType<ApprovalCommand & FinalReviewTerms>,
   actionName: ManualActionName,
@@ -2428,6 +3569,10 @@ const createStageHandler = (
           currentStatus: application.status,
         });
       }
+      const approvedTargetStatus =
+        typeof approvedStatus === "function"
+          ? approvedStatus(application, input)
+          : approvedStatus;
       // A broker must not hand an application into a verification queue whose
       // factory has been deactivated.  The employer-side access check below
       // protects HR/finance actions; this complementary check prevents a
@@ -2435,7 +3580,7 @@ const createStageHandler = (
       if (
         requiredRole === "BROKER_OFFICER" &&
         input.decision === "APPROVED" &&
-        approvedStatus === "EMPLOYER_VERIFICATION" &&
+        approvedTargetStatus === "EMPLOYER_VERIFICATION" &&
         application.employer_tenant_id
       ) {
         const activeTenant = await client.query(
@@ -2498,7 +3643,7 @@ const createStageHandler = (
         application,
         stage,
         securedInput,
-        approvedStatus,
+        approvedTargetStatus,
       );
       if (afterRecord)
         await afterRecord(
@@ -2733,9 +3878,23 @@ app.get("/v1/local/public/employer-tenants", async () => {
   const result = await pool.query<{
     id: string;
     display_name: string;
+    allowed_repayment_methods: RepaymentMethod[] | null;
+    default_repayment_method: RepaymentMethod | null;
   }>(
-    `SELECT id, display_name
-       FROM employer_tenants
+    `SELECT tenant.id,
+                    tenant.display_name,
+                    rule.allowed_repayment_methods,
+                    rule.default_repayment_method
+               FROM employer_tenants AS tenant
+               LEFT JOIN LATERAL (
+                 SELECT allowed_repayment_methods, default_repayment_method
+                   FROM employer_payroll_rules
+                  WHERE employer_tenant_id = tenant.id
+                    AND workflow_version = 'SALARY_LOAN_V2'
+                    AND retired_at IS NULL
+                  ORDER BY published_at DESC
+                  LIMIT 1
+               ) AS rule ON true
       WHERE is_active = true
       ORDER BY display_name ASC`,
   );
@@ -2743,6 +3902,11 @@ app.get("/v1/local/public/employer-tenants", async () => {
     tenants: result.rows.map((tenant) => ({
       id: tenant.id,
       displayName: tenant.display_name,
+      availableRepaymentMethods: tenant.allowed_repayment_methods?.length
+        ? tenant.allowed_repayment_methods
+        : ["USER_MANUAL_PAYMENT"],
+      defaultRepaymentMethod:
+        tenant.default_repayment_method ?? "USER_MANUAL_PAYMENT",
     })),
   };
 });
@@ -3095,6 +4259,20 @@ app.post("/v1/local/applications", async (request, reply) => {
         return reply.code(422).send({ code: "EMPLOYER_TENANT_UNAVAILABLE" });
       }
     }
+    const employerRepaymentConfig = await loadEmployerRepaymentConfig(
+      client,
+      input.employerTenantId,
+    );
+    const availableRepaymentMethods =
+      employerRepaymentConfig.availableRepaymentMethods;
+    if (!availableRepaymentMethods.includes(input.selectedRepaymentMethod)) {
+      await client.query("ROLLBACK");
+      return reply.code(422).send({
+        code: "REPAYMENT_METHOD_UNAVAILABLE",
+        availableRepaymentMethods,
+        defaultRepaymentMethod: employerRepaymentConfig.defaultRepaymentMethod,
+      });
+    }
     // The opaque per-application cookie is useful only for the controlled
     // preview, which deliberately has no Telegram container. Production
     // access must remain bound to the short-lived, revocable Telegram session.
@@ -3249,8 +4427,8 @@ app.post("/v1/local/applications", async (request, reply) => {
       application_no: string;
       status: string;
     }>(
-      `INSERT INTO applications (application_no, user_id, requested_amount_minor, currency, tenor_days, status, applicant_access_token_hash, employer_tenant_id)
-       VALUES ($1, $2, $3, 'USD', $4, 'BROKER_REVIEW', $5, $6)
+      `INSERT INTO applications (application_no, user_id, requested_amount_minor, currency, tenor_days, status, applicant_access_token_hash, employer_tenant_id, workflow_version)
+       VALUES ($1, $2, $3, 'USD', $4, 'BROKER_REVIEW', $5, $6, 'SALARY_LOAN_V2')
        RETURNING id, application_no, status`,
       [
         applicationNo,
@@ -3262,6 +4440,49 @@ app.post("/v1/local/applications", async (request, reply) => {
       ],
     );
     const application = created.rows[0]!;
+    await client.query(
+      `INSERT INTO application_repayment_preferences
+         (application_id, workflow_version, selected_repayment_method, available_repayment_methods, employer_payroll_rule_version, collection_mode, collection_payee_ref)
+       VALUES ($1, 'SALARY_LOAN_V2', $2, $3::text[], $4, $5, $6)`,
+      [
+        application.id,
+        input.selectedRepaymentMethod,
+        availableRepaymentMethods,
+        employerRepaymentConfig.employerPayrollRuleVersion,
+        SALARY_LOAN_V2_COLLECTION_SCOPE,
+        input.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION"
+          ? "EMPLOYER_PAYROLL_RUN"
+          : input.selectedRepaymentMethod === "USER_DIRECT_DEBIT"
+            ? "LICENSED_LENDER_DIRECT_DEBIT"
+            : "LICENSED_LENDER_MANUAL_COLLECTION",
+      ],
+    );
+    await client.query(
+      `INSERT INTO application_authorization_snapshots
+         (application_id, workflow_version, employer_verification_authorized, service_agreement_authorized,
+          post_disbursement_brokerage_authorized, payroll_deduction_authorized, direct_debit_authorized,
+          employer_verification_authorization_ref, service_agreement_authorization_ref,
+          post_disbursement_brokerage_authorization_ref, payroll_deduction_authorization_ref,
+          direct_debit_authorization_ref)
+       VALUES ($1, 'SALARY_LOAN_V2', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        application.id,
+        input.authorizationSnapshot.employerVerificationAuthorized,
+        input.authorizationSnapshot.serviceAgreementAuthorized,
+        input.authorizationSnapshot.postDisbursementBrokerageAuthorized,
+        input.authorizationSnapshot.payrollDeductionAuthorized,
+        input.authorizationSnapshot.directDebitAuthorized,
+        authorizationReference("AUTH-EMPLOYER"),
+        authorizationReference("AUTH-SERVICE"),
+        authorizationReference("AUTH-BROKERAGE"),
+        input.authorizationSnapshot.payrollDeductionAuthorized
+          ? authorizationReference("AUTH-PAYROLL")
+          : null,
+        input.authorizationSnapshot.directDebitAuthorized
+          ? authorizationReference("AUTH-DIRECT-DEBIT")
+          : null,
+      ],
+    );
     await client.query(
       `INSERT INTO application_status_events (application_id, from_status, to_status, actor_user_ref, reason_code, occurred_at)
        VALUES ($1, 'DRAFT', 'SUBMITTED', $2, 'USER_SUBMITTED', now()),
@@ -3279,6 +4500,10 @@ app.post("/v1/local/applications", async (request, reply) => {
         currency: "USD",
         tenorDays: input.tenorDays,
         employerTenantSelected: Boolean(input.employerTenantId),
+        workflowVersion: "SALARY_LOAN_V2",
+        selectedRepaymentMethod: input.selectedRepaymentMethod,
+        availableRepaymentMethods,
+        collectionScope: SALARY_LOAN_V2_COLLECTION_SCOPE,
         identityDocumentProvided: Boolean(input.identityDocument),
         // This is deliberately recorded separately from profile encryption:
         // reviewers can prove that the applicant affirmatively authorized the
@@ -3290,6 +4515,7 @@ app.post("/v1/local/applications", async (request, reply) => {
         personalDataConsentLanguage: input.personalProfile
           ? input.preferredLanguage
           : undefined,
+        authorizationSnapshot: input.authorizationSnapshot,
       },
     );
     await client.query("COMMIT");
@@ -3336,6 +4562,7 @@ app.get(
       currency: string;
       tenor_days: number;
       status: string;
+      workflow_version: "LEGACY_V1" | "SALARY_LOAN_V2";
       approved_amount_minor: string | null;
       rejection_condition_resolved: boolean;
       supplement_requested: boolean;
@@ -3347,6 +4574,7 @@ app.get(
     }>(
       `SELECT applications.id, applications.application_no, applications.requested_amount_minor::text,
             applications.currency, applications.tenor_days, applications.status,
+            applications.workflow_version,
             approved_amount_minor::text, rejection_condition_resolved, supplement_requested,
             applications.created_at::text, applications.updated_at::text,
             tenant.display_name AS employer_tenant_display_name,
@@ -3382,9 +4610,38 @@ app.get(
       return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
     }
     const application = result.rows[0]!;
-    const loanDetails = await loadLoanDetails(application.id);
+    const loanDetails = await loadLoanDetails(
+      application.id,
+      application.workflow_version,
+    );
     const experience = await loadApplicantExperienceData(application.id);
     const timeline = await loadApplicantTimeline(application.id);
+    const workflowSnapshot = await pool.query<{
+      selected_repayment_method: string | null;
+      available_repayment_methods: string[] | null;
+      collection_scope: SalaryLoanV2CollectionScope | null;
+      employer_verification_authorized: boolean | null;
+      service_agreement_authorized: boolean | null;
+      post_disbursement_brokerage_authorized: boolean | null;
+      payroll_deduction_authorized: boolean | null;
+      direct_debit_authorized: boolean | null;
+    }>(
+      `SELECT preference.selected_repayment_method,
+              preference.available_repayment_methods,
+              preference.collection_mode AS collection_scope,
+              auth_snapshot.employer_verification_authorized,
+              auth_snapshot.service_agreement_authorized,
+              auth_snapshot.post_disbursement_brokerage_authorized,
+              auth_snapshot.payroll_deduction_authorized,
+              auth_snapshot.direct_debit_authorized
+         FROM applications application_row
+         LEFT JOIN application_repayment_preferences preference
+           ON preference.application_id = application_row.id
+         LEFT JOIN application_authorization_snapshots auth_snapshot
+           ON auth_snapshot.application_id = application_row.id
+        WHERE application_row.id = $1`,
+      [application.id],
+    );
     return formatApplicantLoanSummary(
       {
         applicationNo: application.application_no,
@@ -3414,6 +4671,26 @@ app.get(
       loanDetails.terms,
       loanDetails.repayment,
       {
+        quote: loanDetails.quote,
+        workflow: {
+          workflowVersion: application.workflow_version,
+          selectedRepaymentMethod:
+            workflowSnapshot.rows[0]?.selected_repayment_method ?? null,
+          availableRepaymentMethods:
+            workflowSnapshot.rows[0]?.available_repayment_methods ?? [],
+          collectionScope: workflowSnapshot.rows[0]?.collection_scope ?? null,
+          employerVerificationAuthorized:
+            workflowSnapshot.rows[0]?.employer_verification_authorized ?? false,
+          serviceAgreementAuthorized:
+            workflowSnapshot.rows[0]?.service_agreement_authorized ?? false,
+          postDisbursementBrokerageAuthorized:
+            workflowSnapshot.rows[0]?.post_disbursement_brokerage_authorized ??
+            false,
+          payrollDeductionAuthorized:
+            workflowSnapshot.rows[0]?.payroll_deduction_authorized ?? false,
+          directDebitAuthorized:
+            workflowSnapshot.rows[0]?.direct_debit_authorized ?? false,
+        },
         recordDetail: {
           createdAt: application.created_at,
           updatedAt: application.updated_at,
@@ -4167,14 +5444,21 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
     .object({ applicationNo: z.string().min(1) })
     .parse(request.params);
   const result = await pool.query(
-    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor, currency, tenor_days, status, approved_amount_minor::text AS approved_amount_minor, rejection_condition_resolved, supplement_requested, created_at
+    `SELECT id, application_no, requested_amount_minor::text AS requested_amount_minor,
+            currency, tenor_days, status,
+            approved_amount_minor::text AS approved_amount_minor,
+            rejection_condition_resolved, supplement_requested, created_at,
+            workflow_version
      FROM applications WHERE application_no = $1`,
     [params.applicationNo],
   );
   if (result.rowCount === 0)
     return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
   const application = result.rows[0]!;
-  const loanDetails = await loadLoanDetails(application.id);
+  const loanDetails = await loadLoanDetails(
+    application.id,
+    application.workflow_version,
+  );
   return formatApplicantLoanSummary(
     {
       applicationNo: application.application_no,
@@ -4192,6 +5476,10 @@ app.get("/v1/local/applications/:applicationNo", async (request, reply) => {
     },
     loanDetails.terms,
     loanDetails.repayment,
+    {
+      quote: loanDetails.quote,
+      workflow: { workflowVersion: application.workflow_version },
+    },
   );
 });
 
@@ -4372,7 +5660,10 @@ app.post(
   createStageHandler(
     "EMPLOYER_VERIFICATION",
     "EMPLOYER_VERIFICATION",
-    "EMPLOYER_FINANCE_VERIFICATION",
+    (application) =>
+      application.workflow_version === "SALARY_LOAN_V2"
+        ? "LENDER_INITIAL_REVIEW"
+        : "EMPLOYER_FINANCE_VERIFICATION",
     "EMPLOYER_HR",
     employerVerificationSchema,
     "EMPLOYER_VERIFICATION",
@@ -4381,14 +5672,231 @@ app.post(
 
 app.post(
   "/v1/local/applications/:applicationNo/employer-finance-verification",
-  createStageHandler(
-    "EMPLOYER_FINANCE_VERIFICATION",
-    "EMPLOYER_FINANCE_VERIFICATION",
-    "LENDER_INITIAL_REVIEW",
-    "EMPLOYER_FINANCE",
-    employerVerificationSchema,
-    "EMPLOYER_FINANCE_VERIFICATION",
-  ),
+  async (request, reply) => {
+    if (!requireRole(request, reply, "EMPLOYER_FINANCE")) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey)
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = employerCollectionVerificationSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      const replay = await manualActionReplay(
+        client,
+        application,
+        "EMPLOYER_FINANCE_VERIFICATION",
+        actorUserRef,
+        idempotencyKey,
+        input,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const access = await employerTenantAccess(
+        client,
+        application,
+        actorUserRef,
+      );
+      if (access === "APPLICATION_UNASSIGNED") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "EMPLOYER_TENANT_NOT_ASSIGNED" });
+      }
+      if (access === "DENIED") {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ code: "EMPLOYER_TENANT_ACCESS_DENIED" });
+      }
+      const instruction =
+        await loadEmployerPayrollCollectionInstructionForUpdate(
+          client,
+          application.id,
+          input.collectionSequence,
+        );
+      if (!instruction) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "NO_PAYROLL_COLLECTION_INSTRUCTION" });
+      }
+      await client.query(
+        `INSERT INTO approval_events
+          (application_id, stage, decision, actor_user_ref, actor_role,
+           reason_code, review_round, repayment_installment_no, occurred_at)
+         VALUES ($1, 'EMPLOYER_FINANCE_VERIFICATION', $2, $3, 'EMPLOYER_FINANCE', $4, $5, $6, now())`,
+        [
+          application.id,
+          input.collectionResult === "COLLECTED"
+            ? "APPROVED"
+            : input.collectionResult === "PARTIALLY_COLLECTED"
+              ? "RETURNED"
+              : "REJECTED",
+          actorUserRef,
+          input.reasonCode,
+          application.review_round,
+          instruction.repayment_installment_no,
+        ],
+      );
+
+      let projectionStatus: EmployerPayrollInstructionStatus =
+        instruction.projection_status;
+      let payrollEventType:
+        | "PAYROLL_COLLECTION_REPORTED"
+        | "PARTIALLY_COLLECTED_REPORTED"
+        | "NOT_COLLECTED_REPORTED";
+      if (input.collectionResult === "COLLECTED") {
+        projectionStatus = "COLLECTION_RECONCILIATION_PENDING";
+        payrollEventType = "PAYROLL_COLLECTION_REPORTED";
+      } else if (input.collectionResult === "PARTIALLY_COLLECTED") {
+        projectionStatus = "COLLECTION_EXCEPTION";
+        payrollEventType = "PARTIALLY_COLLECTED_REPORTED";
+      } else {
+        projectionStatus = "COLLECTION_EXCEPTION";
+        payrollEventType = "NOT_COLLECTED_REPORTED";
+      }
+      const actualCollectedAmountMinor = BigInt(
+        input.actualCollectedAmountMinor,
+      );
+      if (
+        input.collectionResult === "COLLECTED" &&
+        actualCollectedAmountMinor !==
+          BigInt(instruction.scheduled_amount_minor)
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({
+          code: "INVALID_COLLECTION_AMOUNT",
+          scheduledAmountMinor: instruction.scheduled_amount_minor,
+        });
+      }
+      if (
+        input.collectionResult === "PARTIALLY_COLLECTED" &&
+        actualCollectedAmountMinor >= BigInt(instruction.scheduled_amount_minor)
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({
+          code: "INVALID_PARTIAL_COLLECTION_AMOUNT",
+          scheduledAmountMinor: instruction.scheduled_amount_minor,
+        });
+      }
+      const employerEventRef = `EMPLOYER-COLLECTION-${application.id}-${instruction.repayment_installment_no}-${Date.now()}`;
+      await client.query(
+        `UPDATE employer_payroll_collection_instructions
+            SET projection_status = $1,
+                reported_event_ref = $2,
+                reported_by_user_ref = $3,
+                reported_reason_code = $4,
+                reported_collection_result = $5,
+                reported_actual_amount_minor = $6,
+                reported_evidence_reference = $7,
+                reported_at = now(),
+                updated_at = now()
+          WHERE id = $8`,
+        [
+          projectionStatus,
+          employerEventRef,
+          actorUserRef,
+          input.reasonCode,
+          input.collectionResult,
+          input.actualCollectedAmountMinor,
+          input.evidenceReference,
+          instruction.id,
+        ],
+      );
+      await client.query(
+        `INSERT INTO payroll_collection_events
+          (application_id, workflow_version, event_type, source_domain,
+           actor_user_ref, payroll_run_date, amount_minor, currency,
+           evidence_reference, reason_code, occurred_at)
+         VALUES (
+           $1, 'SALARY_LOAN_V2', $2, 'EMPLOYER',
+           $3, $4, $5, 'USD', $6, $7, now()
+         )`,
+        [
+          application.id,
+          payrollEventType,
+          actorUserRef,
+          instruction.scheduled_due_date,
+          input.actualCollectedAmountMinor,
+          input.evidenceReference,
+          input.reasonCode,
+        ],
+      );
+      const workItem = await createLenderCollectionWorkItem(
+        client,
+        application,
+        actorUserRef,
+        {
+          sourceType: "EMPLOYER_PAYROLL_REPORT",
+          collectionResult: input.collectionResult,
+          actualCollectedAmountMinor: input.actualCollectedAmountMinor,
+          evidenceReference: input.evidenceReference,
+          sourceReference: employerEventRef,
+          reasonCode: input.reasonCode,
+          collectionSequence: instruction.repayment_installment_no,
+          metadata: {
+            collectionScope: instruction.collection_scope,
+            scheduledAmountMinor: instruction.scheduled_amount_minor,
+            projectionStatus,
+          },
+        },
+      );
+
+      await addAuditEvent(
+        client,
+        application.id,
+        "EMPLOYER_PAYROLL_COLLECTION_REPORTED",
+        actorUserRef,
+        {
+          collectionResult: input.collectionResult,
+          reasonCode: input.reasonCode,
+          collectionSequence: instruction.repayment_installment_no,
+          collectionScope: instruction.collection_scope,
+          actualCollectedAmountMinor: input.actualCollectedAmountMinor,
+          evidenceReference: input.evidenceReference,
+          projectionStatus,
+          lenderCollectionWorkItemId: workItem.workItemId,
+          lenderCollectionExceptionId: workItem.exceptionId,
+        },
+      );
+      const response = {
+        applicationNo: params.applicationNo,
+        status: projectionStatus,
+        collectionSequence: instruction.repayment_installment_no,
+        actualCollectedAmountMinor: input.actualCollectedAmountMinor,
+        lenderCollectionWorkItemId: workItem.workItemId,
+        lenderCollectionExceptionId: workItem.exceptionId,
+      };
+      await recordManualActionResult(
+        client,
+        application,
+        "EMPLOYER_FINANCE_VERIFICATION",
+        actorUserRef,
+        replay,
+        response,
+      );
+      await client.query("COMMIT");
+      return response;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
 );
 
 app.get("/v1/local/employer/verifications/open", async (request, reply) => {
@@ -4398,55 +5906,371 @@ app.get("/v1/local/employer/verifications/open", async (request, reply) => {
   if (!isHr && !isFinance) {
     return reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
   }
-  const statuses = [
-    ...(isHr ? ["EMPLOYER_VERIFICATION"] : []),
-    ...(isFinance ? ["EMPLOYER_FINANCE_VERIFICATION"] : []),
-  ];
-  const result = await pool.query<{
-    application_no: string;
-    requested_amount_minor: string;
-    currency: string;
-    tenor_days: number;
-    status: string;
-    created_at: Date;
-    identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
-    employment_identity_match_status: "PENDING" | "MATCHED" | "NOT_MATCHED";
-    employer_tenant_id: string;
-  }>(
-    `SELECT a.application_no, a.requested_amount_minor::text, a.currency,
-            a.tenor_days, a.status, a.created_at, u.identity_document_type,
-            a.employment_identity_match_status,
-            a.employer_tenant_id
-       FROM applications a
-       JOIN users u ON u.id = a.user_id
-       JOIN employer_tenants tenant ON tenant.id = a.employer_tenant_id AND tenant.is_active = true
-       JOIN employer_tenant_members m ON m.employer_tenant_id = a.employer_tenant_id
-       JOIN admin_accounts account ON account.id = m.account_id
-      WHERE account.login_name = $1 AND account.is_active = true
-        AND a.status = ANY($2::text[])
-      ORDER BY a.created_at ASC`,
-    [request.adminIdentity!.loginName, statuses],
-  );
+  const items: Array<Record<string, unknown>> = [];
+  if (isHr) {
+    const hrQueue = await pool.query<{
+      application_no: string;
+      status: string;
+      created_at: Date;
+      identity_document_type: "NATIONAL_ID" | "PASSPORT" | null;
+      employment_identity_match_status: "PENDING" | "MATCHED" | "NOT_MATCHED";
+      employer_tenant_id: string;
+    }>(
+      `SELECT a.application_no, a.status, a.created_at,
+              u.identity_document_type,
+              a.employment_identity_match_status,
+              a.employer_tenant_id
+         FROM applications a
+         JOIN users u ON u.id = a.user_id
+         JOIN employer_tenants tenant
+           ON tenant.id = a.employer_tenant_id
+          AND tenant.is_active = true
+         JOIN employer_tenant_members m
+           ON m.employer_tenant_id = a.employer_tenant_id
+         JOIN admin_accounts account
+           ON account.id = m.account_id
+        WHERE account.login_name = $1
+          AND account.is_active = true
+          AND a.status = 'EMPLOYER_VERIFICATION'
+        ORDER BY a.created_at ASC`,
+      [request.adminIdentity!.loginName],
+    );
+    items.push(
+      ...hrQueue.rows.map((row) => ({
+        applicationNo: row.application_no,
+        stage: row.status,
+        createdAt: row.created_at.toISOString(),
+        identityDocumentType: row.identity_document_type,
+        identityMatchStatus: row.employment_identity_match_status,
+        employerTenantId: row.employer_tenant_id,
+      })),
+    );
+  }
+  if (isFinance) {
+    const financeQueue = await pool.query<{
+      application_no: string;
+      projection_status: EmployerPayrollInstructionStatus;
+      created_at: Date;
+      employer_tenant_id: string;
+      repayment_installment_no: number;
+      scheduled_due_date: string;
+      scheduled_amount_minor: string;
+      selected_repayment_method: "EMPLOYER_PAYROLL_DEDUCTION";
+      collection_scope: SalaryLoanV2CollectionScope;
+    }>(
+      `SELECT a.application_no,
+              instruction.projection_status,
+              instruction.created_at,
+              instruction.employer_tenant_id,
+              instruction.repayment_installment_no,
+              instruction.scheduled_due_date::text,
+              instruction.scheduled_amount_minor::text,
+              instruction.selected_repayment_method,
+              instruction.collection_scope
+         FROM employer_payroll_collection_instructions instruction
+         JOIN applications a
+           ON a.id = instruction.application_id
+         JOIN employer_tenants tenant
+           ON tenant.id = instruction.employer_tenant_id
+          AND tenant.is_active = true
+         JOIN employer_tenant_members m
+           ON m.employer_tenant_id = instruction.employer_tenant_id
+         JOIN admin_accounts account
+           ON account.id = m.account_id
+        WHERE account.login_name = $1
+          AND account.is_active = true
+          AND instruction.projection_status = 'PAYROLL_COLLECTION_PENDING'
+        ORDER BY instruction.scheduled_due_date ASC,
+                 instruction.repayment_installment_no ASC`,
+      [request.adminIdentity!.loginName],
+    );
+    items.push(
+      ...financeQueue.rows.map((row) => ({
+        applicationNo: row.application_no,
+        stage: row.projection_status,
+        createdAt: row.created_at.toISOString(),
+        employerTenantId: row.employer_tenant_id,
+        collectionSequence: row.repayment_installment_no,
+        dueDate: row.scheduled_due_date,
+        scheduledAmountMinor: row.scheduled_amount_minor,
+        selectedRepaymentMethod: row.selected_repayment_method,
+        payrollDeductionAuthorized: true,
+        collectionScope: row.collection_scope,
+      })),
+    );
+  }
   return {
-    items: result.rows.map((row) => ({
-      applicationNo: row.application_no,
-      requestedAmountMinor: row.requested_amount_minor,
-      currency: row.currency,
-      tenorDays: row.tenor_days,
-      stage: row.status,
-      createdAt: row.created_at.toISOString(),
-      // Finance verifies salary/settlement only.  Identity document metadata
-      // and the HR match outcome are not necessary for that responsibility.
-      ...(isHr
-        ? {
-            identityDocumentType: row.identity_document_type,
-            identityMatchStatus: row.employment_identity_match_status,
-          }
-        : {}),
-      employerTenantId: row.employer_tenant_id,
-    })),
+    items,
   };
 });
+
+app.get(
+  "/v1/local/lender-repayment-work-items/open",
+  async (request, reply) => {
+    if (!requireLenderRepaymentRole(request, reply)) return;
+    const result = await pool.query<{
+      id: string;
+      application_no: string;
+      repayment_installment_no: number;
+      selected_repayment_method: RepaymentMethod;
+      source_type: LenderCollectionSourceType;
+      collection_result: LenderCollectionResult;
+      reported_amount_minor: string;
+      evidence_reference: string;
+      work_item_status: LenderCollectionWorkItemStatus;
+      created_at: string;
+    }>(
+      `SELECT item.id,
+            application_row.application_no,
+            item.repayment_installment_no,
+            item.selected_repayment_method,
+            item.source_type,
+            item.collection_result,
+            item.reported_amount_minor::text,
+            item.evidence_reference,
+            item.work_item_status,
+            item.created_at::text
+       FROM lender_collection_work_items item
+       JOIN applications application_row ON application_row.id = item.application_id
+      WHERE item.work_item_status IN ('OPEN', 'PROCESSING', 'EXCEPTION')
+      ORDER BY item.created_at ASC`,
+    );
+    return {
+      items: result.rows.map((row) => ({
+        workItemId: row.id,
+        applicationNo: row.application_no,
+        collectionSequence: row.repayment_installment_no,
+        selectedRepaymentMethod: row.selected_repayment_method,
+        sourceType: row.source_type,
+        collectionResult: row.collection_result,
+        reportedAmountMinor: row.reported_amount_minor,
+        evidenceReference: row.evidence_reference,
+        workItemStatus: row.work_item_status,
+        createdAt: row.created_at,
+      })),
+    };
+  },
+);
+
+app.get(
+  "/v1/local/lender-collection-exceptions/open",
+  async (request, reply) => {
+    if (!requireLenderRepaymentRole(request, reply)) return;
+    const result = await pool.query<{
+      id: string;
+      application_no: string;
+      repayment_installment_no: number;
+      selected_repayment_method: RepaymentMethod;
+      exception_type: LenderCollectionExceptionType;
+      reason_code: string;
+      evidence_reference: string;
+      reported_amount_minor: string;
+      created_at: string;
+      work_item_id: string;
+    }>(
+      `SELECT exception.id,
+              application_row.application_no,
+              exception.repayment_installment_no,
+              exception.selected_repayment_method,
+              exception.exception_type,
+              exception.reason_code,
+              exception.evidence_reference,
+              exception.reported_amount_minor::text,
+              exception.created_at::text,
+              exception.work_item_id
+         FROM lender_collection_exceptions exception
+         JOIN applications application_row ON application_row.id = exception.application_id
+        WHERE exception.status = 'OPEN'
+        ORDER BY exception.created_at ASC`,
+    );
+    return {
+      items: result.rows.map((row) => ({
+        exceptionId: row.id,
+        workItemId: row.work_item_id,
+        applicationNo: row.application_no,
+        collectionSequence: row.repayment_installment_no,
+        selectedRepaymentMethod: row.selected_repayment_method,
+        exceptionType: row.exception_type,
+        reasonCode: row.reason_code,
+        evidenceReference: row.evidence_reference,
+        reportedAmountMinor: row.reported_amount_minor,
+        createdAt: row.created_at,
+      })),
+    };
+  },
+);
+
+app.post(
+  "/v1/local/lender-collection-exceptions/:exceptionId/resolve",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "LENDER_REPAYMENT_CHECKER")) return;
+    const params = z
+      .object({ exceptionId: z.string().uuid() })
+      .parse(request.params);
+    const input = lenderCollectionExceptionResolutionSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const exception = await client.query<{
+        id: string;
+        application_id: string;
+        status: "OPEN" | "RESOLVED" | "CLOSED";
+      }>(
+        `SELECT id, application_id, status
+           FROM lender_collection_exceptions
+          WHERE id = $1
+          FOR UPDATE`,
+        [params.exceptionId],
+      );
+      const item = exception.rows[0];
+      if (!item) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(404)
+          .send({ code: "LENDER_COLLECTION_EXCEPTION_NOT_FOUND" });
+      }
+      if (item.status !== "OPEN") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "LENDER_COLLECTION_EXCEPTION_NOT_OPEN",
+          currentStatus: item.status,
+        });
+      }
+      await client.query(
+        `UPDATE lender_collection_exceptions
+            SET status = 'RESOLVED',
+                resolved_by_user_ref = $1,
+                resolution_reason_code = $2,
+                resolution_evidence_reference = $3,
+                resolved_at = now(),
+                updated_at = now()
+          WHERE id = $4`,
+        [
+          request.adminIdentity!.loginName,
+          input.reasonCode,
+          input.evidenceReference,
+          item.id,
+        ],
+      );
+      await addAuditEvent(
+        client,
+        item.application_id,
+        "LENDER_COLLECTION_EXCEPTION_RESOLVED",
+        request.adminIdentity!.loginName,
+        {
+          exceptionId: item.id,
+          reasonCode: input.reasonCode,
+          evidenceReference: input.evidenceReference,
+        },
+      );
+      await client.query("COMMIT");
+      return { exceptionId: item.id, status: "RESOLVED" };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/applications/:applicationNo/lender-collection-work-items",
+  async (request, reply) => {
+    if (!requireRole(request, reply, "BROKER_OFFICER")) return;
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = lenderCollectionWorkItemCreateSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplication(client, params.applicationNo);
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (application.status !== "REPAYMENT_ACTIVE") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "INVALID_APPLICATION_STATE",
+          currentStatus: application.status,
+        });
+      }
+      const workItem = await createLenderCollectionWorkItem(
+        client,
+        application,
+        actorUserRef,
+        {
+          sourceType: input.sourceType,
+          collectionResult: input.collectionResult,
+          actualCollectedAmountMinor: input.actualCollectedAmountMinor,
+          evidenceReference: input.evidenceReference,
+          sourceReference:
+            input.sourceReference ??
+            `${input.sourceType}:${input.evidenceReference}:${input.collectionSequence ?? "NEXT"}`,
+          reasonCode: input.reasonCode,
+          collectionSequence: input.collectionSequence,
+          metadata: {
+            fixture: "DAY3_UAT",
+          },
+        },
+      );
+      await addAuditEvent(
+        client,
+        application.id,
+        "LENDER_COLLECTION_WORK_ITEM_CREATED",
+        actorUserRef,
+        {
+          sourceType: input.sourceType,
+          collectionResult: input.collectionResult,
+          collectionSequence: workItem.collectionSequence,
+          actualCollectedAmountMinor: input.actualCollectedAmountMinor,
+          evidenceReference: input.evidenceReference,
+          lenderCollectionWorkItemId: workItem.workItemId,
+          lenderCollectionExceptionId: workItem.exceptionId,
+        },
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send({
+        applicationNo: params.applicationNo,
+        collectionSequence: workItem.collectionSequence,
+        selectedRepaymentMethod: workItem.selectedRepaymentMethod,
+        workItemId: workItem.workItemId,
+        workItemStatus: workItem.workItemStatus,
+        exceptionId: workItem.exceptionId,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error as { code?: string }).code === "23505"
+      ) {
+        return reply
+          .code(409)
+          .send({ code: "DUPLICATE_COLLECTION_SOURCE_REFERENCE" });
+      }
+      if (error instanceof Error) {
+        if (error.message === "COLLECTION_SOURCE_REPAYMENT_METHOD_MISMATCH") {
+          return reply
+            .code(409)
+            .send({ code: "COLLECTION_SOURCE_REPAYMENT_METHOD_MISMATCH" });
+        }
+        if (error.message === "COLLECTION_INSTALLMENT_NOT_FOUND") {
+          return reply
+            .code(409)
+            .send({ code: "COLLECTION_INSTALLMENT_NOT_FOUND" });
+        }
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
 
 app.post(
   "/v1/local/applications/:applicationNo/lender-initial-review",
@@ -4473,21 +6297,42 @@ app.post(
       if (input.decision !== "APPROVED") return;
       if (
         !input.approvedAmountMinor ||
-        !input.serviceFeeMinor ||
-        !input.totalRepayableMinor ||
+        !input.actualDisbursementAmountMinor ||
+        !input.lenderInterestMinor ||
+        !input.totalRepaymentAmountMinor ||
+        !input.brokerageRemunerationReceivableMinor ||
         !input.installmentCount ||
-        !input.firstDueDate
+        !input.firstDueDate ||
+        !input.productRuleVersion ||
+        !input.brokerageRemunerationRuleVersion ||
+        !input.lenderInterestRuleVersion
       ) {
-        throw new Error("approved final review requires complete loan terms");
+        throw new Error(
+          "approved final review requires complete V2 quote terms",
+        );
       }
       const approvedAmountMinor = BigInt(input.approvedAmountMinor);
-      const serviceFeeMinor = BigInt(input.serviceFeeMinor);
-      const totalRepayableMinor = BigInt(input.totalRepayableMinor);
+      const actualDisbursementAmountMinor = BigInt(
+        input.actualDisbursementAmountMinor,
+      );
+      const lenderInterestMinor = BigInt(input.lenderInterestMinor);
+      const totalRepaymentAmountMinor = BigInt(input.totalRepaymentAmountMinor);
+      const brokerageRemunerationReceivableMinor = BigInt(
+        input.brokerageRemunerationReceivableMinor,
+      );
       if (approvedAmountMinor < 1000n || approvedAmountMinor > 50000n) {
-        throw new Error("approved amount is outside the V1 range");
+        throw new Error("approved amount is outside the V2 salary loan range");
       }
-      if (totalRepayableMinor < approvedAmountMinor + serviceFeeMinor) {
-        throw new Error("total repayable amount does not cover loan terms");
+      if (actualDisbursementAmountMinor !== approvedAmountMinor) {
+        throw new Error("actual disbursement must equal approved principal");
+      }
+      if (
+        totalRepaymentAmountMinor !==
+        approvedAmountMinor + lenderInterestMinor
+      ) {
+        throw new Error(
+          "total repayment amount must equal principal plus lender interest",
+        );
       }
       await client.query(
         "UPDATE applications SET approved_amount_minor = $1, updated_at = now() WHERE id = $2",
@@ -4500,8 +6345,44 @@ app.post(
         [
           application.id,
           approvedAmountMinor.toString(),
-          serviceFeeMinor.toString(),
-          totalRepayableMinor.toString(),
+          lenderInterestMinor.toString(),
+          totalRepaymentAmountMinor.toString(),
+          input.installmentCount,
+          input.firstDueDate,
+          actorUserRef,
+        ],
+      );
+      await client.query(
+        `INSERT INTO application_v2_quote_snapshots
+          (application_id, workflow_version, principal_amount_minor,
+           actual_disbursement_amount_minor, lender_interest_minor,
+           total_repayment_amount_minor,
+           brokerage_remuneration_receivable_minor, product_rule_version,
+           brokerage_remuneration_rule_version, lender_interest_rule_version,
+           installment_count, first_due_date, created_by_user_ref)
+         VALUES ($1, 'SALARY_LOAN_V2', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (application_id) DO UPDATE SET
+           principal_amount_minor = EXCLUDED.principal_amount_minor,
+           actual_disbursement_amount_minor = EXCLUDED.actual_disbursement_amount_minor,
+           lender_interest_minor = EXCLUDED.lender_interest_minor,
+           total_repayment_amount_minor = EXCLUDED.total_repayment_amount_minor,
+           brokerage_remuneration_receivable_minor = EXCLUDED.brokerage_remuneration_receivable_minor,
+           product_rule_version = EXCLUDED.product_rule_version,
+           brokerage_remuneration_rule_version = EXCLUDED.brokerage_remuneration_rule_version,
+           lender_interest_rule_version = EXCLUDED.lender_interest_rule_version,
+           installment_count = EXCLUDED.installment_count,
+           first_due_date = EXCLUDED.first_due_date,
+           created_by_user_ref = EXCLUDED.created_by_user_ref`,
+        [
+          application.id,
+          approvedAmountMinor.toString(),
+          actualDisbursementAmountMinor.toString(),
+          lenderInterestMinor.toString(),
+          totalRepaymentAmountMinor.toString(),
+          brokerageRemunerationReceivableMinor.toString(),
+          input.productRuleVersion,
+          input.brokerageRemunerationRuleVersion,
+          input.lenderInterestRuleVersion,
           input.installmentCount,
           input.firstDueDate,
           actorUserRef,
@@ -5755,6 +7636,11 @@ app.post(
         "DISBURSEMENT_RECEIPT",
       );
       await createRepaymentSchedule(client, application.id);
+      await ensureEmployerPayrollCollectionInstructions(
+        client,
+        application.id,
+        actorUserRef,
+      );
       const result = {
         applicationNo: params.applicationNo,
         status: "DISBURSED",
@@ -5864,6 +7750,11 @@ app.post(
         actorUserRef,
         input.reasonCode,
       );
+      await ensureEmployerPayrollCollectionInstructions(
+        client,
+        application.id,
+        actorUserRef,
+      );
       await addAuditEvent(
         client,
         application.id,
@@ -5950,10 +7841,27 @@ app.post(
         input.reasonCode,
         nextInstallment.installment_no,
       );
+      const lenderCollectionWorkItem =
+        await loadActiveLenderCollectionWorkItemForInstallment(
+          client,
+          application.id,
+          nextInstallment.installment_no,
+        );
+      if (lenderCollectionWorkItem) {
+        await client.query(
+          `UPDATE lender_collection_work_items
+              SET work_item_status = 'PROCESSING',
+                  assigned_to_user_ref = $1,
+                  updated_at = now()
+            WHERE id = $2`,
+          [actorUserRef, lenderCollectionWorkItem.id],
+        );
+      }
       const result = {
         applicationNo: params.applicationNo,
         status: "REPAYMENT_ACTIVE",
         approval: "MAKER_RECORDED",
+        lenderCollectionWorkItemId: lenderCollectionWorkItem?.id ?? null,
       };
       await recordManualActionResult(
         client,
@@ -6056,15 +7964,44 @@ app.post(
         "REPAYMENT_RECEIPT",
         nextInstallment.installment_no,
       );
+      const lenderCollectionWorkItem =
+        await loadActiveLenderCollectionWorkItemForInstallment(
+          client,
+          application.id,
+          nextInstallment.installment_no,
+        );
+      if (lenderCollectionWorkItem) {
+        await client.query(
+          `UPDATE lender_collection_work_items
+              SET work_item_status = 'CONFIRMED',
+                  confirmed_by_user_ref = $1,
+                  confirmed_at = now(),
+                  updated_at = now()
+            WHERE id = $2`,
+          [actorUserRef, lenderCollectionWorkItem.id],
+        );
+      }
       await client.query(
         `UPDATE repayment_installments
          SET status = 'PAID', amount_paid_minor = amount_due_minor, paid_at = now()
          WHERE id = $1`,
         [nextInstallment.id],
       );
+      await markEmployerPayrollInstructionReconciled(
+        client,
+        application.id,
+        nextInstallment.installment_no,
+      );
+      if (nextStatus === "REPAYMENT_ACTIVE") {
+        await promoteNextEmployerPayrollCollectionInstruction(
+          client,
+          application.id,
+        );
+      }
       const result = {
         applicationNo: params.applicationNo,
         status: nextStatus,
+        lenderCollectionWorkItemId: lenderCollectionWorkItem?.id ?? null,
       };
       await recordManualActionResult(
         client,
@@ -6279,17 +8216,70 @@ app.post("/v1/local/payment-proofs/:proofNo/review", async (request, reply) => {
         WHERE id = $4`,
       [input.status, input.reasonCode, actorUserRef, proof.id],
     );
+    let lenderCollectionWorkItem:
+      | Readonly<{
+          workItemId: string;
+          exceptionId: string | null;
+        }>
+      | undefined;
+    if (input.status === "RECONCILED") {
+      const pendingInstallment = await loadRepaymentInstallmentForCollection(
+        client,
+        application.id,
+      );
+      if (pendingInstallment) {
+        try {
+          const created = await createLenderCollectionWorkItem(
+            client,
+            application,
+            actorUserRef,
+            {
+              sourceType: "USER_MANUAL_PAYMENT_PROOF",
+              collectionResult: "COLLECTED",
+              actualCollectedAmountMinor: pendingInstallment.amount_due_minor,
+              evidenceReference:
+                proof.transfer_reference ?? `${proof.proof_no}-REVIEWED`,
+              sourceReference: proof.proof_no,
+              reasonCode: input.reasonCode,
+              metadata: {
+                reviewedStatus: input.status,
+                proofNo: proof.proof_no,
+                transferReference: proof.transfer_reference,
+              },
+            },
+          );
+          lenderCollectionWorkItem = {
+            workItemId: created.workItemId,
+            exceptionId: created.exceptionId,
+          };
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            error.message !== "COLLECTION_SOURCE_REPAYMENT_METHOD_MISMATCH"
+          ) {
+            throw error;
+          }
+        }
+      }
+    }
     const response = {
       proofNo: proof.proof_no,
       status: input.status,
       reviewedBy: actorUserRef,
+      lenderCollectionWorkItemId: lenderCollectionWorkItem?.workItemId ?? null,
     };
     await addAuditEvent(
       client,
       proof.id,
       "APPLICANT_PAYMENT_PROOF_REVIEWED",
       actorUserRef,
-      { proofNo: proof.proof_no, actorRole, ...input },
+      {
+        proofNo: proof.proof_no,
+        actorRole,
+        lenderCollectionWorkItemId:
+          lenderCollectionWorkItem?.workItemId ?? null,
+        ...input,
+      },
       "APPLICANT_PAYMENT_PROOF",
     );
     await recordManualActionResult(
@@ -6876,12 +8866,12 @@ async function reconciliationTenantAccess(
 ): Promise<boolean> {
   const membership = await client.query(
     `SELECT 1
-       FROM applications application
-       JOIN employer_tenants tenant ON tenant.id = application.employer_tenant_id
+       FROM applications application_row
+       JOIN employer_tenants tenant ON tenant.id = application_row.employer_tenant_id
        JOIN employer_tenant_members membership
-         ON membership.employer_tenant_id = application.employer_tenant_id
+         ON membership.employer_tenant_id = application_row.employer_tenant_id
        JOIN admin_accounts account ON account.id = membership.account_id
-      WHERE application.id = $1 AND account.login_name = $2
+      WHERE application_row.id = $1 AND account.login_name = $2
         AND account.is_active = true AND tenant.is_active = true`,
     [applicationId, loginName],
   );
@@ -6921,14 +8911,14 @@ app.post(
       }
       const assignee = await client.query(
         `SELECT 1
-           FROM applications application
-           JOIN employer_tenants tenant ON tenant.id = application.employer_tenant_id
+           FROM applications application_row
+           JOIN employer_tenants tenant ON tenant.id = application_row.employer_tenant_id
            JOIN employer_tenant_members membership
-             ON membership.employer_tenant_id = application.employer_tenant_id
+             ON membership.employer_tenant_id = application_row.employer_tenant_id
            JOIN admin_accounts account ON account.id = membership.account_id
            JOIN admin_account_roles account_role ON account_role.account_id = account.id
            JOIN roles role ON role.id = account_role.role_id
-          WHERE application.id = $1 AND account.login_name = $2
+          WHERE application_row.id = $1 AND account.login_name = $2
             AND account.is_active = true AND tenant.is_active = true
             AND role.code = 'EMPLOYER_FINANCE'`,
         [workItem.application_id, input.assigneeLoginName],

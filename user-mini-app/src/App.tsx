@@ -98,6 +98,19 @@ type UserSummary = {
     installmentCount: number;
     firstDueDate: string;
   };
+  quote?: null | {
+    principalAmountMinor: string;
+    actualDisbursementAmountMinor: string;
+    lenderInterestMinor: string;
+    totalRepaymentAmountMinor: string;
+    brokerageRemunerationReceivableMinor: string;
+    productRuleVersion: string;
+    brokerageRemunerationRuleVersion: string;
+    lenderInterestRuleVersion: string;
+    installmentCount: number;
+    firstDueDate: string;
+    repaymentGraceDays: number;
+  };
   repayment: {
     periodCount: number;
     paidPeriods: number;
@@ -119,6 +132,17 @@ type UserSummary = {
       amountPaidMinor: string;
       status: "PENDING" | "PAID";
     }>;
+  };
+  workflow?: {
+    workflowVersion: "LEGACY_V1" | "SALARY_LOAN_V2";
+    selectedRepaymentMethod?: RepaymentMethod | null;
+    availableRepaymentMethods?: RepaymentMethod[];
+    collectionScope?: "PRINCIPAL_AND_INTEREST" | null;
+    employerVerificationAuthorized?: boolean;
+    serviceAgreementAuthorized?: boolean;
+    postDisbursementBrokerageAuthorized?: boolean;
+    payrollDeductionAuthorized?: boolean;
+    directDebitAuthorized?: boolean;
   };
   recordDetail?: {
     createdAt: string;
@@ -145,10 +169,18 @@ type UserSummary = {
   timeline?: ApplicantTimelineEntry[];
 };
 
+type RepaymentMethod =
+  "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
+
 type ApplicationListEntry = ApplicationHistoryEntry;
 
 type EmployerTenantDirectory = {
-  tenants: Array<{ id: string; displayName: string }>;
+  tenants: Array<{
+    id: string;
+    displayName: string;
+    availableRepaymentMethods: RepaymentMethod[];
+    defaultRepaymentMethod: RepaymentMethod;
+  }>;
 };
 
 type TelegramPhoneVerification = {
@@ -1013,6 +1045,8 @@ export function App(): JSX.Element {
   const [recordFilter, setRecordFilter] = useState<RecordFilter>("ALL");
   const [amountInput, setAmountInput] = useState("50");
   const [term, setTerm] = useState(30);
+  const [selectedRepaymentMethod, setSelectedRepaymentMethod] =
+    useState<RepaymentMethod>("USER_MANUAL_PAYMENT");
   const [name, setName] = useState("");
   const [residentialAddress, setResidentialAddress] = useState("");
   const [phone, setPhone] = useState("");
@@ -1035,6 +1069,17 @@ export function App(): JSX.Element {
   const [livenessPrepared, setLivenessPrepared] = useState(false);
   const [wealthProofAttached, setWealthProofAttached] = useState(false);
   const [consent, setConsent] = useState(false);
+  const [employerVerificationAuthorized, setEmployerVerificationAuthorized] =
+    useState(false);
+  const [serviceAgreementAuthorized, setServiceAgreementAuthorized] =
+    useState(false);
+  const [
+    postDisbursementBrokerageAuthorized,
+    setPostDisbursementBrokerageAuthorized,
+  ] = useState(false);
+  const [payrollDeductionAuthorized, setPayrollDeductionAuthorized] =
+    useState(false);
+  const [directDebitAuthorized, setDirectDebitAuthorized] = useState(false);
   const [repaymentProofFile, setRepaymentProofFile] = useState<File | null>(
     null,
   );
@@ -1076,6 +1121,68 @@ export function App(): JSX.Element {
   const applicationCopy = applicationSectionCopy(language);
   const stepCopy = applicationStepCopy(language);
   const stepNavCopy = stepNavigationCopy(language);
+  const selectedEmployerTenant = employerTenants.find(
+    (tenant) => tenant.id === employerTenantId,
+  );
+  const availableRepaymentMethods =
+    selectedEmployerTenant?.availableRepaymentMethods ??
+    (["USER_MANUAL_PAYMENT"] as RepaymentMethod[]);
+  const defaultRepaymentMethod =
+    selectedEmployerTenant?.defaultRepaymentMethod ?? "USER_MANUAL_PAYMENT";
+  const repaymentMethodOptionCatalog: Array<{
+    value: RepaymentMethod;
+    label: string;
+    description: string;
+  }> = [
+    {
+      value: "EMPLOYER_PAYROLL_DEDUCTION",
+      label:
+        language === "en"
+          ? "Employer payroll"
+          : language === "km"
+            ? "កាត់ពីប្រាក់ខែ"
+            : "工资代扣",
+      description:
+        language === "en"
+          ? "The employer reports authorized principal-and-interest collection on the payroll date."
+          : language === "km"
+            ? "ក្រុមហ៊ុនរាយការណ៍ការកាត់ប្រាក់ដើមនិងការប្រាក់ដែលបានអនុញ្ញាតនៅថ្ងៃបើកប្រាក់។"
+            : "企业在已授权工资日回填本息回收结果。",
+    },
+    {
+      value: "USER_DIRECT_DEBIT",
+      label:
+        language === "en"
+          ? "Direct debit"
+          : language === "km"
+            ? "កាត់ដោយស្វ័យប្រវត្តិ"
+            : "自动扣款",
+      description:
+        language === "en"
+          ? "The licensed lender collects principal and interest through direct debit after your separate authorization."
+          : language === "km"
+            ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណប្រមូលប្រាក់ដើមនិងការប្រាក់តាម direct debit បន្ទាប់ពីការអនុញ្ញាតដាច់ដោយឡែក។"
+            : "持牌机构在你单独授权后通过 direct debit 回收本息。",
+    },
+    {
+      value: "USER_MANUAL_PAYMENT",
+      label:
+        language === "en"
+          ? "Manual payment"
+          : language === "km"
+            ? "បង់ដោយខ្លួនឯង"
+            : "手动还款",
+      description:
+        language === "en"
+          ? "You follow the licensed lender's manual collection instructions when a bill is due."
+          : language === "km"
+            ? "អ្នកអនុវត្តតាមការណែនាំសងប្រាក់ដោយដៃរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណនៅពេលវិក្កយបត្រត្រូវបង់។"
+            : "账单到期时按持牌机构指引手动完成回收。",
+    },
+  ];
+  const repaymentMethodOptions = repaymentMethodOptionCatalog.filter((option) =>
+    availableRepaymentMethods.includes(option.value),
+  );
   const amountInputError =
     t.amountInvalid ?? "Enter an amount from USD 10.00 to 500.00.";
   const phoneInputError = t.phoneInvalid ?? "Enter a valid mobile number.";
@@ -1098,6 +1205,32 @@ export function App(): JSX.Element {
   useEffect(() => {
     currentLanguage.current = language;
   }, [language]);
+
+  useEffect(() => {
+    if (!employerTenantId) {
+      setSelectedRepaymentMethod("USER_MANUAL_PAYMENT");
+      setPayrollDeductionAuthorized(false);
+      setDirectDebitAuthorized(false);
+      return;
+    }
+    if (!availableRepaymentMethods.includes(selectedRepaymentMethod)) {
+      setSelectedRepaymentMethod(defaultRepaymentMethod);
+    }
+  }, [
+    availableRepaymentMethods,
+    defaultRepaymentMethod,
+    employerTenantId,
+    selectedRepaymentMethod,
+  ]);
+
+  useEffect(() => {
+    if (selectedRepaymentMethod !== "EMPLOYER_PAYROLL_DEDUCTION") {
+      setPayrollDeductionAuthorized(false);
+    }
+    if (selectedRepaymentMethod !== "USER_DIRECT_DEBIT") {
+      setDirectDebitAuthorized(false);
+    }
+  }, [selectedRepaymentMethod]);
 
   useEffect(() => {
     currentPageRef.current = currentPage;
@@ -1176,6 +1309,7 @@ export function App(): JSX.Element {
       currentValues: {
         amountInput,
         term,
+        selectedRepaymentMethod,
         name,
         residentialAddress,
         phone,
@@ -1193,11 +1327,17 @@ export function App(): JSX.Element {
         livenessPrepared,
         wealthProofAttached,
         consent,
+        employerVerificationAuthorized,
+        serviceAgreementAuthorized,
+        postDisbursementBrokerageAuthorized,
+        payrollDeductionAuthorized,
+        directDebitAuthorized,
       } as ApplicationDraftValues,
       currentFormStep: formStep,
       restoreValues: (draft) => {
         setAmountInput(draft.amountInput);
         setTerm(draft.term);
+        setSelectedRepaymentMethod(draft.selectedRepaymentMethod);
         setName(draft.name);
         setResidentialAddress(draft.residentialAddress);
         setPhone(draft.phone);
@@ -1215,6 +1355,13 @@ export function App(): JSX.Element {
         setLivenessPrepared(draft.livenessPrepared);
         setWealthProofAttached(draft.wealthProofAttached);
         setConsent(draft.consent);
+        setEmployerVerificationAuthorized(draft.employerVerificationAuthorized);
+        setServiceAgreementAuthorized(draft.serviceAgreementAuthorized);
+        setPostDisbursementBrokerageAuthorized(
+          draft.postDisbursementBrokerageAuthorized,
+        );
+        setPayrollDeductionAuthorized(draft.payrollDeductionAuthorized);
+        setDirectDebitAuthorized(draft.directDebitAuthorized);
       },
       recoverApplicantSession,
       setStage,
@@ -1534,6 +1681,52 @@ export function App(): JSX.Element {
       setError(payoutError);
       return;
     }
+    if (!employerVerificationAuthorized || !serviceAgreementAuthorized) {
+      setError(
+        language === "en"
+          ? "Confirm the employer-verification and broker service authorizations first."
+          : language === "km"
+            ? "សូមបញ្ជាក់ការអនុញ្ញាតផ្ទៀងផ្ទាត់ក្រុមហ៊ុន និងកិច្ចព្រមព្រៀងសេវាជាមុនសិន។"
+            : "请先确认企业核验授权和助贷服务协议授权。",
+      );
+      return;
+    }
+    if (!postDisbursementBrokerageAuthorized) {
+      setError(
+        language === "en"
+          ? "Acknowledge that the KhmerX brokerage remuneration becomes due only after disbursement."
+          : language === "km"
+            ? "សូមបញ្ជាក់ថាកម្រៃជើងសារ KhmerX នឹងក្លាយជាបំណុលបន្ទាប់ពីបើកប្រាក់ប៉ុណ្ណោះ។"
+            : "请先确认 KhmerX 融资居间服务费仅在放款后形成应收。",
+      );
+      return;
+    }
+    if (
+      selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" &&
+      !payrollDeductionAuthorized
+    ) {
+      setError(
+        language === "en"
+          ? "Employer payroll deduction requires its own authorization."
+          : language === "km"
+            ? "ការកាត់ពីប្រាក់ខែត្រូវការការអនុញ្ញាតដាច់ដោយឡែក។"
+            : "工资代扣需要单独授权。",
+      );
+      return;
+    }
+    if (
+      selectedRepaymentMethod === "USER_DIRECT_DEBIT" &&
+      !directDebitAuthorized
+    ) {
+      setError(
+        language === "en"
+          ? "Direct debit requires its own authorization."
+          : language === "km"
+            ? "Direct debit ត្រូវការការអនុញ្ញាតដាច់ដោយឡែក។"
+            : "自动扣款需要单独授权。",
+      );
+      return;
+    }
     if (
       applicantSession &&
       (!hasValidEmployerTenantSelection() ||
@@ -1559,6 +1752,14 @@ export function App(): JSX.Element {
             currency: "USD",
           },
           tenorDays: term,
+          selectedRepaymentMethod,
+          authorizationSnapshot: {
+            employerVerificationAuthorized,
+            serviceAgreementAuthorized,
+            postDisbursementBrokerageAuthorized,
+            payrollDeductionAuthorized,
+            directDebitAuthorized,
+          },
           ...(employerTenantId
             ? {
                 employerTenantId,
@@ -1679,6 +1880,24 @@ export function App(): JSX.Element {
       }
       const payload = (await response.json()) as UserSummary;
       if (!response.ok) throw new Error("STATUS_FAILED");
+      if (payload.workflow?.selectedRepaymentMethod) {
+        setSelectedRepaymentMethod(payload.workflow.selectedRepaymentMethod);
+        setEmployerVerificationAuthorized(
+          payload.workflow.employerVerificationAuthorized ?? false,
+        );
+        setServiceAgreementAuthorized(
+          payload.workflow.serviceAgreementAuthorized ?? false,
+        );
+        setPostDisbursementBrokerageAuthorized(
+          payload.workflow.postDisbursementBrokerageAuthorized ?? false,
+        );
+        setPayrollDeductionAuthorized(
+          payload.workflow.payrollDeductionAuthorized ?? false,
+        );
+        setDirectDebitAuthorized(
+          payload.workflow.directDebitAuthorized ?? false,
+        );
+      }
       setApprovedAmountMinor(
         payload.application.approvedAmountMinor ?? undefined,
       );
@@ -2205,6 +2424,18 @@ export function App(): JSX.Element {
         ? `${formatUsdMinor(requestedAmountMinor)} · ${term}d`
         : "—",
     },
+    {
+      label:
+        language === "en"
+          ? "Repayment method"
+          : language === "km"
+            ? "វិធីសងប្រាក់"
+            : "回收方式",
+      value:
+        repaymentMethodOptions.find(
+          (item) => item.value === selectedRepaymentMethod,
+        )?.label ?? "—",
+    },
     { label: t.name ?? "", value: name.trim() || "—" },
     { label: t.phone ?? "", value: phone.trim() || "—" },
     { label: t.employer ?? "", value: employer.trim() || "—" },
@@ -2223,6 +2454,54 @@ export function App(): JSX.Element {
     {
       label: applicationCopy.bankAccount,
       value: bankAccountNumber.trim() || "—",
+    },
+    {
+      label:
+        language === "en"
+          ? "Independent authorizations"
+          : language === "km"
+            ? "ការអនុញ្ញាតដាច់ដោយឡែក"
+            : "独立授权",
+      value:
+        [
+          employerVerificationAuthorized
+            ? language === "en"
+              ? "Employer verification"
+              : language === "km"
+                ? "ការផ្ទៀងផ្ទាត់ក្រុមហ៊ុន"
+                : "企业核验"
+            : null,
+          serviceAgreementAuthorized
+            ? language === "en"
+              ? "Service agreement"
+              : language === "km"
+                ? "កិច្ចព្រមព្រៀងសេវា"
+                : "服务协议"
+            : null,
+          postDisbursementBrokerageAuthorized
+            ? language === "en"
+              ? "Post-disbursement brokerage"
+              : language === "km"
+                ? "កម្រៃជើងសារបន្ទាប់ពីបើកប្រាក់"
+                : "放款后服务费应收"
+            : null,
+          payrollDeductionAuthorized
+            ? language === "en"
+              ? "Payroll deduction"
+              : language === "km"
+                ? "កាត់ពីប្រាក់ខែ"
+                : "工资代扣"
+            : null,
+          directDebitAuthorized
+            ? language === "en"
+              ? "Direct debit"
+              : language === "km"
+                ? "កាត់ដោយស្វ័យប្រវត្តិ"
+                : "自动扣款"
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || "—",
     },
   ];
   const renderApplicantError = () =>
@@ -2553,6 +2832,7 @@ export function App(): JSX.Element {
             {(stage === "welcome" || stage === "details") && (
               <ApplicationFlow
                 stage={stage}
+                language={language}
                 t={t}
                 applicationCopy={applicationCopy}
                 stepCopy={stepCopy}
@@ -2563,6 +2843,8 @@ export function App(): JSX.Element {
                 terms={terms}
                 amountInput={amountInput}
                 term={term}
+                repaymentMethodOptions={repaymentMethodOptions}
+                selectedRepaymentMethod={selectedRepaymentMethod}
                 requestedAmountDisplay={
                   requestedAmountMinor
                     ? formatUsdMinor(requestedAmountMinor)
@@ -2592,6 +2874,13 @@ export function App(): JSX.Element {
                 livenessPrepared={livenessPrepared}
                 wealthProofAttached={wealthProofAttached}
                 consent={consent}
+                employerVerificationAuthorized={employerVerificationAuthorized}
+                serviceAgreementAuthorized={serviceAgreementAuthorized}
+                postDisbursementBrokerageAuthorized={
+                  postDisbursementBrokerageAuthorized
+                }
+                payrollDeductionAuthorized={payrollDeductionAuthorized}
+                directDebitAuthorized={directDebitAuthorized}
                 summaryItems={summaryItems}
                 loading={loading}
                 renderError={renderApplicantError}
@@ -2644,6 +2933,20 @@ export function App(): JSX.Element {
                 onLivenessPreparedChange={setLivenessPrepared}
                 onWealthProofAttachedChange={setWealthProofAttached}
                 onConsentChange={setConsent}
+                onSelectedRepaymentMethodChange={setSelectedRepaymentMethod}
+                onEmployerVerificationAuthorizedChange={
+                  setEmployerVerificationAuthorized
+                }
+                onServiceAgreementAuthorizedChange={
+                  setServiceAgreementAuthorized
+                }
+                onPostDisbursementBrokerageAuthorizedChange={
+                  setPostDisbursementBrokerageAuthorized
+                }
+                onPayrollDeductionAuthorizedChange={
+                  setPayrollDeductionAuthorized
+                }
+                onDirectDebitAuthorizedChange={setDirectDebitAuthorized}
               />
             )}
 
@@ -2935,54 +3238,142 @@ export function App(): JSX.Element {
                       </div>
                       <div>
                         <span>{t.installments}</span>
-                        <b>{summary.terms?.installmentCount ?? "—"}</b>
+                        <b>
+                          {summary.quote?.installmentCount ??
+                            summary.terms?.installmentCount ??
+                            "—"}
+                        </b>
                       </div>
                       <div>
                         <span>{t.firstDueDate}</span>
-                        <b>{displayDate(summary.terms?.firstDueDate)}</b>
+                        <b>
+                          {displayDate(
+                            summary.quote?.firstDueDate ??
+                              summary.terms?.firstDueDate,
+                          )}
+                        </b>
                       </div>
                       <div>
                         <span>
                           {language === "en"
-                            ? "Approved"
+                            ? "Principal"
                             : language === "km"
-                              ? "បានអនុម័ត"
-                              : "审核额度"}
+                              ? "ដើមប្រាក់"
+                              : "贷款本金"}
                         </span>
                         <b>
-                          {summary.terms
-                            ? formatUsdMinor(summary.terms.approvedAmountMinor)
+                          {summary.quote
+                            ? formatUsdMinor(summary.quote.principalAmountMinor)
+                            : summary.terms
+                              ? formatUsdMinor(
+                                  summary.terms.approvedAmountMinor,
+                                )
+                              : "—"}
+                        </b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Lender interest"
+                            : language === "km"
+                              ? "ការប្រាក់របស់ស្ថាប័ន"
+                              : "持牌机构利息"}
+                        </span>
+                        <b>
+                          {summary.quote
+                            ? formatUsdMinor(summary.quote.lenderInterestMinor)
+                            : summary.terms
+                              ? formatUsdMinor(summary.terms.serviceFeeMinor)
+                              : "—"}
+                        </b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Brokerage receivable"
+                            : language === "km"
+                              ? "កម្រៃជើងសារត្រូវទូទាត់បន្ទាប់ពីបើកប្រាក់"
+                              : "放款后融资居间服务费应收"}
+                        </span>
+                        <b>
+                          {summary.quote
+                            ? formatUsdMinor(
+                                summary.quote
+                                  .brokerageRemunerationReceivableMinor,
+                              )
                             : "—"}
                         </b>
                       </div>
                       <div>
                         <span>
                           {language === "en"
-                            ? "Service fee"
-                            : language === "km"
-                              ? "ថ្លៃសេវា"
-                              : "服务费"}
-                        </span>
-                        <b>
-                          {summary.terms
-                            ? formatUsdMinor(summary.terms.serviceFeeMinor)
-                            : "—"}
-                        </b>
-                      </div>
-                      <div>
-                        <span>
-                          {language === "en"
-                            ? "Total repayable"
+                            ? "Total repayment"
                             : language === "km"
                               ? "សរុបត្រូវសង"
                               : "应还总额"}
                         </span>
                         <b>
-                          {summary.terms
-                            ? formatUsdMinor(summary.terms.totalRepayableMinor)
+                          {summary.quote
+                            ? formatUsdMinor(
+                                summary.quote.totalRepaymentAmountMinor,
+                              )
+                            : summary.terms
+                              ? formatUsdMinor(
+                                  summary.terms.totalRepayableMinor,
+                                )
+                              : "—"}
+                        </b>
+                      </div>
+                      <div>
+                        <span>
+                          {language === "en"
+                            ? "Actual disbursement"
+                            : language === "km"
+                              ? "ចំនួនទឹកប្រាក់បើកជាក់ស្តែង"
+                              : "实际到账"}
+                        </span>
+                        <b>
+                          {summary.quote
+                            ? formatUsdMinor(
+                                summary.quote.actualDisbursementAmountMinor,
+                              )
                             : "—"}
                         </b>
                       </div>
+                      {summary.quote ? (
+                        <>
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Grace period"
+                                : language === "km"
+                                  ? "រយៈពេលអនុគ្រោះ"
+                                  : "缓冲期"}
+                            </span>
+                            <b>
+                              {summary.quote.repaymentGraceDays}{" "}
+                              {language === "en"
+                                ? "days"
+                                : language === "km"
+                                  ? "ថ្ងៃ"
+                                  : "天"}
+                            </b>
+                          </div>
+                          <div>
+                            <span>
+                              {language === "en"
+                                ? "Rule versions"
+                                : language === "km"
+                                  ? "កំណែច្បាប់"
+                                  : "规则版本"}
+                            </span>
+                            <b>
+                              {summary.quote.productRuleVersion} /{" "}
+                              {summary.quote.lenderInterestRuleVersion}
+                            </b>
+                          </div>
+                        </>
+                      ) : null}
                       <div>
                         <span>
                           {language === "en"
@@ -3806,26 +4197,52 @@ export function App(): JSX.Element {
                               <div>
                                 <span>
                                   {language === "en"
-                                    ? "Approved"
+                                    ? "Principal"
                                     : language === "zh-CN"
-                                      ? "获批额度"
-                                      : "ទំហំដែលបានអនុម័ត"}
+                                      ? "贷款本金"
+                                      : "ដើមប្រាក់"}
                                 </span>
-                                <b>{formatUsdMinor(approvedAmountMinor)}</b>
+                                <b>
+                                  {formatUsdMinor(
+                                    summary.quote?.principalAmountMinor ??
+                                      approvedAmountMinor,
+                                  )}
+                                </b>
                               </div>
                             ) : null}
                             <div>
                               <span>
                                 {language === "en"
-                                  ? "Service fee"
+                                  ? "Lender interest"
                                   : language === "km"
-                                    ? "ថ្លៃសេវា"
-                                    : "服务费"}
+                                    ? "ការប្រាក់របស់ស្ថាប័ន"
+                                    : "持牌机构利息"}
                               </span>
                               <b>
-                                {summary.terms
+                                {summary.quote
                                   ? formatUsdMinor(
-                                      summary.terms.serviceFeeMinor,
+                                      summary.quote.lenderInterestMinor,
+                                    )
+                                  : summary.terms
+                                    ? formatUsdMinor(
+                                        summary.terms.serviceFeeMinor,
+                                      )
+                                    : "—"}
+                              </b>
+                            </div>
+                            <div>
+                              <span>
+                                {language === "en"
+                                  ? "Brokerage receivable"
+                                  : language === "km"
+                                    ? "កម្រៃជើងសារត្រូវទូទាត់បន្ទាប់ពីបើកប្រាក់"
+                                    : "放款后融资居间服务费应收"}
+                              </span>
+                              <b>
+                                {summary.quote
+                                  ? formatUsdMinor(
+                                      summary.quote
+                                        .brokerageRemunerationReceivableMinor,
                                     )
                                   : "—"}
                               </b>
@@ -3833,20 +4250,41 @@ export function App(): JSX.Element {
                             <div>
                               <span>
                                 {language === "en"
-                                  ? "Total repayable"
+                                  ? "Total repayment"
                                   : language === "km"
                                     ? "សរុបត្រូវសង"
                                     : "应还总额"}
                               </span>
                               <b>
-                                {summary.terms
+                                {summary.quote
                                   ? formatUsdMinor(
-                                      summary.terms.totalRepayableMinor,
+                                      summary.quote.totalRepaymentAmountMinor,
+                                    )
+                                  : summary.terms
+                                    ? formatUsdMinor(
+                                        summary.terms.totalRepayableMinor,
+                                      )
+                                    : "—"}
+                              </b>
+                            </div>
+                            <div>
+                              <span>
+                                {language === "en"
+                                  ? "Actual disbursement"
+                                  : language === "km"
+                                    ? "ចំនួនទឹកប្រាក់បើកជាក់ស្តែង"
+                                    : "实际到账"}
+                              </span>
+                              <b>
+                                {summary.quote
+                                  ? formatUsdMinor(
+                                      summary.quote
+                                        .actualDisbursementAmountMinor,
                                     )
                                   : "—"}
                               </b>
                             </div>
-                            {summary.terms ? (
+                            {summary.quote || summary.terms ? (
                               <>
                                 <div>
                                   <span>
@@ -3856,7 +4294,11 @@ export function App(): JSX.Element {
                                         ? "ប្រភេទការបង់ប្រាក់"
                                         : "分期数"}
                                   </span>
-                                  <b>{summary.terms.installmentCount}</b>
+                                  <b>
+                                    {summary.quote?.installmentCount ??
+                                      summary.terms?.installmentCount ??
+                                      "—"}
+                                  </b>
                                 </div>
                                 <div>
                                   <span>
@@ -3867,7 +4309,10 @@ export function App(): JSX.Element {
                                         : "ថ្ងៃសងប្រាក់ដំបូង"}
                                   </span>
                                   <b>
-                                    {displayDate(summary.terms.firstDueDate)}
+                                    {displayDate(
+                                      summary.quote?.firstDueDate ??
+                                        summary.terms?.firstDueDate,
+                                    )}
                                   </b>
                                 </div>
                               </>

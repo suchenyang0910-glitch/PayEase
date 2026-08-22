@@ -4,6 +4,7 @@
 param(
   [Parameter(Mandatory = $true)]
   [ValidateNotNullOrEmpty()]
+  [Alias('TestDatabaseUrl')]
   [string]$IntegrationDatabaseUrl,
   [string]$RootDir
 )
@@ -52,8 +53,11 @@ try {
   # Do not echo this value: it can contain a password even though it must
   # point only to a disposable database named payease_test.
   $env:PAYEASE_TEST_DATABASE_URL = $IntegrationDatabaseUrl
-  Invoke-Gate 'PostgreSQL integration tests' {
+  Invoke-Gate 'PostgreSQL broker integration tests' {
     pnpm.cmd --filter '@payease/broker-api' run test:integration
+  }
+  Invoke-Gate 'PostgreSQL lender integration tests' {
+    pnpm.cmd --filter '@payease/lender-core' run test:integration
   }
   Write-Host '[v1-acceptance] LOCAL ACCEPTANCE PASSED'
 } finally {

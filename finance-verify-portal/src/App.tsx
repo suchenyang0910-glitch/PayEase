@@ -21,10 +21,19 @@ type WorkItem = {
 };
 type VerificationQueueItem = {
   applicationNo: string;
-  requestedAmountMinor: string;
-  currency: string;
-  tenorDays: number;
   stage: string;
+  createdAt: string;
+  employerTenantId: string;
+  collectionSequence?: number;
+  dueDate?: string;
+  scheduledAmountMinor?: string;
+  selectedRepaymentMethod:
+    | "EMPLOYER_PAYROLL_DEDUCTION"
+    | "USER_DIRECT_DEBIT"
+    | "USER_MANUAL_PAYMENT"
+    | null;
+  payrollDeductionAuthorized: boolean;
+  collectionScope: "PRINCIPAL_AND_INTEREST" | null;
 };
 const layout = {
   maxWidth: 1000,
@@ -161,6 +170,15 @@ export function App(): JSX.Element {
   >([]);
   const [verificationApplicationNo, setVerificationApplicationNo] =
     useState("");
+  const [verificationCollectionSequence, setVerificationCollectionSequence] =
+    useState<number | "">("");
+  const [
+    verificationScheduledAmountMinor,
+    setVerificationScheduledAmountMinor,
+  ] = useState("");
+  const [actualCollectedAmountMinor, setActualCollectedAmountMinor] =
+    useState("");
+  const [evidenceReference, setEvidenceReference] = useState("");
   const [assignee, setAssignee] = useState("");
   const [reasonCode, setReasonCode] = useState("MANUAL_EVIDENCE_MATCHED");
   const [notice, setNotice] = useState("");
@@ -179,9 +197,47 @@ export function App(): JSX.Element {
   const language = identity?.preferredLanguage ?? "en";
   const copy = FINANCE_COPY[language];
   const permitted = identity?.roles.includes("EMPLOYER_FINANCE") ?? false;
+  const repaymentMethodLabel = (
+    value: VerificationQueueItem["selectedRepaymentMethod"],
+  ) => {
+    if (value === "EMPLOYER_PAYROLL_DEDUCTION") {
+      return language === "zh-CN"
+        ? "工资代扣"
+        : language === "km"
+          ? "កាត់ពីប្រាក់ខែ"
+          : "Employer payroll";
+    }
+    return language === "zh-CN"
+      ? "不在企业财务范围"
+      : language === "km"
+        ? "មិនស្ថិតក្នុងសិទ្ធិហិរញ្ញវត្ថុក្រុមហ៊ុន"
+        : "Out of employer finance scope";
+  };
   const expireSession = () => {
     setSignInError(copy.sessionExpired);
     setIdentity(undefined);
+  };
+  const selectVerificationItem = (item: VerificationQueueItem) => {
+    if (
+      item.selectedRepaymentMethod !== "EMPLOYER_PAYROLL_DEDUCTION" ||
+      !item.payrollDeductionAuthorized
+    ) {
+      setNotice(
+        language === "zh-CN"
+          ? "企业财务仅处理已授权工资代扣任务。"
+          : language === "km"
+            ? "ផ្នែកហិរញ្ញវត្ថុអាចដំណើរការបានតែការកាត់ពីប្រាក់ខែដែលបានអនុញ្ញាត។"
+            : "Employer finance can process only authorized payroll collection tasks.",
+      );
+      return;
+    }
+    setVerificationApplicationNo(item.applicationNo);
+    setVerificationCollectionSequence(item.collectionSequence ?? "");
+    setVerificationScheduledAmountMinor(item.scheduledAmountMinor ?? "");
+    setActualCollectedAmountMinor(item.scheduledAmountMinor ?? "");
+    setEvidenceReference("");
+    setNotice("");
+    setReasonCode("PAYROLL_INSTALLMENT_COLLECTION_REPORTED");
   };
   const load = async () => {
     setRunningAction(true);
@@ -208,10 +264,25 @@ export function App(): JSX.Element {
       { items?: VerificationQueueItem[] } | undefined;
     if (response.ok && Array.isArray(payload?.items)) {
       setVerificationItems(payload.items);
+      if (
+        verificationApplicationNo &&
+        !payload.items.some(
+          (item) =>
+            item.applicationNo === verificationApplicationNo &&
+            (verificationCollectionSequence === "" ||
+              item.collectionSequence === verificationCollectionSequence),
+        )
+      ) {
+        setVerificationApplicationNo("");
+        setVerificationCollectionSequence("");
+        setVerificationScheduledAmountMinor("");
+        setActualCollectedAmountMinor("");
+        setEvidenceReference("");
+      }
     }
   };
   const decideVerification = async (
-    decision: "APPROVED" | "REJECTED" | "RETURNED",
+    collectionResult: "COLLECTED" | "PARTIALLY_COLLECTED" | "NOT_COLLECTED",
   ) => {
     if (!verificationApplicationNo) return;
     setRunningAction(true);
@@ -225,7 +296,16 @@ export function App(): JSX.Element {
         {
           method: "POST",
           headers: { "Idempotency-Key": idempotencyKey },
-          body: JSON.stringify({ decision, reasonCode }),
+          body: JSON.stringify({
+            collectionResult,
+            reasonCode,
+            collectionSequence:
+              verificationCollectionSequence === ""
+                ? undefined
+                : verificationCollectionSequence,
+            actualCollectedAmountMinor,
+            evidenceReference,
+          }),
         },
       );
       if (response.status === 401) return expireSession();
@@ -240,7 +320,7 @@ export function App(): JSX.Element {
         return;
       }
       verificationIdempotencyKey.current = undefined;
-      setNotice(`Recorded: ${payload.status ?? decision}`);
+      setNotice(`Recorded: ${payload.status ?? collectionResult}`);
       await loadVerificationQueue();
     } finally {
       setRunningAction(false);
@@ -349,17 +429,66 @@ export function App(): JSX.Element {
               <ul>
                 {verificationItems.map((item) => (
                   <li key={item.applicationNo}>
-                    <button
-                      onClick={() =>
-                        setVerificationApplicationNo(item.applicationNo)
-                      }
-                    >
-                      {item.applicationNo} · {item.currency}{" "}
-                      {item.requestedAmountMinor} · {item.tenorDays}d
+                    <button onClick={() => selectVerificationItem(item)}>
+                      {item.applicationNo} ·{" "}
+                      {item.collectionSequence
+                        ? `#${item.collectionSequence} · `
+                        : ""}
+                      {repaymentMethodLabel(item.selectedRepaymentMethod)} ·{" "}
+                      {item.collectionScope ?? "—"} ·{" "}
+                      {item.payrollDeductionAuthorized
+                        ? language === "zh-CN"
+                          ? "已授权代扣"
+                          : language === "km"
+                            ? "បានអនុញ្ញាតកាត់ប្រាក់"
+                            : "Payroll authorized"
+                        : language === "zh-CN"
+                          ? "无需代扣授权"
+                          : language === "km"
+                            ? "មិនត្រូវការអនុញ្ញាតកាត់ប្រាក់"
+                            : "No payroll authorization"}{" "}
+                      {item.scheduledAmountMinor
+                        ? `· USD ${item.scheduledAmountMinor} `
+                        : ""}
+                      · {new Date(item.createdAt).toLocaleDateString()}
                     </button>
                   </li>
                 ))}
               </ul>
+              {verificationApplicationNo ? (
+                <section
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    borderRadius: 8,
+                    background: "#f8fafc",
+                  }}
+                >
+                  <strong>
+                    {language === "zh-CN"
+                      ? "当前扣款待办"
+                      : language === "km"
+                        ? "កិច្ចការកាត់ប្រាក់បច្ចុប្បន្ន"
+                        : "Selected collection case"}
+                  </strong>
+                  <div style={{ marginTop: 6 }}>
+                    {verificationApplicationNo}
+                    {verificationCollectionSequence !== ""
+                      ? ` · #${verificationCollectionSequence}`
+                      : ""}
+                    {verificationScheduledAmountMinor
+                      ? ` · USD ${verificationScheduledAmountMinor}`
+                      : ""}
+                  </div>
+                </section>
+              ) : null}
+              <p style={{ marginTop: 10, color: "#555" }}>
+                {language === "zh-CN"
+                  ? "企业财务端只执行已授权的本息回收回填，不显示申请金额、期限、持牌机构编号或完整账单。"
+                  : language === "km"
+                    ? "ផ្នែកហិរញ្ញវត្ថុអនុវត្តតែការរាយការណ៍ប្រមូលប្រាក់ដើមនិងការប្រាក់ដែលបានអនុញ្ញាតប៉ុណ្ណោះ។"
+                    : "Finance reports authorized principal-and-interest collection only. Loan amount, tenor, lender IDs and full bills stay hidden."}
+              </p>
               <label>
                 {language === "zh-CN"
                   ? "申请编号"
@@ -368,41 +497,82 @@ export function App(): JSX.Element {
                     : "Application number"}
                 <input
                   value={verificationApplicationNo}
+                  onChange={(event) => {
+                    setVerificationApplicationNo(event.target.value);
+                    setVerificationCollectionSequence("");
+                    setVerificationScheduledAmountMinor("");
+                  }}
+                />
+              </label>
+              <label>
+                {language === "zh-CN"
+                  ? "实际扣款金额（minor）"
+                  : language === "km"
+                    ? "ចំនួនទឹកប្រាក់កាត់ពិតប្រាកដ (minor)"
+                    : "Actual collected amount (minor)"}
+                <input
+                  value={actualCollectedAmountMinor}
                   onChange={(event) =>
-                    setVerificationApplicationNo(event.target.value)
+                    setActualCollectedAmountMinor(event.target.value)
                   }
+                />
+              </label>
+              <label>
+                {language === "zh-CN"
+                  ? "回填凭证引用"
+                  : language === "km"
+                    ? "ឯកសារយោងភស្តុតាង"
+                    : "Evidence reference"}
+                <input
+                  value={evidenceReference}
+                  onChange={(event) => setEvidenceReference(event.target.value)}
                 />
               </label>
               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                 <button
-                  disabled={!verificationApplicationNo || runningAction}
-                  onClick={() => void decideVerification("APPROVED")}
+                  disabled={
+                    !verificationApplicationNo ||
+                    !actualCollectedAmountMinor ||
+                    !evidenceReference ||
+                    runningAction
+                  }
+                  onClick={() => void decideVerification("COLLECTED")}
                 >
                   {language === "zh-CN"
-                    ? "确认"
+                    ? "已扣"
                     : language === "km"
-                      ? "បញ្ជាក់"
-                      : "Confirm"}
+                      ? "បានកាត់"
+                      : "Collected"}
                 </button>
                 <button
-                  disabled={!verificationApplicationNo || runningAction}
-                  onClick={() => void decideVerification("RETURNED")}
+                  disabled={
+                    !verificationApplicationNo ||
+                    !actualCollectedAmountMinor ||
+                    !evidenceReference ||
+                    runningAction
+                  }
+                  onClick={() => void decideVerification("PARTIALLY_COLLECTED")}
                 >
                   {language === "zh-CN"
-                    ? "退回补充"
+                    ? "部分扣"
                     : language === "km"
-                      ? "ស្នើបន្ថែម"
-                      : "Request correction"}
+                      ? "កាត់មួយផ្នែក"
+                      : "Partially collected"}
                 </button>
                 <button
-                  disabled={!verificationApplicationNo || runningAction}
-                  onClick={() => void decideVerification("REJECTED")}
+                  disabled={
+                    !verificationApplicationNo ||
+                    !actualCollectedAmountMinor ||
+                    !evidenceReference ||
+                    runningAction
+                  }
+                  onClick={() => void decideVerification("NOT_COLLECTED")}
                 >
                   {language === "zh-CN"
-                    ? "无法核验"
+                    ? "未扣"
                     : language === "km"
-                      ? "មិនអាចផ្ទៀងផ្ទាត់"
-                      : "Cannot verify"}
+                      ? "មិនបានកាត់"
+                      : "Not collected"}
                 </button>
               </div>
             </section>

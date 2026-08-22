@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSalaryLoanV2RepaymentSchedule,
   buildRepaymentSchedule,
   formatApplicantLoanSummary,
   summarizeRepaymentSchedule,
@@ -10,6 +11,45 @@ describe("repayment schedule", () => {
     expect(buildRepaymentSchedule("25501", 2, "2026-09-15")).toEqual([
       { installmentNo: 1, dueDate: "2026-09-15", amountDueMinor: "12750" },
       { installmentNo: 2, dueDate: "2026-10-15", amountDueMinor: "12751" },
+    ]);
+  });
+
+  it("builds a V2 payroll-node schedule with principal and interest split separately", () => {
+    expect(
+      buildSalaryLoanV2RepaymentSchedule({
+        principalAmountMinor: "10001",
+        lenderInterestMinor: "151",
+        contractualTermDays: 30,
+        installmentCount: 2,
+        firstDueDate: "2026-09-15",
+        selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+        employerPayrollRuleVersion: "EMPLOYER-PAYROLL-V2-20260821",
+        payrollNodes: [
+          { nodeRef: "PAYDAY-1", scheduleType: "FIXED_DAY", dayOfMonth: 15 },
+          { nodeRef: "PAYDAY-2", scheduleType: "LAST_DAY_OF_MONTH" },
+        ],
+        payrollDeductionAuthorizationRef: "PAYROLL-AUTH-001",
+        collectionPayeeRef: "LENDER-COLLECTION-ACCOUNT",
+        productRuleVersion: "PRODUCT-RULE-V2-20260821",
+        lenderInterestRuleVersion: "LENDER-INTEREST-V2-20260821",
+      }),
+    ).toEqual([
+      {
+        installmentNo: 1,
+        dueDate: "2026-09-15",
+        amountDueMinor: "5075",
+        principalDueMinor: "5000",
+        lenderInterestDueMinor: "75",
+        payrollNodeRef: "PAYDAY-1",
+      },
+      {
+        installmentNo: 2,
+        dueDate: "2026-09-30",
+        amountDueMinor: "5077",
+        principalDueMinor: "5001",
+        lenderInterestDueMinor: "76",
+        payrollNodeRef: "PAYDAY-2",
+      },
     ]);
   });
 
@@ -74,6 +114,25 @@ describe("repayment schedule", () => {
     expect(() => buildRepaymentSchedule("25.50", 2, "2026-09-15")).toThrow();
     expect(() => buildRepaymentSchedule("25500", 0, "2026-09-15")).toThrow();
     expect(() => buildRepaymentSchedule("25500", 2, "not-a-date")).toThrow();
+    expect(() =>
+      buildSalaryLoanV2RepaymentSchedule({
+        principalAmountMinor: "10000",
+        lenderInterestMinor: "150",
+        contractualTermDays: 30,
+        installmentCount: 2,
+        firstDueDate: "2026-09-14",
+        selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+        employerPayrollRuleVersion: "EMPLOYER-PAYROLL-V2-20260821",
+        payrollNodes: [
+          { nodeRef: "PAYDAY-1", scheduleType: "FIXED_DAY", dayOfMonth: 15 },
+          { nodeRef: "PAYDAY-2", scheduleType: "LAST_DAY_OF_MONTH" },
+        ],
+        payrollDeductionAuthorizationRef: "PAYROLL-AUTH-001",
+        collectionPayeeRef: "LENDER-COLLECTION-ACCOUNT",
+        productRuleVersion: "PRODUCT-RULE-V2-20260821",
+        lenderInterestRuleVersion: "LENDER-INTEREST-V2-20260821",
+      }),
+    ).toThrow(/does not match a configured payroll node/);
   });
 
   it("keeps the user-facing API shape complete and free of internal database names", () => {

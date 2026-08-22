@@ -4,25 +4,39 @@ import {
   applicantReassessmentBrokerReviewSchema,
   createApplicationSchema,
   disbursementDualControlSchema,
+  employerCollectionVerificationSchema,
   applicantSupplementResponseSchema,
   lenderFinalReviewSchema,
 } from "../src/validation.js";
 
+const baseCreateApplicationPayload = {
+  telegramUserRef: "local-user-001",
+  preferredLanguage: "km" as const,
+  requestedAmount: { amountMinor: "10000", currency: "USD" as const },
+  tenorDays: 30 as const,
+  selectedRepaymentMethod: "USER_MANUAL_PAYMENT" as const,
+  authorizationSnapshot: {
+    employerVerificationAuthorized: true as const,
+    serviceAgreementAuthorized: true as const,
+    postDisbursementBrokerageAuthorized: true as const,
+    payrollDeductionAuthorized: false,
+    directDebitAuthorized: false,
+  },
+};
+
 describe("controlled-pilot application validation", () => {
-  it("accepts a USD request with minor-unit string and valid term", () => {
+  it("accepts a USD request with Day 2 workflow fields", () => {
     expect(
-      createApplicationSchema.parse({
-        telegramUserRef: "local-user-001",
-        preferredLanguage: "km",
-        requestedAmount: { amountMinor: "10000", currency: "USD" },
-        tenorDays: 30,
-      }),
-    ).toMatchObject({ tenorDays: 30 });
+      createApplicationSchema.parse(baseCreateApplicationPayload),
+    ).toMatchObject({
+      tenorDays: 30,
+      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+    });
   });
 
   it("rejects number money values and an out-of-range term", () => {
     const parsed = createApplicationSchema.safeParse({
-      telegramUserRef: "local-user-001",
+      ...baseCreateApplicationPayload,
       preferredLanguage: "en",
       requestedAmount: { amountMinor: 10000, currency: "USD" },
       tenorDays: 181,
@@ -32,10 +46,9 @@ describe("controlled-pilot application validation", () => {
 
   it("accepts complete personal details but rejects a malformed phone number", () => {
     const valid = {
+      ...baseCreateApplicationPayload,
       telegramUserRef: "local-user-private-profile",
-      preferredLanguage: "en",
-      requestedAmount: { amountMinor: "10000", currency: "USD" },
-      tenorDays: 30,
+      preferredLanguage: "en" as const,
       personalProfile: {
         fullName: "Test Applicant",
         phone: "+85512345678",
@@ -56,6 +69,25 @@ describe("controlled-pilot application validation", () => {
         personalDataAndPhoneConsent: undefined,
       }).success,
     ).toBe(false);
+  });
+
+  it("requires method-specific authorization snapshots", () => {
+    expect(
+      createApplicationSchema.safeParse({
+        ...baseCreateApplicationPayload,
+        selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+      }).success,
+    ).toBe(false);
+    expect(
+      createApplicationSchema.safeParse({
+        ...baseCreateApplicationPayload,
+        selectedRepaymentMethod: "USER_DIRECT_DEBIT",
+        authorizationSnapshot: {
+          ...baseCreateApplicationPayload.authorizationSnapshot,
+          directDebitAuthorized: true,
+        },
+      }).success,
+    ).toBe(true);
   });
 
   it("requires distinct maker and checker roles for disbursement control", () => {
@@ -103,10 +135,15 @@ describe("controlled-pilot application validation", () => {
         decision: "APPROVED",
         reasonCode: "FINAL_APPROVAL",
         approvedAmountMinor: "25000",
-        serviceFeeMinor: "0",
-        totalRepayableMinor: "25000",
+        actualDisbursementAmountMinor: "25000",
+        lenderInterestMinor: "500",
+        totalRepaymentAmountMinor: "25500",
+        brokerageRemunerationReceivableMinor: "3500",
         installmentCount: 1,
         firstDueDate: "2026-09-13",
+        productRuleVersion: "PRODUCT-RULE-V2-20260821",
+        brokerageRemunerationRuleVersion: "BROKERAGE-RULE-V2-20260821",
+        lenderInterestRuleVersion: "LENDER-INTEREST-V2-20260821",
       }).success,
     ).toBe(true);
   });
@@ -153,6 +190,27 @@ describe("controlled-pilot application validation", () => {
       applicantReassessmentBrokerReviewSchema.safeParse({
         decision: "APPROVED",
         reasonCode: "bad reason",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts an optional payroll collection sequence for employer finance reporting", () => {
+    expect(
+      employerCollectionVerificationSchema.safeParse({
+        collectionResult: "COLLECTED",
+        reasonCode: "PAYROLL_INSTALLMENT_COLLECTION_REPORTED",
+        collectionSequence: 1,
+        actualCollectedAmountMinor: "12750",
+        evidenceReference: "PAYROLL-EVIDENCE-001",
+      }).success,
+    ).toBe(true);
+    expect(
+      employerCollectionVerificationSchema.safeParse({
+        collectionResult: "NOT_COLLECTED",
+        reasonCode: "PAYROLL_INSTALLMENT_NOT_COLLECTED",
+        collectionSequence: 3,
+        actualCollectedAmountMinor: "1",
+        evidenceReference: "PAYROLL-EVIDENCE-002",
       }).success,
     ).toBe(false);
   });

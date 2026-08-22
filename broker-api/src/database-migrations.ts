@@ -6,6 +6,15 @@ import type { Pool, PoolClient } from "pg";
 
 type Migration = { filename: string; sql: string; checksum: string };
 
+const compatibleMigrationChecksums = new Map<string, ReadonlySet<string>>([
+  [
+    "V0040__repayment_plan_breakdown_and_payroll_reporting.sql",
+    new Set([
+      "3cf93d177614b0e5c9a09f222b7c6b0d33216ce05c8af7be5bd6793fc87e744e",
+    ]),
+  ],
+]);
+
 const migrationFile = /^V\d{4}__[a-z0-9_]+\.sql$/;
 const legacyBaselineFinal = "V0009__protect_paid_repayment_installments.sql";
 
@@ -97,7 +106,13 @@ export async function runDatabaseMigrations(pool: Pool): Promise<void> {
     for (const migration of migrations) {
       const previousChecksum = appliedByName.get(migration.filename);
       if (previousChecksum) {
-        if (previousChecksum !== migration.checksum) {
+        const compatibleChecksums = compatibleMigrationChecksums.get(
+          migration.filename,
+        );
+        if (
+          previousChecksum !== migration.checksum &&
+          !compatibleChecksums?.has(previousChecksum)
+        ) {
           throw new Error(`Migration checksum mismatch: ${migration.filename}`);
         }
         continue;

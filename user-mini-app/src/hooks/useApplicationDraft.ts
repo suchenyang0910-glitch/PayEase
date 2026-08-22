@@ -8,6 +8,8 @@ type ApplicationDraftStage = "welcome" | "details";
 export type ApplicationDraftValues = Readonly<{
   amountInput: string;
   term: number;
+  selectedRepaymentMethod:
+    "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
   name: string;
   residentialAddress: string;
   phone: string;
@@ -25,6 +27,11 @@ export type ApplicationDraftValues = Readonly<{
   livenessPrepared: boolean;
   wealthProofAttached: boolean;
   consent: boolean;
+  employerVerificationAuthorized: boolean;
+  serviceAgreementAuthorized: boolean;
+  postDisbursementBrokerageAuthorized: boolean;
+  payrollDeductionAuthorized: boolean;
+  directDebitAuthorized: boolean;
 }>;
 
 type StoredApplicationDraft = Readonly<{
@@ -106,6 +113,11 @@ function readStoredApplicationDraft(): StoredApplicationDraft | undefined {
       amountInput:
         typeof parsed.amountInput === "string" ? parsed.amountInput : "50",
       term: parsed.term === 15 ? 15 : 30,
+      selectedRepaymentMethod:
+        parsed.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" ||
+        parsed.selectedRepaymentMethod === "USER_DIRECT_DEBIT"
+          ? parsed.selectedRepaymentMethod
+          : "USER_MANUAL_PAYMENT",
       name: typeof parsed.name === "string" ? parsed.name : "",
       residentialAddress:
         typeof parsed.residentialAddress === "string"
@@ -151,6 +163,13 @@ function readStoredApplicationDraft(): StoredApplicationDraft | undefined {
       livenessPrepared: parsed.livenessPrepared === true,
       wealthProofAttached: parsed.wealthProofAttached === true,
       consent: parsed.consent === true,
+      employerVerificationAuthorized:
+        parsed.employerVerificationAuthorized === true,
+      serviceAgreementAuthorized: parsed.serviceAgreementAuthorized === true,
+      postDisbursementBrokerageAuthorized:
+        parsed.postDisbursementBrokerageAuthorized === true,
+      payrollDeductionAuthorized: parsed.payrollDeductionAuthorized === true,
+      directDebitAuthorized: parsed.directDebitAuthorized === true,
     };
   } catch {
     return undefined;
@@ -187,6 +206,7 @@ export function useApplicationDraft({
     restoreValuesRef.current({
       amountInput: draft.amountInput,
       term: draft.term,
+      selectedRepaymentMethod: draft.selectedRepaymentMethod,
       name: draft.name,
       residentialAddress: draft.residentialAddress,
       phone: draft.phone,
@@ -204,6 +224,12 @@ export function useApplicationDraft({
       livenessPrepared: draft.livenessPrepared,
       wealthProofAttached: draft.wealthProofAttached,
       consent: draft.consent,
+      employerVerificationAuthorized: draft.employerVerificationAuthorized,
+      serviceAgreementAuthorized: draft.serviceAgreementAuthorized,
+      postDisbursementBrokerageAuthorized:
+        draft.postDisbursementBrokerageAuthorized,
+      payrollDeductionAuthorized: draft.payrollDeductionAuthorized,
+      directDebitAuthorized: draft.directDebitAuthorized,
     });
     setStage(draft.stage);
     setFormStep(draft.formStep);

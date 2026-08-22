@@ -34,11 +34,6 @@ EXTENSIONS=('*.ts' '*.tsx' '*.js' '*.jsx')
 echo "[check-money-type] ROOT_DIR=${ROOT_DIR}"
 echo "[check-money-type] 扫描 ${EXTENSIONS[*]} 目录：排除 ${IGNORE_DIRS[*]}"
 
-EXCLUDES=()
-for d in "${IGNORE_DIRS[@]}"; do
-  EXCLUDES+=(--exclude-dir="${d}")
-done
-
 if ! command -v grep >/dev/null 2>&1; then
   echo "[check-money-type] ERR: 环境中无 grep，Windows 请使用 ./scripts/check-money-type.ps1" >&2
   exit 2
@@ -47,29 +42,22 @@ fi
 TMP_OUT="$(mktemp)"
 trap 'rm -f "${TMP_OUT}"' EXIT
 
-set +e
-grep -R -n -E \
-  "${VIOLATION_RE}" \
-  "${EXCLUDES[@]}" \
-  --include='*.ts' \
-  --include='*.tsx' \
-  --include='*.js' \
-  --include='*.jsx' \
-  "${ROOT_DIR}" \
-  >"${TMP_OUT}" 2>/dev/null
-GREP_RC=$?
-set -e
-
-# grep 退出码：0=匹配到(违规) 1=无匹配 2=错误
-if [ ${GREP_RC} -eq 2 ]; then
-  echo "[check-money-type] grep 执行错误" >&2
-  cat "${TMP_OUT}" >&2 || true
-  exit 2
-fi
+# Scan only versioned source files plus non-ignored worktree files. This avoids
+# recursively traversing local caches, build output and Windows junctions while
+# preserving the exact source set that can be committed or evaluated by CI.
+while IFS= read -r -d '' source_file; do
+  grep -Hn -E "${VIOLATION_RE}" -- "${source_file}" >>"${TMP_OUT}" 2>/dev/null || true
+done < <(
+  git ls-files -z --cached --others --exclude-standard -- \
+    '*.ts' '*.tsx' '*.js' '*.jsx'
+)
 
 # 允许列表：S0.1 shared-money 包定义的类型 / zod schema 引用不算违规
 ALLOWLIST_RE='packages/shared-money/src/|packages/shared-money/__tests__/|packages/shared-security/src/__tests__/|packages/shared-security/__tests__/|.semgrep/README.ts'
 FILTERED="$(grep -v -E "${ALLOWLIST_RE}" "${TMP_OUT}" || true)"
+# These are control values, not monetary amounts. Keep this narrow: a
+# repayment amount/fee/balance must still be represented as amountMinor.
+FILTERED="$(printf '%s\n' "${FILTERED}" | grep -v -E '(repaymentGraceDays|repayment_grace_days|repayment_installment_no)[[:space:]]*[:!?][[:space:]]*number' || true)"
 
 if [ -n "${FILTERED}" ]; then
   echo "[check-money-type] FAIL: 发现 Money 字段使用 number (CI-10)。请改为 { amountMinor: string; currency: Currency } 类型：" >&2

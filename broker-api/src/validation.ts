@@ -1,6 +1,30 @@
 import { z } from "zod";
 
 export const languageSchema = z.enum(["km", "en", "zh-CN"]);
+const REPAYMENT_METHODS = [
+  "EMPLOYER_PAYROLL_DEDUCTION",
+  "USER_DIRECT_DEBIT",
+  "USER_MANUAL_PAYMENT",
+] as const;
+const repaymentMethodSchema = z.enum(REPAYMENT_METHODS);
+const authorizationSnapshotSchema = z
+  .object({
+    employerVerificationAuthorized: z.literal(true),
+    serviceAgreementAuthorized: z.literal(true),
+    postDisbursementBrokerageAuthorized: z.literal(true),
+    payrollDeductionAuthorized: z.boolean(),
+    directDebitAuthorized: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    if (value.payrollDeductionAuthorized && value.directDebitAuthorized) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["directDebitAuthorized"],
+        message:
+          "Payroll deduction and direct debit authorization cannot both be active for the same application snapshot.",
+      });
+    }
+  });
 
 export const createApplicationSchema = z
   .object({
@@ -12,7 +36,9 @@ export const createApplicationSchema = z
       amountMinor: z.string().regex(/^\d+$/),
       currency: z.literal("USD"),
     }),
-    tenorDays: z.number().int().min(7).max(180),
+    tenorDays: z.union([z.literal(15), z.literal(30)]),
+    selectedRepaymentMethod: repaymentMethodSchema,
+    authorizationSnapshot: authorizationSnapshotSchema,
     employerTenantId: z.string().uuid().optional(),
     identityDocument: z
       .object({
@@ -46,6 +72,40 @@ export const createApplicationSchema = z
           "Personal-data and phone consent is required when submitting a profile.",
       });
     }
+    if (
+      value.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" &&
+      value.authorizationSnapshot.payrollDeductionAuthorized !== true
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["authorizationSnapshot", "payrollDeductionAuthorized"],
+        message:
+          "Employer payroll deduction requires an explicit payroll deduction authorization.",
+      });
+    }
+    if (
+      value.selectedRepaymentMethod === "USER_DIRECT_DEBIT" &&
+      value.authorizationSnapshot.directDebitAuthorized !== true
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["authorizationSnapshot", "directDebitAuthorized"],
+        message:
+          "User direct debit requires an explicit direct debit authorization.",
+      });
+    }
+    if (
+      value.selectedRepaymentMethod === "USER_MANUAL_PAYMENT" &&
+      (value.authorizationSnapshot.payrollDeductionAuthorized ||
+        value.authorizationSnapshot.directDebitAuthorized)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["authorizationSnapshot"],
+        message:
+          "Manual payment cannot submit payroll deduction or direct debit authorization.",
+      });
+    }
   });
 
 export const applicantDraftStageSchema = z.enum(["welcome", "details"]);
@@ -63,6 +123,7 @@ export const applicantApplicationDraftSchema = z.object({
   formStep: applicantDraftFormStepSchema,
   amountInput: z.string().max(32),
   term: z.union([z.literal(15), z.literal(30)]),
+  selectedRepaymentMethod: repaymentMethodSchema,
   name: z.string().max(120),
   residentialAddress: z.string().max(240),
   phone: z.string().max(32),
@@ -80,6 +141,11 @@ export const applicantApplicationDraftSchema = z.object({
   livenessPrepared: z.boolean(),
   wealthProofAttached: z.boolean(),
   consent: z.boolean(),
+  employerVerificationAuthorized: z.boolean(),
+  serviceAgreementAuthorized: z.boolean(),
+  postDisbursementBrokerageAuthorized: z.boolean(),
+  payrollDeductionAuthorized: z.boolean(),
+  directDebitAuthorized: z.boolean(),
 });
 
 export const telegramSessionSchema = z.object({
@@ -97,23 +163,78 @@ const approvalDecisionSchema = z.object({
 });
 
 export const employerVerificationSchema = approvalDecisionSchema;
+export const employerCollectionVerificationSchema = z
+  .object({
+    collectionResult: z.enum([
+      "COLLECTED",
+      "PARTIALLY_COLLECTED",
+      "NOT_COLLECTED",
+    ]),
+    reasonCode: z.string().min(1).max(64),
+    collectionSequence: z.number().int().min(1).max(2).optional(),
+    actualCollectedAmountMinor: z.string().regex(/^\d+$/),
+    evidenceReference: z.string().trim().min(3).max(160),
+  })
+  .superRefine((value, context) => {
+    const actual = BigInt(value.actualCollectedAmountMinor);
+    if (value.collectionResult === "NOT_COLLECTED" && actual !== 0n) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actualCollectedAmountMinor"],
+        message:
+          "A not-collected payroll report must use 0 as the actual amount.",
+      });
+    }
+    if (
+      value.collectionResult === "COLLECTED" &&
+      value.actualCollectedAmountMinor === "0"
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actualCollectedAmountMinor"],
+        message:
+          "A collected payroll report must record a positive actual amount.",
+      });
+    }
+    if (
+      value.collectionResult === "PARTIALLY_COLLECTED" &&
+      value.actualCollectedAmountMinor === "0"
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actualCollectedAmountMinor"],
+        message:
+          "A partially-collected payroll report must record the deducted amount.",
+      });
+    }
+  });
 export const lenderInitialReviewSchema = approvalDecisionSchema;
 export const lenderFinalReviewSchema = approvalDecisionSchema
   .extend({
     approvedAmountMinor: z.string().regex(/^\d+$/).optional(),
-    serviceFeeMinor: z.string().regex(/^\d+$/).optional(),
-    totalRepayableMinor: z.string().regex(/^\d+$/).optional(),
-    installmentCount: z.number().int().min(1).max(6).optional(),
+    actualDisbursementAmountMinor: z.string().regex(/^\d+$/).optional(),
+    lenderInterestMinor: z.string().regex(/^\d+$/).optional(),
+    totalRepaymentAmountMinor: z.string().regex(/^\d+$/).optional(),
+    brokerageRemunerationReceivableMinor: z.string().regex(/^\d+$/).optional(),
+    installmentCount: z.number().int().min(1).max(2).optional(),
     firstDueDate: z.string().date().optional(),
+    productRuleVersion: z.string().min(3).max(64).optional(),
+    brokerageRemunerationRuleVersion: z.string().min(3).max(64).optional(),
+    lenderInterestRuleVersion: z.string().min(3).max(64).optional(),
   })
   .superRefine((value, context) => {
     if (value.decision !== "APPROVED") return;
     for (const field of [
       "approvedAmountMinor",
-      "serviceFeeMinor",
-      "totalRepayableMinor",
+      "actualDisbursementAmountMinor",
+      "lenderInterestMinor",
+      "totalRepaymentAmountMinor",
+      "brokerageRemunerationReceivableMinor",
       "installmentCount",
       "firstDueDate",
+      "productRuleVersion",
+      "brokerageRemunerationRuleVersion",
+      "lenderInterestRuleVersion",
     ] as const) {
       if (value[field] === undefined) {
         context.addIssue({
@@ -125,16 +246,31 @@ export const lenderFinalReviewSchema = approvalDecisionSchema
     }
     if (
       value.approvedAmountMinor &&
-      value.serviceFeeMinor &&
-      value.totalRepayableMinor &&
-      BigInt(value.totalRepayableMinor) <
-        BigInt(value.approvedAmountMinor) + BigInt(value.serviceFeeMinor)
+      value.actualDisbursementAmountMinor &&
+      value.lenderInterestMinor &&
+      value.totalRepaymentAmountMinor &&
+      BigInt(value.actualDisbursementAmountMinor) !==
+        BigInt(value.approvedAmountMinor)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["totalRepayableMinor"],
+        path: ["actualDisbursementAmountMinor"],
         message:
-          "Total repayable amount must include principal and service fee.",
+          "Actual disbursement must equal the approved principal for V2 salary loans.",
+      });
+    }
+    if (
+      value.approvedAmountMinor &&
+      value.lenderInterestMinor &&
+      value.totalRepaymentAmountMinor &&
+      BigInt(value.totalRepaymentAmountMinor) !==
+        BigInt(value.approvedAmountMinor) + BigInt(value.lenderInterestMinor)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["totalRepaymentAmountMinor"],
+        message:
+          "Total repayment amount must equal principal plus lender interest.",
       });
     }
   });
@@ -295,6 +431,75 @@ export const reconciliationAssignSchema = z.object({
 
 export const reconciliationResolutionSchema = z.object({
   reasonCode: z.string().min(1).max(128),
+});
+
+export const lenderCollectionWorkItemCreateSchema = z
+  .object({
+    sourceType: z.enum([
+      "USER_DIRECT_DEBIT_REPORT",
+      "USER_MANUAL_PAYMENT_PROOF",
+      "REFUND_REVERSAL",
+    ]),
+    collectionResult: z.enum([
+      "COLLECTED",
+      "PARTIALLY_COLLECTED",
+      "NOT_COLLECTED",
+      "DIRECT_DEBIT_FAILED",
+      "AUTHORIZATION_EXPIRED",
+      "REFUND_REVERSED",
+    ]),
+    reasonCode: z.string().min(1).max(64),
+    collectionSequence: z.number().int().min(1).max(2).optional(),
+    actualCollectedAmountMinor: z.string().regex(/^\d+$/),
+    evidenceReference: z.string().trim().min(3).max(160),
+    sourceReference: z.string().trim().min(3).max(160).optional(),
+  })
+  .superRefine((value, context) => {
+    const actual = BigInt(value.actualCollectedAmountMinor);
+    if (
+      [
+        "NOT_COLLECTED",
+        "DIRECT_DEBIT_FAILED",
+        "AUTHORIZATION_EXPIRED",
+        "REFUND_REVERSED",
+      ].includes(value.collectionResult) &&
+      actual !== 0n
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actualCollectedAmountMinor"],
+        message:
+          "A failed, expired, not-collected, or reversed collection must use 0 as the actual amount.",
+      });
+    }
+    if (
+      (value.collectionResult === "COLLECTED" ||
+        value.collectionResult === "PARTIALLY_COLLECTED") &&
+      actual === 0n
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actualCollectedAmountMinor"],
+        message:
+          "A collected or partially-collected collection must record a positive actual amount.",
+      });
+    }
+    if (
+      value.sourceType === "REFUND_REVERSAL" &&
+      value.collectionResult !== "REFUND_REVERSED"
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["collectionResult"],
+        message:
+          "Refund reversal fixtures must use REFUND_REVERSED as the collection result.",
+      });
+    }
+  });
+
+export const lenderCollectionExceptionResolutionSchema = z.object({
+  reasonCode: z.string().min(1).max(64),
+  evidenceReference: z.string().trim().min(3).max(160),
 });
 
 export const bootstrapAdminSchema = z.object({

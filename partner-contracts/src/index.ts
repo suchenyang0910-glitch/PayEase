@@ -85,3 +85,11 @@ export {
   type FinanceRepaymentReconV1Result,
   type FinanceRepaymentReconLineV1,
 } from "./templates/finance-repayment-recon.template";
+
+export {
+  SALARY_LOAN_V2_QUOTE_VERSION,
+  SalaryLoanV2QuoteParamsSchema,
+  SalaryLoanV2QuoteResultSchema,
+  type SalaryLoanV2QuoteParams,
+  type SalaryLoanV2QuoteResult,
+} from "./templates/salary-loan-v2-quote.template";

@@ -11,8 +11,8 @@
     "start": "node dist/server.js",
     "preflight:telegram-auth": "node dist/deployment-preflight.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --exclude __tests__/public-application.integration.test.ts",
-    "test:integration": "node scripts/require-integration-database.mjs && vitest run __tests__/public-application.integration.test.ts",
+    "test": "vitest run --exclude __tests__/public-application.integration.test.ts --exclude __tests__/broker-migration-runtime.integration.test.ts",
+    "test:integration": "node scripts/require-integration-database.mjs && vitest run __tests__/public-application.integration.test.ts __tests__/broker-migration-runtime.integration.test.ts",
     "lint": "echo 'broker-api lint placeholder'"
   },
   "dependencies": {

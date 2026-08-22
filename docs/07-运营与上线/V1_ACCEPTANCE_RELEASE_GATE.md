@@ -14,13 +14,13 @@
 
 ## P0：自动化验收
 
-| 编号 | 验收项               | 权威证据                                                     | 通过条件                                          |
-| ---- | -------------------- | ------------------------------------------------------------ | ------------------------------------------------- |
-| A-01 | 格式、类型、单元测试 | `pnpm format:check`、`pnpm typecheck`、`pnpm test`           | 退出码 0                                          |
-| A-02 | PostgreSQL 集成测试  | `pnpm --filter @payease/broker-api run test:integration`     | 退出码 0；不得跳过                                |
-| A-03 | 金额与许可证守卫     | `scripts/check-money-type.ps1`、`scripts/check-licenses.ps1` | 退出码 0；金额无 `number` DTO                     |
-| A-04 | 远程安全门禁         | GitHub Actions `S0.3 - Local Security Gates`                 | Semgrep、Gitleaks、金额和许可证作业全绿           |
-| A-05 | 远程质量门禁         | GitHub Actions `S0 - Shared packages & Gate`                 | format、typecheck、tests、integration、build 全绿 |
+| 编号 | 验收项                 | 权威证据                                                                                                            | 通过条件                                          |
+| ---- | ---------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| A-01 | 格式、类型、单元测试   | `pnpm format:check`、`pnpm typecheck`、`pnpm test`                                                                  | 退出码 0                                          |
+| A-02 | PostgreSQL 18 集成测试 | `pnpm --filter @payease/broker-api run test:integration`；`pnpm --filter @payease/lender-core run test:integration` | 两域均退出码 0；不得跳过                          |
+| A-03 | 金额与许可证守卫       | `scripts/check-money-type.ps1`、`scripts/check-licenses.ps1`                                                        | 退出码 0；金额无 `number` DTO                     |
+| A-04 | 远程安全门禁           | GitHub Actions `S0.3 - Local Security Gates`                                                                        | Semgrep、Gitleaks、金额和许可证作业全绿           |
+| A-05 | 远程质量门禁           | GitHub Actions `S0 - Shared packages & Gate`                                                                        | format、typecheck、tests、integration、build 全绿 |
 
 建议使用 [run-v1-acceptance.ps1](../scripts/run-v1-acceptance.ps1) 在提交前一次运行 A-01 至 A-03。该脚本必须传入名为 `payease_test` 的一次性 PostgreSQL 测试数据库 URL；不提供 URL 或目标名称不正确会失败而不是静默跳过集成测试。
 

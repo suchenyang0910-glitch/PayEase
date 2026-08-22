@@ -14,11 +14,12 @@ services:
       POSTGRES_USER: payease_preview
       POSTGRES_PASSWORD: ${PAYEASE_PREVIEW_POSTGRES_PASSWORD:?Set a VPS-local preview password}
     volumes:
-      # A PostgreSQL 18 data directory is not compatible with the existing
-      # PostgreSQL 16 preview volume. The release upgrade restores a verified
-      # logical backup into this new volume and retains the prior volume for
-      # rollback until the controlled-preview acceptance window closes.
-      - payease-preview-postgres18:/var/lib/postgresql/data
+      # PostgreSQL 18 images manage the version-specific data directory below
+      # /var/lib/postgresql. Mounting the legacy /data path makes the image
+      # fail closed rather than initialize an upgrade-safe cluster. The new
+      # volume is restored from a verified logical backup; the PostgreSQL 16
+      # volume remains untouched for rollback during the acceptance window.
+      - payease-preview-postgres18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payease_preview -d payease_preview"]
       interval: 5s

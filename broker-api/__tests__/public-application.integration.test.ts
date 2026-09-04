@@ -3,6 +3,12 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runDatabaseMigrations } from "../src/database-migrations.js";
 import {
+  createOutgoingDomainEvent,
+  sha256Hex,
+  signDomainEventRequest,
+  stableJson,
+} from "../src/domain-events.js";
+import {
   decryptPersonalProfile,
   decryptPersonalValue,
 } from "../src/personal-profile.js";
@@ -35,6 +41,54 @@ function signedInitData(
     createHmac("sha256", secret).update(dataCheckString).digest("hex"),
   );
   return parameters.toString();
+}
+
+function signedLenderEventHeaders(
+  event: ReturnType<typeof createOutgoingDomainEvent>,
+) {
+  const timestampMillis = String(Date.now());
+  const nonce = `nonce-${randomUUID()}`;
+  const secret =
+    process.env.PAYEASE_LENDER_EVENT_SHARED_SECRET ??
+    `lender_test_only_${"*".repeat(40)}`;
+  return {
+    "x-payease-algo": "HMAC-SHA256",
+    "x-payease-key-id": "lender-hmac-v1",
+    "x-payease-timestamp-millis": timestampMillis,
+    "x-payease-nonce": nonce,
+    "x-payease-signature": signDomainEventRequest({
+      method: "POST",
+      path: "/v1/local/domain-events/inbox/receive",
+      timestampMillis,
+      nonce,
+      keyId: "lender-hmac-v1",
+      bodySha256: sha256Hex(stableJson(event)),
+      secret,
+    }),
+  };
+}
+
+function signedWalletJumpExchangeHeaders(payload: Record<string, unknown>) {
+  const timestampMillis = String(Date.now());
+  const nonce = `wallet-jump-${randomUUID()}`;
+  const secret =
+    process.env.PAYEASE_LENDER_WALLET_SHARED_SECRET ??
+    `lender_wallet_test_only_${"*".repeat(40)}`;
+  return {
+    "x-payease-wallet-algo": "HMAC-SHA256",
+    "x-payease-wallet-key-id": "lender-wallet-hmac-v1",
+    "x-payease-wallet-timestamp-millis": timestampMillis,
+    "x-payease-wallet-nonce": nonce,
+    "x-payease-wallet-signature": signDomainEventRequest({
+      method: "POST",
+      path: "/v1/local/wallet-operation-jumps/exchange",
+      timestampMillis,
+      nonce,
+      keyId: "lender-wallet-hmac-v1",
+      bodySha256: sha256Hex(stableJson(payload)),
+      secret,
+    }),
+  };
 }
 
 function multipartPayload(args: {
@@ -142,13 +196,11 @@ function day2ApplicationPayload(
     preferredLanguage: "en",
     requestedAmount: { amountMinor: "10000", currency: "USD" },
     tenorDays: 30,
-    selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+    selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
     authorizationSnapshot: {
       employerVerificationAuthorized: true,
       serviceAgreementAuthorized: true,
       postDisbursementBrokerageAuthorized: true,
-      payrollDeductionAuthorized: false,
-      directDebitAuthorized: false,
     },
     ...overrides,
   };
@@ -168,7 +220,7 @@ integration("public applicant access", () => {
       "SELECT filename FROM schema_migrations ORDER BY filename",
     );
     expect(appliedMigrations.rows.at(-1)).toEqual({
-      filename: "V0042__lender_collection_work_items_and_exceptions.sql",
+      filename: "V0047__lender_wallet_operation_result_projection.sql",
     });
     process.env.NODE_ENV = "test";
     process.env.DATABASE_URL = integrationDatabaseUrl;
@@ -1180,14 +1232,12 @@ integration("public applicant access", () => {
       },
       workflow: {
         workflowVersion: "SALARY_LOAN_V2",
-        selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
-        availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
+        selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
+        availableRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
         collectionScope: "PRINCIPAL_AND_INTEREST",
         employerVerificationAuthorized: true,
         serviceAgreementAuthorized: true,
         postDisbursementBrokerageAuthorized: true,
-        payrollDeductionAuthorized: false,
-        directDebitAuthorized: false,
       },
       terms: null,
       quote: {
@@ -1350,8 +1400,8 @@ integration("public applicant access", () => {
       tenorDays: 30,
       employerTenantSelected: true,
       workflowVersion: "SALARY_LOAN_V2",
-      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
-      availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
+      selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
+      availableRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
       collectionScope: "PRINCIPAL_AND_INTEREST",
       identityDocumentProvided: true,
       personalDataAndPhoneConsent: true,
@@ -1361,8 +1411,6 @@ integration("public applicant access", () => {
         employerVerificationAuthorized: true,
         serviceAgreementAuthorized: true,
         postDisbursementBrokerageAuthorized: true,
-        payrollDeductionAuthorized: false,
-        directDebitAuthorized: false,
       },
     };
     expect(submittedAudit.rows[0]!.payload_hash).toBe(
@@ -2205,6 +2253,157 @@ integration("public applicant access", () => {
     expect(Number(withdrawalAuditCount.rows[0]?.count)).toBe(1);
   });
 
+  it("projects wallet credit only from a signed lender domain event and issues a fragment token jump", async () => {
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('integration-wallet-user', 'en')
+       RETURNING id`,
+    );
+    const application = await database.query<{ application_no: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days,
+         status, workflow_version)
+       VALUES (
+         'APP-20260830-WALLET-001', $1, 25000, 'USD', 30,
+         'DISBURSED', 'SALARY_LOAN_V2'
+       )
+       RETURNING application_no`,
+      [user.rows[0]!.id],
+    );
+    const applicationNo = application.rows[0]!.application_no;
+    const sessionToken = "integration-wallet-session";
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at)
+       VALUES ($1, $2, '444444444', now() + interval '15 minutes')`,
+      [
+        createHash("sha256").update(sessionToken).digest("hex"),
+        "integration-wallet-user",
+      ],
+    );
+    const applicantCookie = `payease_applicant_session=${sessionToken}`;
+    const unavailableBeforeWallet = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/wallet-operation-jumps`,
+      headers: { cookie: applicantCookie },
+      payload: { operationType: "WITHDRAWAL" },
+    });
+    expect(unavailableBeforeWallet.statusCode).toBe(409);
+
+    const walletCreditEvent = createOutgoingDomainEvent({
+      eventId: "evt_wallet_credit_integration_001",
+      eventType: "WALLET_CREDIT_CONFIRMED",
+      sourceDomain: "LENDER",
+      occurredAt: "2026-08-30T10:00:00.000Z",
+      idempotencyKey: "idem_wallet_credit_integration_001",
+      externalApplicationRef: applicationNo,
+      payload: {
+        externalWalletRef: "wallet-ext-integration-001",
+        walletStatus: "WALLET_AVAILABLE",
+        availableBalanceMinor: "25000",
+        currency: "USD",
+      },
+    });
+    process.env.PAYEASE_LENDER_EVENT_SHARED_SECRET =
+      "integration-lender-event-secret";
+    const walletCredit = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/domain-events/inbox/receive",
+      headers: signedLenderEventHeaders(walletCreditEvent),
+      payload: walletCreditEvent,
+    });
+    expect(walletCredit.statusCode).toBe(202);
+    expect(walletCredit.json()).toMatchObject({
+      accepted: true,
+      processingStatus: "PROCESSED",
+    });
+
+    process.env.PAYEASE_SMILE_WALLET_BASE_URL =
+      "https://wallet.smile.test/entry";
+    process.env.PAYEASE_SMILE_WALLET_ALLOWED_HOSTS = "wallet.smile.test";
+
+    const jumpResponse = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/wallet-operation-jumps`,
+      headers: { cookie: applicantCookie },
+      payload: {
+        operationType: "WITHDRAWAL",
+        requestedAmountMinor: "20000",
+      },
+    });
+    expect(jumpResponse.statusCode).toBe(400);
+
+    const createdJump = await brokerApi.app.inject({
+      method: "POST",
+      url: `/v1/local/public/applications/${applicationNo}/wallet-operation-jumps`,
+      headers: { cookie: applicantCookie },
+      payload: { operationType: "WITHDRAWAL" },
+    });
+    expect(createdJump.statusCode).toBe(200);
+    const jumpPayload = createdJump.json() as {
+      walletOperationJumpRef: string;
+      walletOperationUrl: string;
+    };
+    const jumpUrl = new URL(jumpPayload.walletOperationUrl);
+    const jumpToken = new URLSearchParams(jumpUrl.hash.replace(/^#/, "")).get(
+      "jump_token",
+    );
+    expect(jumpUrl.searchParams.get("jump_token")).toBeNull();
+    expect(jumpToken).toBeTruthy();
+    expect(jumpToken).not.toContain("integration-wallet-user");
+    expect(jumpToken).not.toContain(applicationNo);
+    const exchangePayload = {
+      jumpRef: jumpPayload.walletOperationJumpRef,
+      jumpToken: jumpToken!,
+      operationType: "WITHDRAWAL",
+    };
+    const exchanged = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/wallet-operation-jumps/exchange",
+      headers: signedWalletJumpExchangeHeaders(exchangePayload),
+      payload: exchangePayload,
+    });
+    expect(exchanged.statusCode).toBe(200);
+    expect(exchanged.json()).toMatchObject({
+      applicationNo,
+      walletOperationJumpRef: jumpPayload.walletOperationJumpRef,
+      operationType: "WITHDRAWAL",
+      walletStatus: "WALLET_AVAILABLE",
+      availableBalanceMinor: "25000",
+      currency: "USD",
+    });
+    expect((exchanged.json() as { expiresAt: string }).expiresAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T.*Z$/,
+    );
+    const replay = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/wallet-operation-jumps/exchange",
+      headers: signedWalletJumpExchangeHeaders(exchangePayload),
+      payload: exchangePayload,
+    });
+    expect(replay.statusCode).toBe(404);
+    expect(replay.json()).toEqual({ code: "WALLET_OPERATION_JUMP_NOT_FOUND" });
+    const projectedWallet = await database.query<{
+      wallet_status: string;
+      available_balance_minor: string;
+      last_callback_event_id: string | null;
+    }>(
+      `SELECT wallet_status,
+              available_balance_minor::text,
+              last_callback_event_id
+         FROM lender_wallet_projection_snapshots snapshot
+         JOIN applications application_row
+           ON application_row.id = snapshot.application_id
+        WHERE application_row.application_no = $1`,
+      [applicationNo],
+    );
+    expect(projectedWallet.rows[0]).toEqual({
+      wallet_status: "WALLET_AVAILABLE",
+      available_balance_minor: "25000",
+      last_callback_event_id: "evt_wallet_credit_integration_001",
+    });
+  });
+
   it("records the full manual pilot lifecycle with distinct approval accounts", async () => {
     const tenant = await database.query<{ id: string }>(
       `INSERT INTO employer_tenants (external_ref, display_name)
@@ -2859,13 +3058,10 @@ integration("public applicant access", () => {
         requestedAmount: { amountMinor: "25000", currency: "USD" },
         tenorDays: 30,
         employerTenantId: tenant.rows[0]!.id,
-        selectedRepaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
         authorizationSnapshot: {
           employerVerificationAuthorized: true,
           serviceAgreementAuthorized: true,
           postDisbursementBrokerageAuthorized: true,
-          payrollDeductionAuthorized: true,
-          directDebitAuthorized: false,
         },
         identityDocument: { type: "NATIONAL_ID", number: "KH-ID-20001" },
       }),
@@ -2873,6 +3069,28 @@ integration("public applicant access", () => {
     expect(created.statusCode).toBe(201);
     const applicationNo = (created.json() as { applicationNo: string })
       .applicationNo;
+    await database.query(
+      `UPDATE application_repayment_preferences
+          SET selected_repayment_method = 'EMPLOYER_PAYROLL_DEDUCTION',
+              available_repayment_methods = ARRAY['EMPLOYER_PAYROLL_DEDUCTION']::text[],
+              employer_payroll_rule_version = 'EMPLOYER-PAYROLL-V2-PROJECTION',
+              collection_payee_ref = 'EMPLOYER_PAYROLL_RUN',
+              updated_at = now()
+        WHERE application_id = (
+          SELECT id FROM applications WHERE application_no = $1
+        )`,
+      [applicationNo],
+    );
+    await database.query(
+      `UPDATE application_authorization_snapshots
+          SET payroll_deduction_authorized = true,
+              payroll_deduction_authorization_ref = 'AUTH-PAYROLL-PROJECTION-001',
+              updated_at = now()
+        WHERE application_id = (
+          SELECT id FROM applications WHERE application_no = $1
+        )`,
+      [applicationNo],
+    );
     const applicantSessionToken = "integration-payroll-projection-session";
     await database.query(
       `INSERT INTO telegram_auth_sessions
@@ -3796,7 +4014,7 @@ integration("public applicant access", () => {
       formStep: "contacts",
       amountInput: "125",
       term: 30,
-      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       name: "Draft Owner",
       residentialAddress: "Phnom Penh",
       phone: "012345678",
@@ -3817,8 +4035,6 @@ integration("public applicant access", () => {
       employerVerificationAuthorized: true,
       serviceAgreementAuthorized: true,
       postDisbursementBrokerageAuthorized: true,
-      payrollDeductionAuthorized: false,
-      directDebitAuthorized: false,
     } as const;
 
     const putDraft = await brokerApi.app.inject({
@@ -4581,5 +4797,290 @@ integration("public applicant access", () => {
     );
     expect(finalApplicantPayload).not.toContain("message_encrypted");
     expect(application.rows[0]?.id).toBeDefined();
+  });
+
+  it("stores encrypted KYC location evidence and returns only sanitized status projections", async () => {
+    const user = await database.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('kyc-location-user', 'en')
+       RETURNING id`,
+    );
+    await database.query(
+      `INSERT INTO telegram_auth_sessions
+        (token_hash, telegram_user_ref, authenticated_bot_id, expires_at, last_seen_at)
+       VALUES ($1, 'kyc-location-user', '444444444', now() + interval '15 minutes', now())`,
+      [createHash("sha256").update("kyc-location-session").digest("hex")],
+    );
+    await database.query(
+      `INSERT INTO service_area_zone_versions
+        (zone_ref, version, display_name, scope_type, employer_tenant_id,
+         polygon_geojson, polygon_bbox, status, effective_from, effective_until,
+         change_reason, created_by_user_ref, submitted_by_user_ref, submitted_at,
+         reviewed_by_user_ref, reviewed_at, activated_by_user_ref, activated_at)
+       VALUES (
+         'ZONE-PPH-KYC', 1, 'Phnom Penh service area', 'PLATFORM', NULL,
+         $1::jsonb, $2::jsonb, 'ACTIVE', '2026-09-01T00:00:00.000Z', NULL,
+         'Initial rollout', 'ops-maker', 'ops-maker', now(),
+         'ops-checker', now(), 'ops-checker', now()
+       )`,
+      [
+        JSON.stringify({
+          type: "Polygon",
+          coordinates: [
+            [
+              [104.9, 11.54],
+              [104.96, 11.54],
+              [104.96, 11.6],
+              [104.9, 11.6],
+              [104.9, 11.54],
+            ],
+          ],
+        }),
+        JSON.stringify({
+          minLongitude: 104.9,
+          maxLongitude: 104.96,
+          minLatitude: 11.54,
+          maxLatitude: 11.6,
+        }),
+      ],
+    );
+
+    const submitted = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/public/kyc-location-evidence",
+      headers: {
+        cookie: "__Host-payease_applicant_session=kyc-location-session",
+      },
+      payload: {
+        latitude: 11.5564,
+        longitude: 104.9282,
+        horizontalAccuracyMeters: 80,
+        capturedAt: new Date().toISOString(),
+        consentVersion: "KYC_LOCATION_V1",
+      },
+    });
+
+    expect(submitted.statusCode).toBe(201);
+    expect(submitted.json()).toMatchObject({
+      kycLocation: { assessmentResult: "MATCH" },
+    });
+    expect(JSON.stringify(submitted.json())).not.toContain("11.5564");
+    expect(JSON.stringify(submitted.json())).not.toContain("104.9282");
+
+    const stored = await database.query<{
+      latitude_encrypted: Buffer;
+      longitude_encrypted: Buffer;
+    }>(
+      `SELECT latitude_encrypted, longitude_encrypted
+         FROM kyc_location_evidence
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [user.rows[0]!.id],
+    );
+    expect(decryptPersonalValue(stored.rows[0]!.latitude_encrypted)).toBe(
+      "11.5564",
+    );
+    expect(decryptPersonalValue(stored.rows[0]!.longitude_encrypted)).toBe(
+      "104.9282",
+    );
+
+    const status = await brokerApi.app.inject({
+      method: "GET",
+      url: "/v1/local/public/kyc-location-evidence/status",
+      headers: {
+        cookie: "__Host-payease_applicant_session=kyc-location-session",
+      },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toMatchObject({
+      kycLocation: {
+        assessmentResult: "MATCH",
+        submittedAt: expect.any(String),
+      },
+    });
+    expect(JSON.stringify(status.json())).not.toContain("ZONE-PPH-KYC");
+
+    const auditPayloads = await database.query<{ payload_hash: string }>(
+      `SELECT payload_hash
+         FROM audit_events
+        WHERE entity_type = 'KYC_LOCATION_EVIDENCE'
+        ORDER BY occurred_at DESC`,
+    );
+    expect(auditPayloads.rows).not.toHaveLength(0);
+    expect(auditPayloads.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
+      ]),
+    );
+    expect(
+      auditPayloads.rows.some((row) => row.payload_hash.includes("104.9282")),
+    ).toBe(false);
+    expect(
+      auditPayloads.rows.some((row) => row.payload_hash.includes("11.5564")),
+    ).toBe(false);
+  });
+
+  it("enforces dual-control and overlap checks for service area zone lifecycle APIs", async () => {
+    const creatorCookie = await adminCookieForRole(
+      database,
+      "OPS_ADMIN",
+      "OPS",
+    );
+    const reviewerCookie = await adminCookieForRole(
+      database,
+      "OPS_ADMIN",
+      "OPS",
+    );
+    const createPayload = {
+      zoneRef: "ZONE-OPS-001",
+      displayName: "Ops zone one",
+      scopeType: "PLATFORM",
+      polygonGeoJson: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [105.0, 11.7],
+            [105.04, 11.7],
+            [105.04, 11.74],
+            [105.0, 11.74],
+            [105.0, 11.7],
+          ],
+        ],
+      },
+      effectiveFrom: "2026-09-01T00:00:00.000Z",
+      effectiveUntil: null,
+      changeReason: "Initial rollout",
+    };
+
+    const created = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones",
+      headers: {
+        cookie: creatorCookie,
+        "idempotency-key": "service-area-create-001",
+      },
+      payload: createPayload,
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      zone: { zoneRef: "ZONE-OPS-001", version: 1, status: "DRAFT" },
+    });
+
+    const submitted = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-001/drafts/1/submit-review",
+      headers: {
+        cookie: creatorCookie,
+        "idempotency-key": "service-area-submit-001",
+      },
+      payload: {},
+    });
+    expect(submitted.statusCode).toBe(200);
+    expect(submitted.json()).toMatchObject({
+      zone: { status: "PENDING_REVIEW" },
+    });
+
+    const selfReview = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-001/versions/1/review",
+      headers: {
+        cookie: creatorCookie,
+        "idempotency-key": "service-area-self-review-001",
+      },
+      payload: { reviewNote: "self review should fail" },
+    });
+    expect(selfReview.statusCode).toBe(409);
+    expect(selfReview.json()).toEqual({
+      code: "SERVICE_AREA_ZONE_DUAL_CONTROL_REQUIRED",
+    });
+
+    const reviewed = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-001/versions/1/review",
+      headers: {
+        cookie: reviewerCookie,
+        "idempotency-key": "service-area-review-001",
+      },
+      payload: { reviewNote: "looks good" },
+    });
+    expect(reviewed.statusCode).toBe(200);
+
+    const activated = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-001/versions/1/activate",
+      headers: {
+        cookie: reviewerCookie,
+        "idempotency-key": "service-area-activate-001",
+      },
+      payload: {},
+    });
+    expect(activated.statusCode).toBe(200);
+    expect(activated.json()).toMatchObject({
+      zone: { status: "ACTIVE" },
+    });
+
+    const conflicting = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones",
+      headers: {
+        cookie: creatorCookie,
+        "idempotency-key": "service-area-create-002",
+      },
+      payload: {
+        ...createPayload,
+        zoneRef: "ZONE-OPS-002",
+        displayName: "Ops zone two",
+        polygonGeoJson: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [105.02, 11.72],
+              [105.06, 11.72],
+              [105.06, 11.76],
+              [105.02, 11.76],
+              [105.02, 11.72],
+            ],
+          ],
+        },
+      },
+    });
+    expect(conflicting.statusCode).toBe(201);
+
+    await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-002/drafts/1/submit-review",
+      headers: {
+        cookie: creatorCookie,
+        "idempotency-key": "service-area-submit-002",
+      },
+      payload: {},
+    });
+    await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-002/versions/1/review",
+      headers: {
+        cookie: reviewerCookie,
+        "idempotency-key": "service-area-review-002",
+      },
+      payload: { reviewNote: "overlap candidate" },
+    });
+    const blockedActivation = await brokerApi.app.inject({
+      method: "POST",
+      url: "/v1/local/admin/service-area-zones/ZONE-OPS-002/versions/1/activate",
+      headers: {
+        cookie: reviewerCookie,
+        "idempotency-key": "service-area-activate-002",
+      },
+      payload: {},
+    });
+    expect(blockedActivation.statusCode).toBe(409);
+    expect(blockedActivation.json()).toMatchObject({
+      code: "SERVICE_AREA_ZONE_OVERLAPS_ACTIVE_ZONE",
+      conflictingZoneRef: "ZONE-OPS-001",
+      conflictingZoneVersion: 1,
+    });
   });
 });

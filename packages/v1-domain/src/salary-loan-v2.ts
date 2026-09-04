@@ -13,27 +13,15 @@ export type FeeType = (typeof FEE_TYPES)[number];
 export const CONTRACT_TYPES = [
   "BROKER_SERVICE_AGREEMENT",
   "LENDER_FINAL_CONTRACT",
-  "PAYROLL_DEDUCTION_AUTHORIZATION",
-  "DIRECT_DEBIT_AUTHORIZATION",
   "CONFIRMATION_VIDEO_SCRIPT",
 ] as const;
 export type ContractType = (typeof CONTRACT_TYPES)[number];
-
-export const EMPLOYER_PAYROLL_COLLECTION_STATUSES = [
-  "COLLECTED",
-  "PARTIALLY_COLLECTED",
-  "NOT_COLLECTED",
-] as const;
-export type EmployerPayrollCollectionStatus =
-  (typeof EMPLOYER_PAYROLL_COLLECTION_STATUSES)[number];
 
 export const ROUNDING_MODES = ["HALF_EVEN", "HALF_UP", "DOWN"] as const;
 export type RoundingMode = (typeof ROUNDING_MODES)[number];
 
 export const REPAYMENT_METHODS = [
-  "EMPLOYER_PAYROLL_DEDUCTION",
-  "USER_DIRECT_DEBIT",
-  "USER_MANUAL_PAYMENT",
+  "SMILE_WALLET_AUTHORIZATION",
 ] as const;
 export type RepaymentMethod = (typeof REPAYMENT_METHODS)[number];
 
@@ -104,11 +92,8 @@ export const EmployerPayrollRuleVersionSchema = z
     workflowVersion: z.literal("SALARY_LOAN_V2"),
     collectionCurrency: z.literal("USD"),
     payrollNodes: PayrollNodesSchema,
-    allowedRepaymentMethods: z.array(z.enum(REPAYMENT_METHODS)).min(1).max(3),
+    allowedRepaymentMethods: z.array(z.enum(REPAYMENT_METHODS)).min(1).max(4),
     defaultRepaymentMethod: z.enum(REPAYMENT_METHODS),
-    payrollDeductionEnabled: z.boolean(),
-    directDebitEnabled: z.boolean(),
-    legalApprovalEnabled: z.boolean(),
     effectiveFrom: z.string().datetime({ offset: true }),
     effectiveUntil: z.string().datetime({ offset: true }).optional(),
   })
@@ -461,30 +446,6 @@ export function createRepaymentMethodSnapshot(args: {
       `${args.repaymentMethod} is not allowed by the employer payroll rule`,
     );
   }
-  if (args.repaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION") {
-    if (!employerPayrollRule.payrollDeductionEnabled) {
-      throw new Error("Employer payroll deduction is not enabled");
-    }
-    if (!employerPayrollRule.legalApprovalEnabled) {
-      throw new Error("Employer payroll deduction requires legal approval");
-    }
-    if (!args.userAuthorizationRef?.trim()) {
-      throw new Error(
-        "Employer payroll deduction requires userAuthorizationRef",
-      );
-    }
-  }
-  if (args.repaymentMethod === "USER_DIRECT_DEBIT") {
-    if (!employerPayrollRule.directDebitEnabled) {
-      throw new Error("User direct debit is not enabled");
-    }
-    if (!employerPayrollRule.legalApprovalEnabled) {
-      throw new Error("User direct debit requires legal approval");
-    }
-    if (!args.userAuthorizationRef?.trim()) {
-      throw new Error("User direct debit requires userAuthorizationRef");
-    }
-  }
   return RepaymentMethodSnapshotSchema.parse({
     snapshotVersion: "SALARY_LOAN_V2_REPAYMENT_METHOD_SNAPSHOT",
     repaymentMethod: args.repaymentMethod,
@@ -695,14 +656,6 @@ export const DEFAULT_CONTRACT_VERSIONS_V2: readonly ContractVersion[] = [
     effectiveAt: "2026-08-21T00:00:00.000Z",
     documentHash: "2".repeat(64),
   },
-  {
-    contractVersion: "PAYROLL-AUTH-V2-KM-20260821",
-    contractType: "PAYROLL_DEDUCTION_AUTHORIZATION",
-    owningDomain: "BROKER",
-    language: "km",
-    effectiveAt: "2026-08-21T00:00:00.000Z",
-    documentHash: "3".repeat(64),
-  },
 ] as const;
 
 export const DEFAULT_EMPLOYER_PAYROLL_RULE_V2: EmployerPayrollRuleVersion = {
@@ -715,13 +668,9 @@ export const DEFAULT_EMPLOYER_PAYROLL_RULE_V2: EmployerPayrollRuleVersion = {
     { nodeRef: "PAYDAY-2", scheduleType: "LAST_DAY_OF_MONTH" },
   ],
   allowedRepaymentMethods: [
-    "EMPLOYER_PAYROLL_DEDUCTION",
-    "USER_MANUAL_PAYMENT",
+    "SMILE_WALLET_AUTHORIZATION",
   ],
-  defaultRepaymentMethod: "USER_MANUAL_PAYMENT",
-  payrollDeductionEnabled: true,
-  directDebitEnabled: false,
-  legalApprovalEnabled: true,
+  defaultRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
   effectiveFrom: "2026-08-21T00:00:00.000Z",
 };
 

@@ -5,8 +5,13 @@ import {
   DEFAULT_LENDER_INTEREST_RULE_V2,
   DEFAULT_PRODUCT_RULE_V2,
   type EmployerPayrollRuleVersion,
-  type RepaymentMethod,
 } from "@payease/v1-domain";
+
+export type RepaymentMethod =
+  | "SMILE_WALLET_AUTHORIZATION"
+  | "EMPLOYER_PAYROLL_DEDUCTION"
+  | "USER_DIRECT_DEBIT"
+  | "USER_MANUAL_PAYMENT";
 
 export type RepaymentScheduleItem = Readonly<{
   installmentNo: number;
@@ -86,8 +91,6 @@ export type ApplicantLoanSummary = Readonly<{
     employerVerificationAuthorized?: boolean;
     serviceAgreementAuthorized?: boolean;
     postDisbursementBrokerageAuthorized?: boolean;
-    payrollDeductionAuthorized?: boolean;
-    directDebitAuthorized?: boolean;
   }>;
   recordDetail?: Readonly<{
     createdAt: string;
@@ -281,7 +284,6 @@ export function buildSalaryLoanV2RepaymentSchedule(args: {
   selectedRepaymentMethod: RepaymentMethod;
   employerPayrollRuleVersion: string | null | undefined;
   payrollNodes: EmployerPayrollRuleVersion["payrollNodes"] | null | undefined;
-  payrollDeductionAuthorizationRef?: string | null;
   collectionPayeeRef: string;
   productRuleVersion: string;
   lenderInterestRuleVersion: string;
@@ -326,9 +328,8 @@ export function buildSalaryLoanV2RepaymentSchedule(args: {
     payrollNodes,
   };
   const repaymentMethodSnapshot = createRepaymentMethodSnapshot({
-    repaymentMethod: args.selectedRepaymentMethod,
+    repaymentMethod: "SMILE_WALLET_AUTHORIZATION",
     employerPayrollRule,
-    userAuthorizationRef: args.payrollDeductionAuthorizationRef ?? undefined,
     collectionPayeeRef: args.collectionPayeeRef,
     frozenAt: `${args.firstDueDate}T00:00:00.000Z`,
   });

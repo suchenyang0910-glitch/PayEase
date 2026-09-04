@@ -16,6 +16,7 @@
     "lint": "echo 'broker-api lint placeholder'"
   },
   "dependencies": {
+    "@payease/shared-security": "workspace:*",
     "@payease/v1-domain": "workspace:*",
     "fastify": "^5.3.0",
     "pg": "^8.14.1",

@@ -1,30 +1,15 @@
 import { z } from "zod";
 
 export const languageSchema = z.enum(["km", "en", "zh-CN"]);
-const REPAYMENT_METHODS = [
-  "EMPLOYER_PAYROLL_DEDUCTION",
-  "USER_DIRECT_DEBIT",
-  "USER_MANUAL_PAYMENT",
-] as const;
-const repaymentMethodSchema = z.enum(REPAYMENT_METHODS);
+const ACTIVE_REPAYMENT_METHODS = ["SMILE_WALLET_AUTHORIZATION"] as const;
+const activeRepaymentMethodSchema = z.enum(ACTIVE_REPAYMENT_METHODS);
 const authorizationSnapshotSchema = z
   .object({
     employerVerificationAuthorized: z.literal(true),
     serviceAgreementAuthorized: z.literal(true),
     postDisbursementBrokerageAuthorized: z.literal(true),
-    payrollDeductionAuthorized: z.boolean(),
-    directDebitAuthorized: z.boolean(),
   })
-  .superRefine((value, context) => {
-    if (value.payrollDeductionAuthorized && value.directDebitAuthorized) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["directDebitAuthorized"],
-        message:
-          "Payroll deduction and direct debit authorization cannot both be active for the same application snapshot.",
-      });
-    }
-  });
+  .strict();
 
 export const createApplicationSchema = z
   .object({
@@ -37,7 +22,7 @@ export const createApplicationSchema = z
       currency: z.literal("USD"),
     }),
     tenorDays: z.union([z.literal(15), z.literal(30)]),
-    selectedRepaymentMethod: repaymentMethodSchema,
+    selectedRepaymentMethod: activeRepaymentMethodSchema,
     authorizationSnapshot: authorizationSnapshotSchema,
     employerTenantId: z.string().uuid().optional(),
     identityDocument: z
@@ -72,40 +57,6 @@ export const createApplicationSchema = z
           "Personal-data and phone consent is required when submitting a profile.",
       });
     }
-    if (
-      value.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" &&
-      value.authorizationSnapshot.payrollDeductionAuthorized !== true
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["authorizationSnapshot", "payrollDeductionAuthorized"],
-        message:
-          "Employer payroll deduction requires an explicit payroll deduction authorization.",
-      });
-    }
-    if (
-      value.selectedRepaymentMethod === "USER_DIRECT_DEBIT" &&
-      value.authorizationSnapshot.directDebitAuthorized !== true
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["authorizationSnapshot", "directDebitAuthorized"],
-        message:
-          "User direct debit requires an explicit direct debit authorization.",
-      });
-    }
-    if (
-      value.selectedRepaymentMethod === "USER_MANUAL_PAYMENT" &&
-      (value.authorizationSnapshot.payrollDeductionAuthorized ||
-        value.authorizationSnapshot.directDebitAuthorized)
-    ) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["authorizationSnapshot"],
-        message:
-          "Manual payment cannot submit payroll deduction or direct debit authorization.",
-      });
-    }
   });
 
 export const applicantDraftStageSchema = z.enum(["welcome", "details"]);
@@ -123,7 +74,7 @@ export const applicantApplicationDraftSchema = z.object({
   formStep: applicantDraftFormStepSchema,
   amountInput: z.string().max(32),
   term: z.union([z.literal(15), z.literal(30)]),
-  selectedRepaymentMethod: repaymentMethodSchema,
+  selectedRepaymentMethod: activeRepaymentMethodSchema,
   name: z.string().max(120),
   residentialAddress: z.string().max(240),
   phone: z.string().max(32),
@@ -144,9 +95,13 @@ export const applicantApplicationDraftSchema = z.object({
   employerVerificationAuthorized: z.boolean(),
   serviceAgreementAuthorized: z.boolean(),
   postDisbursementBrokerageAuthorized: z.boolean(),
-  payrollDeductionAuthorized: z.boolean(),
-  directDebitAuthorized: z.boolean(),
 });
+
+export const walletOperationJumpCreateSchema = z
+  .object({
+    operationType: z.enum(["WITHDRAWAL", "REPAYMENT"]),
+  })
+  .strict();
 
 export const telegramSessionSchema = z.object({
   initData: z.string().min(32).max(8192),

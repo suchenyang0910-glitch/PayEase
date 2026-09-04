@@ -34,7 +34,10 @@ importers:
 
   broker-api:
     dependencies:
-      "@payease/v1-domain":
+      '@payease/shared-security':
+        specifier: workspace:*
+        version: link:../packages/shared-security
+      '@payease/v1-domain':
         specifier: workspace:*
         version: link:../packages/v1-domain
       fastify:
@@ -233,6 +236,37 @@ importers:
       vite:
         specifier: ^5.4.0
         version: 5.4.21(@types/node@20.19.43)
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@types/node@20.19.43)(jsdom@26.0.0)
+
+  lender-wallet-service:
+    dependencies:
+      '@payease/shared-security':
+        specifier: workspace:*
+        version: link:../packages/shared-security
+      fastify:
+        specifier: ^5.3.0
+        version: 5.11.3
+      pg:
+        specifier: ^8.14.1
+        version: 8.23.0
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.43
+      '@types/pg':
+        specifier: ^8.11.11
+        version: 8.21.0
+      tsx:
+        specifier: ^4.19.3
+        version: 4.23.12
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
       vitest:
         specifier: ^2.1.1
         version: 2.1.9(@types/node@20.19.43)(jsdom@26.0.0)

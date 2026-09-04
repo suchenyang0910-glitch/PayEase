@@ -14,13 +14,11 @@ const baseCreateApplicationPayload = {
   preferredLanguage: "km" as const,
   requestedAmount: { amountMinor: "10000", currency: "USD" as const },
   tenorDays: 30 as const,
-  selectedRepaymentMethod: "USER_MANUAL_PAYMENT" as const,
+  selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION" as const,
   authorizationSnapshot: {
     employerVerificationAuthorized: true as const,
     serviceAgreementAuthorized: true as const,
     postDisbursementBrokerageAuthorized: true as const,
-    payrollDeductionAuthorized: false,
-    directDebitAuthorized: false,
   },
 };
 
@@ -30,7 +28,7 @@ describe("controlled-pilot application validation", () => {
       createApplicationSchema.parse(baseCreateApplicationPayload),
     ).toMatchObject({
       tenorDays: 30,
-      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
     });
   });
 
@@ -71,7 +69,7 @@ describe("controlled-pilot application validation", () => {
     ).toBe(false);
   });
 
-  it("requires method-specific authorization snapshots", () => {
+  it("locks new applications to SMILE wallet authorization", () => {
     expect(
       createApplicationSchema.safeParse({
         ...baseCreateApplicationPayload,

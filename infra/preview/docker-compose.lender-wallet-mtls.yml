@@ -1,0 +1,19 @@
+# Apply only alongside docker-compose.yml once the independently operated
+# lender wallet service, mTLS CA, and VPS-private secret values are ready.
+services:
+  broker-api:
+    environment:
+      PAYEASE_LENDER_WALLET_INTEGRATION_ENABLED: "true"
+      PAYEASE_BROKER_MTLS_SERVER_CERT_PATH: /run/payease/broker-mtls/server.crt
+      PAYEASE_BROKER_MTLS_SERVER_KEY_PATH: /run/payease/broker-mtls/server.key
+      PAYEASE_BROKER_MTLS_CA_CERT_PATH: /run/payease/broker-mtls/ca.crt
+      PAYEASE_BROKER_INTERNAL_MTLS_HOST: ${PAYEASE_BROKER_INTERNAL_MTLS_HOST:?Set the internal mTLS bind host}
+      PAYEASE_BROKER_INTERNAL_MTLS_PORT: ${PAYEASE_BROKER_INTERNAL_MTLS_PORT:?Set the internal mTLS bind port}
+      PAYEASE_LENDER_WALLET_SHARED_SECRET: ${PAYEASE_LENDER_WALLET_SHARED_SECRET:?Set the broker-lender wallet shared secret}
+      PAYEASE_SMILE_WALLET_BASE_URL: ${PAYEASE_SMILE_WALLET_BASE_URL:?Set the lender-controlled wallet HTTPS URL}
+      PAYEASE_SMILE_WALLET_ALLOWED_HOSTS: ${PAYEASE_SMILE_WALLET_ALLOWED_HOSTS:?Set the lender-controlled wallet hostname allowlist}
+      PAYEASE_WALLET_JUMP_TTL_SECONDS: ${PAYEASE_WALLET_JUMP_TTL_SECONDS:-900}
+    volumes:
+      - ${PAYEASE_BROKER_MTLS_SERVER_CERT_HOST_PATH:?Set the VPS-local mTLS server certificate path}:/run/payease/broker-mtls/server.crt:ro
+      - ${PAYEASE_BROKER_MTLS_SERVER_KEY_HOST_PATH:?Set the VPS-local mTLS server private key path}:/run/payease/broker-mtls/server.key:ro
+      - ${PAYEASE_BROKER_MTLS_CA_CERT_HOST_PATH:?Set the VPS-local mTLS CA certificate path}:/run/payease/broker-mtls/ca.crt:ro

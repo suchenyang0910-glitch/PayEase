@@ -2,14 +2,14 @@
 
 ## 目的与边界
 
-该清单为 `infra/preview/docker-compose.yml` 的 Broker API 提供启动前置。
-它适用于受控预览，不授权真实用户、真实资金、真实银行卡数据或绕过持牌域。
+该清单为持牌钱包启用时的 Broker API 提供启动前置。
+基础 `infra/preview/docker-compose.yml` 是 Telegram/KYC 受控预览，明确关闭钱包；它不授权真实用户、真实资金、真实银行卡数据或绕过持牌域。
 
 Broker 只创建一次性钱包操作跳转；提现金额、银行卡、支付密码、还款金额与银行授权参数仅在持牌机构受控钱包域处理。
 
 ## VPS 私有环境文件
 
-部署责任人在 `/etc/payease-preview/broker-api.env` 填写以下**变量名**。值必须来自受控密钥管理或部署环境；禁止提交、截图、复制到工单或聊天。
+部署责任人在 `/etc/payease-preview/broker-api.env` 填写以下**变量名**，并以 `docker compose -f docker-compose.yml -f docker-compose.lender-wallet-mtls.yml` 启用 overlay。值必须来自受控密钥管理或部署环境；禁止提交、截图、复制到工单或聊天。
 
 | 变量                                        | 要求                                                                         |
 | ------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -27,12 +27,13 @@ Compose 将证书在容器内固定挂载为 `/run/payease/broker-mtls/{server.c
 
 ## 上线前验证
 
-1. 仅输出变量是否存在与证书文件是否可读；绝不打印值、路径以外内容、证书文本或私钥。
-2. 在新 release 目录执行 `docker compose config`；缺任一必填变量必须失败。
-3. 构建并启动新 Broker 后，确认 `/health/ready` 返回 200，且容器为 `healthy`。
-4. 从持牌域使用受信任客户端证书调用内部入口：无证书、错误 CA、错误 CN 必须拒绝；合法证书才允许。
-5. 创建一次性钱包跳转后，确认链接目标主机属于 allowlist、同一跳转不可重复兑换，且 Broker 日志不记录完整 URL 或密钥。
-6. 只有第 1–5 项均记录通过后，才可切换静态 release 并开始 Telegram 真人验证。
+1. Telegram/KYC 预览仅使用基础 Compose，并验证所有 wallet/mTLS 入站路径返回 404 或 503；不得以未认证 HTTP 路由代替 mTLS。
+2. 仅输出变量是否存在与证书文件是否可读；绝不打印值、路径以外内容、证书文本或私钥。
+3. 在新 release 目录使用两份 Compose 文件执行 `docker compose config`；缺任一必填变量必须失败。
+4. 构建并启动新 Broker 后，确认 `/health/ready` 返回 200，且容器为 `healthy`。
+5. 从持牌域使用受信任客户端证书调用内部入口：无证书、错误 CA、错误 CN 必须拒绝；合法证书才允许。
+6. 创建一次性钱包跳转后，确认链接目标主机属于 allowlist、同一跳转不可重复兑换，且 Broker 日志不记录完整 URL 或密钥。
+7. 只有第 1–5 项均记录通过后，才可切换静态 release 并开始 Telegram 真人验证。
 
 ## 回滚
 

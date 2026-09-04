@@ -101,6 +101,7 @@ import {
   requiresTelegramAuthentication,
   requiresTelegramPhoneVerification,
 } from "./telegram-auth-policy.js";
+import { isLenderWalletIntegrationEnabled } from "./lender-wallet-policy.js";
 import {
   isAllowedApplicantOrigin,
   requireConfiguredApplicantOrigins,
@@ -153,6 +154,8 @@ if (!databaseUrl) {
   );
 }
 
+const lenderWalletIntegrationEnabled = isLenderWalletIntegrationEnabled();
+
 function loadBrokerInternalMtlsServerOptions():
   | (HttpsServerOptions & {
       requestCert: true;
@@ -163,7 +166,7 @@ function loadBrokerInternalMtlsServerOptions():
   const keyPath = process.env.PAYEASE_BROKER_MTLS_SERVER_KEY_PATH?.trim();
   const caPath = process.env.PAYEASE_BROKER_MTLS_CA_CERT_PATH?.trim();
   if (!certPath && !keyPath && !caPath) {
-    if (process.env.NODE_ENV !== "test") {
+    if (process.env.NODE_ENV !== "test" && lenderWalletIntegrationEnabled) {
       throw new Error(
         "Broker internal mTLS is required but server certificate paths are missing.",
       );
@@ -3477,7 +3480,7 @@ if (internalMtlsApp) {
     "/v1/local/domain-events/inbox/receive",
     handleIncomingDomainEvent,
   );
-} else {
+} else if (process.env.NODE_ENV === "test") {
   app.post("/v1/local/domain-events/inbox/receive", handleIncomingDomainEvent);
 }
 
@@ -6879,7 +6882,7 @@ if (internalMtlsApp) {
     "/v1/local/wallet-operation-jumps/exchange",
     handleWalletOperationJumpExchange,
   );
-} else {
+} else if (process.env.NODE_ENV === "test") {
   app.post(
     "/v1/local/wallet-operation-jumps/exchange",
     handleWalletOperationJumpExchange,
@@ -6895,6 +6898,11 @@ app.post(
     );
     if (!applicant) {
       return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    if (!lenderWalletIntegrationEnabled) {
+      return reply
+        .code(503)
+        .send({ code: "LENDER_WALLET_INTEGRATION_UNAVAILABLE" });
     }
     const params = z
       .object({ applicationNo: z.string().min(1) })
@@ -11146,7 +11154,9 @@ if (process.env.NODE_ENV !== "test") {
   // Fail before opening the port when real applicant authentication would be
   // impossible. Per-request configuration is still used so a compromised Bot
   // can be disabled without a restart.
-  configuredWalletBrokerServiceSecrets();
+  if (lenderWalletIntegrationEnabled) {
+    configuredWalletBrokerServiceSecrets();
+  }
   if (requiresTelegramAuthentication()) {
     requireTelegramRecoveryTopology();
     requireConfiguredApplicantOrigins();
@@ -11158,10 +11168,11 @@ if (process.env.NODE_ENV !== "test") {
   await runDatabaseMigrations(pool);
   const port = Number(process.env.PORT ?? 3100);
   const host = process.env.HOST ?? "127.0.0.1";
-  const internalListener = brokerInternalMtlsListenSettings();
   try {
     await app.listen({ host, port });
-    await internalMtlsApp!.listen(internalListener);
+    if (internalMtlsApp) {
+      await internalMtlsApp.listen(brokerInternalMtlsListenSettings());
+    }
   } catch (error) {
     app.log.error(error);
     await close();

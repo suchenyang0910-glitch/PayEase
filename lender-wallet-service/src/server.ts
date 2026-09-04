@@ -27,12 +27,24 @@ import {
   type BrokerJumpExchangeResponse,
   type WalletChannelCallbackRequest,
 } from "./protocol.js";
+import { resolveAbaPayWayConfig } from "./aba-payway.js";
+import {
+  hashLenderOperatorPassword,
+  verifyLenderOperatorLoginPassword,
+} from "./operator-passwords.js";
 import { runDatabaseMigrations } from "./database-migrations.js";
 import {
   createFundsOrder,
   transitionFundsOrder,
   type FundsOrderRow,
 } from "./funds-orders.js";
+import {
+  createManualOperation,
+  transitionManualOperation,
+  type ManualOperationActorRole,
+  type ManualOperationEventType,
+  type ManualOperationStatus,
+} from "./manual-operations.js";
 import { WalletSessionStore, type WalletSession } from "./wallet-sessions.js";
 
 const app = Fastify({ logger: true });
@@ -76,6 +88,27 @@ type OutboxRow = Readonly<{
 
 type WalletChannelCallbackEventType = WalletChannelCallbackRequest["eventType"];
 type SetCookieHeader = string | string[] | undefined;
+type LenderOperatorIdentity = Readonly<{
+  accountId: string;
+  loginName: string;
+  preferredLanguage: "zh-CN" | "en" | "km";
+  roles: string[];
+}>;
+
+type ManualOperationQueueRow = Readonly<{
+  operation_id: string;
+  operation_status: ManualOperationStatus;
+  maker_ref: string | null;
+  checker_ref: string | null;
+  application_no: string;
+  order_ref: string;
+  order_type: "WITHDRAWAL" | "REPAYMENT";
+  funds_order_status: FundsOrderRow["status"];
+  requested_amount_minor: string;
+  currency: "USD";
+  created_at: string;
+  updated_at: string;
+}>;
 
 type WalletOperationResultOutboxRow = Readonly<{
   event_id: string;
@@ -103,6 +136,17 @@ function env(name: string): string {
   return value;
 }
 
+function controlledManualOperationsEnabled(): boolean {
+  const configured =
+    process.env.PAYEASE_LENDER_CONTROLLED_MANUAL_OPERATIONS?.trim();
+  if (configured === "true") return true;
+  if (configured === "false") return false;
+  if (isTestMode) return false;
+  throw new Error(
+    "PAYEASE_LENDER_CONTROLLED_MANUAL_OPERATIONS must be explicitly true or false.",
+  );
+}
+
 function requireHttpsUrl(name: string): URL {
   const url = new URL(env(name));
   if (url.protocol !== "https:") {
@@ -124,6 +168,27 @@ function walletPublicOrigin(): string | undefined {
   if (url.username || url.password || url.hash || url.search) {
     throw new Error(
       "PAYEASE_LENDER_WALLET_PUBLIC_ORIGIN must not include credentials, query, or fragment.",
+    );
+  }
+  return url.origin;
+}
+
+function lenderOperatorPublicOrigin(): string | undefined {
+  const configured = process.env.PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN?.trim();
+  if (!configured) {
+    if (isTestMode) return undefined;
+    throw new Error("PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN is required.");
+  }
+  const url = new URL(configured);
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    url.search
+  ) {
+    throw new Error(
+      "PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN must be a clean HTTPS origin.",
     );
   }
   return url.origin;
@@ -277,6 +342,24 @@ function csrfTokenFromCookie(
   );
 }
 
+function lenderOperatorSessionTokenFromCookie(
+  cookieHeader: string | undefined,
+): string | undefined {
+  return cookieValueFromHeader(
+    cookieHeader,
+    "__Host-payease_lender_operator_session",
+  );
+}
+
+function lenderOperatorCsrfTokenFromCookie(
+  cookieHeader: string | undefined,
+): string | undefined {
+  return cookieValueFromHeader(
+    cookieHeader,
+    "__Host-payease_lender_operator_csrf",
+  );
+}
+
 function walletCookieHeaders(args: {
   sessionToken: string;
   csrfToken: string;
@@ -285,6 +368,17 @@ function walletCookieHeaders(args: {
   return [
     `__Host-payease_lender_wallet_session=${args.sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${args.ttlSeconds}`,
     `__Host-payease_lender_wallet_csrf=${args.csrfToken}; Secure; SameSite=Strict; Path=/; Max-Age=${args.ttlSeconds}`,
+  ];
+}
+
+function lenderOperatorCookieHeaders(args: {
+  sessionToken: string;
+  csrfToken: string;
+  ttlSeconds: number;
+}): string[] {
+  return [
+    `__Host-payease_lender_operator_session=${args.sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${args.ttlSeconds}`,
+    `__Host-payease_lender_operator_csrf=${args.csrfToken}; Secure; SameSite=Strict; Path=/; Max-Age=${args.ttlSeconds}`,
   ];
 }
 
@@ -320,6 +414,29 @@ function requireTrustedWalletOrigin(
   return true;
 }
 
+function requireTrustedLenderOperatorOrigin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  const expectedOrigin = lenderOperatorPublicOrigin();
+  if (!expectedOrigin) return true;
+  const origin = request.headers.origin;
+  if (Array.isArray(origin) || typeof origin !== "string") {
+    reply.code(403).send({ code: "LENDER_OPERATOR_ORIGIN_FORBIDDEN" });
+    return false;
+  }
+  try {
+    if (new URL(origin).origin !== expectedOrigin) {
+      reply.code(403).send({ code: "LENDER_OPERATOR_ORIGIN_FORBIDDEN" });
+      return false;
+    }
+  } catch {
+    reply.code(403).send({ code: "LENDER_OPERATOR_ORIGIN_FORBIDDEN" });
+    return false;
+  }
+  return true;
+}
+
 function requireWalletCsrf(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -335,6 +452,77 @@ function requireWalletCsrf(
     return false;
   }
   return true;
+}
+
+function requireLenderOperatorCsrf(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  const supplied = request.headers["x-csrf-token"];
+  if (Array.isArray(supplied) || typeof supplied !== "string") {
+    reply.code(403).send({ code: "LENDER_OPERATOR_CSRF_TOKEN_INVALID" });
+    return false;
+  }
+  const cookie = lenderOperatorCsrfTokenFromCookie(request.headers.cookie);
+  if (!cookie || !secureCompare(cookie, supplied.trim())) {
+    reply.code(403).send({ code: "LENDER_OPERATOR_CSRF_TOKEN_INVALID" });
+    return false;
+  }
+  return true;
+}
+
+async function currentLenderOperatorIdentity(
+  cookieHeader: string | undefined,
+): Promise<LenderOperatorIdentity | undefined> {
+  const token = lenderOperatorSessionTokenFromCookie(cookieHeader);
+  if (!token) return undefined;
+  const result = await assertPool().query<{
+    id: string;
+    login_name: string;
+    preferred_language: "zh-CN" | "en" | "km";
+    roles: string[];
+  }>(
+    `SELECT account.id,
+            account.login_name,
+            account.preferred_language,
+            COALESCE(array_agg(role.code) FILTER (WHERE role.code IS NOT NULL), '{}') AS roles
+       FROM lender_operator_sessions session
+       JOIN lender_operator_accounts account ON account.id = session.account_id
+       LEFT JOIN lender_operator_account_roles membership ON membership.account_id = account.id
+       LEFT JOIN lender_operator_roles role ON role.code = membership.role_code
+      WHERE session.token_hash = $1
+        AND session.revoked_at IS NULL
+        AND session.expires_at > now()
+        AND account.is_active = true
+      GROUP BY account.id, account.login_name, account.preferred_language`,
+    [createHash("sha256").update(token).digest("hex")],
+  );
+  const row = result.rows[0];
+  return row
+    ? {
+        accountId: row.id,
+        loginName: row.login_name,
+        preferredLanguage: row.preferred_language,
+        roles: row.roles,
+      }
+    : undefined;
+}
+
+async function requireLenderOperatorRole(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  allowedRoles: readonly string[],
+): Promise<LenderOperatorIdentity | undefined> {
+  const identity = await currentLenderOperatorIdentity(request.headers.cookie);
+  if (!identity) {
+    reply.code(401).send({ code: "LENDER_OPERATOR_UNAUTHENTICATED" });
+    return undefined;
+  }
+  if (!identity.roles.some((role) => allowedRoles.includes(role))) {
+    reply.code(403).send({ code: "LENDER_OPERATOR_ROLE_FORBIDDEN" });
+    return undefined;
+  }
+  return identity;
 }
 
 async function addAuditEvent(
@@ -1150,6 +1338,570 @@ async function dispatchWalletOperationResultEvent(
 
 app.get("/health/live", async () => ({ ok: true, service: "lender-wallet" }));
 
+app.post(
+  "/v1/lender-operator/auth/login",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!requireTrustedLenderOperatorOrigin(request, reply)) return;
+    const input = z
+      .object({
+        loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+        password: z.string().min(8).max(256),
+      })
+      .strict()
+      .parse(request.body);
+    const client = await assertPool().connect();
+    try {
+      await client.query("BEGIN");
+      const account = await client.query<{
+        id: string;
+        password_hash: string;
+        preferred_language: "zh-CN" | "en" | "km";
+      }>(
+        `SELECT id, password_hash, preferred_language
+           FROM lender_operator_accounts
+          WHERE login_name = $1 AND is_active = true
+          FOR UPDATE`,
+        [input.loginName],
+      );
+      const row = account.rows[0];
+      if (
+        !(await verifyLenderOperatorLoginPassword(
+          input.password,
+          row?.password_hash,
+        ))
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(401).send({ code: "LENDER_OPERATOR_LOGIN_FAILED" });
+      }
+      const sessionToken = randomBytes(32).toString("base64url");
+      const ttlSeconds = 30 * 60;
+      await client.query(
+        `INSERT INTO lender_operator_sessions (token_hash, account_id, expires_at)
+         VALUES ($1, $2, now() + ($3 * interval '1 second'))`,
+        [
+          createHash("sha256").update(sessionToken).digest("hex"),
+          row!.id,
+          ttlSeconds,
+        ],
+      );
+      await client.query(
+        `INSERT INTO lender_operator_auth_audit_events
+          (actor_ref, event_name, subject_ref, details)
+         VALUES ($1, 'LENDER_OPERATOR_LOGIN_SUCCEEDED', $1, '{}'::jsonb)`,
+        [`operator:${row!.id}`],
+      );
+      await client.query("COMMIT");
+      appendSetCookieHeader(
+        reply,
+        lenderOperatorCookieHeaders({
+          sessionToken,
+          csrfToken: randomBytes(24).toString("base64url"),
+          ttlSeconds,
+        }),
+      );
+      return { preferredLanguage: row!.preferred_language };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get(
+  "/v1/lender-operator/auth/me",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await currentLenderOperatorIdentity(
+      request.headers.cookie,
+    );
+    if (!identity) {
+      return reply.code(401).send({ code: "LENDER_OPERATOR_UNAUTHENTICATED" });
+    }
+    return {
+      accountId: identity.accountId,
+      loginName: identity.loginName,
+      preferredLanguage: identity.preferredLanguage,
+      roles: identity.roles,
+    };
+  },
+);
+
+app.post(
+  "/v1/lender-operator/auth/logout",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!requireTrustedLenderOperatorOrigin(request, reply)) return;
+    if (!requireLenderOperatorCsrf(request, reply)) return;
+    const token = lenderOperatorSessionTokenFromCookie(request.headers.cookie);
+    if (token) {
+      await assertPool().query(
+        `UPDATE lender_operator_sessions
+            SET revoked_at = now()
+          WHERE token_hash = $1 AND revoked_at IS NULL`,
+        [createHash("sha256").update(token).digest("hex")],
+      );
+    }
+    appendSetCookieHeader(reply, [
+      "__Host-payease_lender_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
+      "__Host-payease_lender_operator_csrf=; Secure; SameSite=Strict; Path=/; Max-Age=0",
+    ]);
+    return reply.code(204).send();
+  },
+);
+
+const lenderOperatorRoleSchema = z.enum([
+  "LENDER_WALLET_MAKER",
+  "LENDER_WALLET_CHECKER",
+  "LENDER_WALLET_ADMIN",
+]);
+
+async function requireLenderOperatorAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<LenderOperatorIdentity | undefined> {
+  if (!requireTrustedLenderOperatorOrigin(request, reply)) return undefined;
+  if (!requireLenderOperatorCsrf(request, reply)) return undefined;
+  return requireLenderOperatorRole(request, reply, ["LENDER_WALLET_ADMIN"]);
+}
+
+app.get(
+  "/v1/lender-operator/admin/accounts",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorRole(request, reply, [
+      "LENDER_WALLET_ADMIN",
+    ]);
+    if (!identity) return;
+    const result = await assertPool().query<{
+      id: string;
+      login_name: string;
+      preferred_language: "zh-CN" | "en" | "km";
+      is_active: boolean;
+      roles: string[];
+      created_at: string;
+    }>(
+      `SELECT account.id,
+              account.login_name,
+              account.preferred_language,
+              account.is_active,
+              COALESCE(array_agg(role.code) FILTER (WHERE role.code IS NOT NULL), '{}') AS roles,
+              account.created_at::text
+         FROM lender_operator_accounts account
+         LEFT JOIN lender_operator_account_roles membership ON membership.account_id = account.id
+         LEFT JOIN lender_operator_roles role ON role.code = membership.role_code
+        GROUP BY account.id, account.login_name, account.preferred_language, account.is_active, account.created_at
+        ORDER BY account.created_at ASC`,
+    );
+    return {
+      accounts: result.rows.map((row) => ({
+        accountId: row.id,
+        loginName: row.login_name,
+        preferredLanguage: row.preferred_language,
+        isActive: row.is_active,
+        roles: row.roles,
+        createdAt: row.created_at,
+      })),
+    };
+  },
+);
+
+app.post(
+  "/v1/lender-operator/admin/accounts",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    const input = z
+      .object({
+        loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
+        password: z.string().min(12).max(256),
+        preferredLanguage: z.enum(["zh-CN", "en", "km"]).default("en"),
+        roles: z.array(lenderOperatorRoleSchema).min(1).max(3),
+      })
+      .strict()
+      .parse(request.body);
+    const client = await assertPool().connect();
+    try {
+      await client.query("BEGIN");
+      const account = await client.query<{ id: string }>(
+        `INSERT INTO lender_operator_accounts
+          (login_name, password_hash, preferred_language)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [
+          input.loginName,
+          await hashLenderOperatorPassword(input.password),
+          input.preferredLanguage,
+        ],
+      );
+      for (const role of [...new Set(input.roles)]) {
+        await client.query(
+          `INSERT INTO lender_operator_account_roles (account_id, role_code)
+           VALUES ($1, $2)`,
+          [account.rows[0]!.id, role],
+        );
+      }
+      await client.query(
+        `INSERT INTO lender_operator_auth_audit_events
+          (actor_ref, event_name, subject_ref, details)
+         VALUES ($1, 'LENDER_OPERATOR_ACCOUNT_CREATED', $2, $3::jsonb)`,
+        [
+          `operator:${identity.accountId}`,
+          `operator:${account.rows[0]!.id}`,
+          JSON.stringify({
+            loginName: input.loginName,
+            roles: [...new Set(input.roles)],
+          }),
+        ],
+      );
+      await client.query("COMMIT");
+      return reply.code(201).send({ accountId: account.rows[0]!.id });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.patch(
+  "/v1/lender-operator/admin/accounts/:accountId",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    const params = z
+      .object({ accountId: z.string().uuid() })
+      .parse(request.params);
+    const input = z
+      .object({
+        isActive: z.boolean().optional(),
+        preferredLanguage: z.enum(["zh-CN", "en", "km"]).optional(),
+        roles: z.array(lenderOperatorRoleSchema).min(1).max(3).optional(),
+      })
+      .strict()
+      .refine((value) => Object.keys(value).length > 0)
+      .parse(request.body);
+    if (params.accountId === identity.accountId && input.isActive === false) {
+      return reply
+        .code(409)
+        .send({ code: "LENDER_OPERATOR_SELF_DISABLE_FORBIDDEN" });
+    }
+    const client = await assertPool().connect();
+    try {
+      await client.query("BEGIN");
+      const account = await client.query<{ id: string }>(
+        `SELECT id FROM lender_operator_accounts WHERE id = $1 FOR UPDATE`,
+        [params.accountId],
+      );
+      if (!account.rowCount) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(404)
+          .send({ code: "LENDER_OPERATOR_ACCOUNT_NOT_FOUND" });
+      }
+      if (
+        input.isActive !== undefined ||
+        input.preferredLanguage !== undefined
+      ) {
+        await client.query(
+          `UPDATE lender_operator_accounts
+              SET is_active = COALESCE($2, is_active),
+                  preferred_language = COALESCE($3, preferred_language),
+                  updated_at = now()
+            WHERE id = $1`,
+          [
+            params.accountId,
+            input.isActive ?? null,
+            input.preferredLanguage ?? null,
+          ],
+        );
+      }
+      if (input.roles) {
+        await client.query(
+          `DELETE FROM lender_operator_account_roles WHERE account_id = $1`,
+          [params.accountId],
+        );
+        for (const role of [...new Set(input.roles)]) {
+          await client.query(
+            `INSERT INTO lender_operator_account_roles (account_id, role_code)
+             VALUES ($1, $2)`,
+            [params.accountId, role],
+          );
+        }
+      }
+      if (input.isActive === false) {
+        await client.query(
+          `UPDATE lender_operator_sessions
+              SET revoked_at = now()
+            WHERE account_id = $1 AND revoked_at IS NULL`,
+          [params.accountId],
+        );
+      }
+      await client.query(
+        `INSERT INTO lender_operator_auth_audit_events
+          (actor_ref, event_name, subject_ref, details)
+         VALUES ($1, 'LENDER_OPERATOR_ACCOUNT_UPDATED', $2, $3::jsonb)`,
+        [
+          `operator:${identity.accountId}`,
+          `operator:${params.accountId}`,
+          JSON.stringify({
+            ...input,
+            roles: input.roles ? [...new Set(input.roles)] : undefined,
+          }),
+        ],
+      );
+      await client.query("COMMIT");
+      return reply.code(204).send();
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get(
+  "/v1/lender-operator/manual-operations/open",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorRole(request, reply, [
+      "LENDER_WALLET_MAKER",
+      "LENDER_WALLET_CHECKER",
+    ]);
+    if (!identity) return;
+    const result = await assertPool().query<ManualOperationQueueRow>(
+      `SELECT operation.id AS operation_id,
+              operation.status AS operation_status,
+              operation.maker_ref,
+              operation.checker_ref,
+              funds_order.application_no,
+              funds_order.order_ref,
+              funds_order.order_type,
+              funds_order.status AS funds_order_status,
+              funds_order.requested_amount_minor::text,
+              funds_order.currency,
+              operation.created_at::text,
+              operation.updated_at::text
+         FROM lender_wallet_manual_operation_cases operation
+         JOIN lender_wallet_funds_orders funds_order
+           ON funds_order.id = operation.funds_order_id
+        WHERE operation.status IN (
+          'REQUESTED', 'MAKER_VERIFIED', 'CHECKER_APPROVED', 'BANK_TRANSFER_RECORDED'
+        )
+        ORDER BY operation.created_at ASC
+        LIMIT 100`,
+    );
+    return {
+      operations: result.rows.map((row) => ({
+        operationRef: row.operation_id,
+        status: row.operation_status,
+        applicationNo: row.application_no,
+        orderRef: row.order_ref,
+        operationType: row.order_type,
+        fundsOrderStatus: row.funds_order_status,
+        requestedAmountMinor: row.requested_amount_minor,
+        currency: row.currency,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+    };
+  },
+);
+
+app.get(
+  "/v1/lender-operator/manual-operations/:operationId/audit",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorRole(request, reply, [
+      "LENDER_WALLET_MAKER",
+      "LENDER_WALLET_CHECKER",
+    ]);
+    if (!identity) return;
+    const params = z
+      .object({ operationId: z.string().uuid() })
+      .parse(request.params);
+    const result = await assertPool().query<{
+      event_ref: string;
+      event_type: string;
+      actor_ref: string;
+      actor_role: string;
+      evidence_reference: string | null;
+      reason_code: string | null;
+      created_at: string;
+    }>(
+      `SELECT event_ref,
+              event_type,
+              actor_ref,
+              actor_role,
+              evidence_reference,
+              reason_code,
+              created_at::text
+         FROM lender_wallet_manual_operation_events
+        WHERE operation_id = $1
+        ORDER BY created_at ASC`,
+      [params.operationId],
+    );
+    if (!result.rowCount) {
+      return reply
+        .code(404)
+        .send({ code: "LENDER_MANUAL_OPERATION_NOT_FOUND" });
+    }
+    return {
+      operationRef: params.operationId,
+      events: result.rows.map((row) => ({
+        eventRef: row.event_ref,
+        eventType: row.event_type,
+        actorRole: row.actor_role,
+        evidenceReference: row.evidence_reference,
+        reasonCode: row.reason_code,
+        occurredAt: row.created_at,
+      })),
+    };
+  },
+);
+
+app.post(
+  "/v1/lender-operator/manual-operations/:operationId/actions",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!requireTrustedLenderOperatorOrigin(request, reply)) return;
+    if (!requireLenderOperatorCsrf(request, reply)) return;
+    const params = z
+      .object({ operationId: z.string().uuid() })
+      .parse(request.params);
+    const input = z
+      .object({
+        eventType: z.enum([
+          "MAKER_VERIFIED",
+          "CHECKER_APPROVED",
+          "BANK_TRANSFER_RECORDED",
+          "SETTLED",
+          "FAILED",
+        ]),
+        evidenceReference: z.string().min(1).max(512).optional(),
+        reasonCode: z.string().min(1).max(80).optional(),
+      })
+      .strict()
+      .parse(request.body);
+    const roleForEvent: Record<
+      typeof input.eventType,
+      {
+        roleCode: "LENDER_WALLET_MAKER" | "LENDER_WALLET_CHECKER";
+        actorRole: ManualOperationActorRole;
+      }
+    > = {
+      MAKER_VERIFIED: { roleCode: "LENDER_WALLET_MAKER", actorRole: "MAKER" },
+      CHECKER_APPROVED: {
+        roleCode: "LENDER_WALLET_CHECKER",
+        actorRole: "CHECKER",
+      },
+      BANK_TRANSFER_RECORDED: {
+        roleCode: "LENDER_WALLET_MAKER",
+        actorRole: "MAKER",
+      },
+      SETTLED: { roleCode: "LENDER_WALLET_CHECKER", actorRole: "CHECKER" },
+      FAILED: { roleCode: "LENDER_WALLET_CHECKER", actorRole: "CHECKER" },
+    };
+    const eventAccess = roleForEvent[input.eventType];
+    const identity = await requireLenderOperatorRole(request, reply, [
+      eventAccess.roleCode,
+    ]);
+    if (!identity) return;
+
+    const client = await assertPool().connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<ManualOperationQueueRow>(
+        `SELECT operation.id AS operation_id,
+                operation.status AS operation_status,
+                operation.maker_ref,
+                operation.checker_ref,
+                funds_order.application_no,
+                funds_order.order_ref,
+                funds_order.order_type,
+                funds_order.status AS funds_order_status,
+                funds_order.requested_amount_minor::text,
+                funds_order.currency,
+                operation.created_at::text,
+                operation.updated_at::text
+           FROM lender_wallet_manual_operation_cases operation
+           JOIN lender_wallet_funds_orders funds_order
+             ON funds_order.id = operation.funds_order_id
+          WHERE operation.id = $1
+          FOR UPDATE OF operation, funds_order`,
+        [params.operationId],
+      );
+      const row = current.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(404)
+          .send({ code: "LENDER_MANUAL_OPERATION_NOT_FOUND" });
+      }
+      const actorRef = `operator:${identity.accountId}`;
+      const eventType = input.eventType as ManualOperationEventType;
+      const updated = await transitionManualOperation(client, {
+        operationId: row.operation_id,
+        eventRef: `manual-operation-${eventType.toLowerCase()}-${randomUUID()}`,
+        fromStatus: row.operation_status,
+        eventType,
+        actorRef,
+        actorRole: eventAccess.actorRole,
+        makerRef: row.maker_ref,
+        evidenceReference: input.evidenceReference,
+        reasonCode: input.reasonCode,
+        metadata: { operatorLoginName: identity.loginName },
+      });
+
+      let order: FundsOrderRow | undefined;
+      const fundsEventType =
+        eventType === "MAKER_VERIFIED"
+          ? "AUTHORIZED"
+          : eventType === "BANK_TRANSFER_RECORDED"
+            ? "PROCESSING"
+            : eventType === "SETTLED"
+              ? "SETTLED"
+              : eventType === "FAILED"
+                ? "FAILED"
+                : undefined;
+      if (fundsEventType) {
+        order = await transitionFundsOrder(client, {
+          orderRef: row.order_ref,
+          eventRef: `funds-order-${fundsEventType.toLowerCase()}-${randomUUID()}`,
+          eventType: fundsEventType,
+          actorRef,
+          fromStatus: row.funds_order_status,
+          amountMinor: row.requested_amount_minor,
+          settledAmountMinor:
+            fundsEventType === "SETTLED" ? row.requested_amount_minor : null,
+          metadata: { manualOperationRef: row.operation_id },
+        });
+        await enqueueWalletOperationResult(client, order);
+      }
+      await addAuditEvent(client, {
+        actorRef,
+        eventName: `LENDER_MANUAL_OPERATION_${eventType}`,
+        applicationNo: row.application_no,
+        subjectRef: row.order_ref,
+        details: {
+          operationRef: row.operation_id,
+          evidenceReference: input.evidenceReference ?? null,
+          reasonCode: input.reasonCode ?? null,
+        },
+      });
+      await client.query("COMMIT");
+      return {
+        operationRef: updated.id,
+        status: updated.status,
+        orderRef: row.order_ref,
+        fundsOrderStatus: order?.status ?? row.funds_order_status,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
 app.get("/v1/wallet/entry", async (_request, reply) => {
   reply.type("text/html; charset=utf-8");
   return walletEntryPageHtml();
@@ -1391,7 +2143,7 @@ app.post(
         walletOperationJumpRef: session.walletOperationJumpRef,
         walletStatus: session.walletStatus,
       };
-      await createFundsOrder(client, {
+      const createdOrder = await createFundsOrder(client, {
         applicationNo: session.applicationNo,
         externalWalletRef: session.externalWalletRef,
         orderRef,
@@ -1402,6 +2154,18 @@ app.post(
         eventRef: `order-created-${randomUUID()}`,
         metadata,
       });
+      const manualOperation = controlledManualOperationsEnabled()
+        ? await createManualOperation(client, {
+            fundsOrderId: createdOrder.id,
+            requestedByRef: `applicant:${session.applicationNo}`,
+            eventRef: `manual-operation-requested-${randomUUID()}`,
+            metadata: {
+              orderRef,
+              operationType: session.operationType,
+              walletOperationJumpRef: session.walletOperationJumpRef,
+            },
+          })
+        : undefined;
       const requested = await transitionFundsOrder(client, {
         orderRef,
         eventRef: `order-auth-requested-${randomUUID()}`,
@@ -1420,6 +2184,7 @@ app.post(
           walletOperationJumpRef: session.walletOperationJumpRef,
           operationType: session.operationType,
           requestedAmountMinor: requestedAmountMinor.toString(),
+          manualOperationRef: manualOperation?.id ?? null,
         },
       });
       await client.query("COMMIT");
@@ -1431,6 +2196,7 @@ app.post(
         settledAmountMinor: requested.settled_amount_minor,
         currency: requested.currency,
         updatedAt: requested.updated_at,
+        manualOperationRef: manualOperation?.id ?? null,
       };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -1475,6 +2241,18 @@ app.post(
       if (!order) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ code: "LENDER_WALLET_ORDER_NOT_FOUND" });
+      }
+      const manualOperation = await client.query<{ id: string }>(
+        `SELECT id
+           FROM lender_wallet_manual_operation_cases
+          WHERE funds_order_id = $1`,
+        [order.id],
+      );
+      if (manualOperation.rowCount) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "LENDER_MANUAL_OPERATION_REQUIRED" });
       }
       let receipt;
       try {
@@ -1831,6 +2609,8 @@ const close = async (): Promise<void> => {
 };
 
 if (!isTestMode) {
+  // Optional integration: absent means disabled; a partial configuration is fatal.
+  resolveAbaPayWayConfig();
   env("PAYEASE_LENDER_WALLET_SHARED_SECRET");
   env("PAYEASE_LENDER_EVENT_SHARED_SECRET");
   env("PAYEASE_LENDER_WALLET_INTERNAL_TOKEN");

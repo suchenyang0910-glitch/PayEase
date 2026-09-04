@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./index.css";
 // Do not let a stale ignored `App.js` shadow the authored TSX module.
 import { App } from "./App.tsx";
 

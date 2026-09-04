@@ -1,1089 +1,614 @@
 import { useEffect, useState, type FormEvent } from "react";
-import {
-  finalReviewPayload,
-  hasValidFinalReviewTerms,
-  type ReviewDecision,
-} from "./review-payload.ts";
-import { lenderActionNotice } from "./lender-action.ts";
-import {
-  LENDER_COPY,
-  type LenderActionKey,
-  type LenderLanguage,
-} from "./lender-copy.ts";
-import {
-  allowedLenderActionRoutes,
-  lenderApplicationStatusLabel,
-  parseLenderApplicationSummary,
-  type LenderApplicationSummary,
-} from "./lender-application-summary.ts";
-import {
-  applyRepaymentWorkItemSelection,
-  canResolveCollectionException,
-  LENDER_REPAYMENT_QUEUE_AUTO_REFRESH_MS,
-  type CollectionExceptionItem,
-  type RepaymentWorkItem,
-} from "./lender-repayment-queue.ts";
-import { lenderServiceFeeSummaryLabel } from "./lender-summary-label.ts";
-import { lenderServiceCaseTypeLabel } from "./lender-service-case-label.ts";
-import { formatHuman } from "@payease/shared-money";
 
-type Identity = {
+type Language = "zh-CN" | "en" | "km";
+type Identity = Readonly<{
+  accountId: string;
   loginName: string;
-  preferredLanguage: "zh-CN" | "en" | "km";
+  preferredLanguage: Language;
   roles: string[];
-};
-type ReferredServiceCase = Readonly<{
-  caseNo: string;
-  applicationNo: string;
-  caseType: "SERVICE_QUERY" | "COMPLAINT";
-  applicantLanguage: LenderLanguage;
-  referredToLenderAt: string;
 }>;
-type ServiceCaseDetail = Readonly<
-  ReferredServiceCase & {
-    status: "OPEN" | "ACKNOWLEDGED" | "REFERRED_TO_LENDER" | "RESOLVED";
-    message: string;
-  }
->;
+type Status =
+  | "REQUESTED"
+  | "MAKER_VERIFIED"
+  | "CHECKER_APPROVED"
+  | "BANK_TRANSFER_RECORDED";
+type Operation = Readonly<{
+  operationRef: string;
+  status: Status;
+  applicationNo: string;
+  orderRef: string;
+  operationType: "WITHDRAWAL" | "REPAYMENT";
+  fundsOrderStatus: string;
+  requestedAmountMinor: string;
+  currency: "USD";
+}>;
+type AuditEvent = Readonly<{
+  eventRef: string;
+  eventType: string;
+  actorRole: string;
+  evidenceReference: string | null;
+  reasonCode: string | null;
+  occurredAt: string;
+}>;
+type OperatorAccount = Readonly<{
+  accountId: string;
+  loginName: string;
+  preferredLanguage: Language;
+  isActive: boolean;
+  roles: string[];
+  createdAt: string;
+}>;
 
-function isReferredServiceCaseQueue(
-  payload: unknown,
-): payload is { cases: ReferredServiceCase[] } {
-  if (!payload || typeof payload !== "object") return false;
-  const cases = (payload as { cases?: unknown }).cases;
-  return (
-    Array.isArray(cases) &&
-    cases.every(
-      (entry) =>
-        entry &&
-        typeof entry === "object" &&
-        typeof (entry as { caseNo?: unknown }).caseNo === "string" &&
-        typeof (entry as { applicationNo?: unknown }).applicationNo ===
-          "string",
-    )
-  );
+const apiBase = (import.meta.env.VITE_LENDER_WALLET_API_BASE ?? "/api").replace(
+  /\/$/,
+  "",
+);
+const COPY: Record<Language, Record<string, string>> = {
+  "zh-CN": {
+    title: "持牌机构资金操作台",
+    subtitle: "受控人工操作 · 经办与复核分离",
+    account: "账号",
+    password: "密码",
+    signIn: "登录",
+    signOut: "退出登录",
+    queue: "待处理操作",
+    audit: "审计记录",
+    refresh: "刷新",
+    empty: "当前没有待处理的资金操作。",
+    evidence: "持牌证据库引用",
+    reason: "失败原因代码",
+    maker: "经办核验",
+    checker: "复核批准",
+    record: "记录银行操作",
+    settle: "确认结算",
+    fail: "标记失败",
+    viewAudit: "查看审计",
+    loginFailed: "登录失败，请检查账号、密码或权限。",
+    actionFailed: "操作未完成。请检查权限、当前状态和证据引用。",
+    expired: "会话已失效，请重新登录。",
+    noAccess: "没有执行此操作的权限。",
+    evidenceRequired: "此操作必须填写持牌证据库引用。",
+  },
+  en: {
+    title: "Lender Funds Operations",
+    subtitle: "Controlled manual operations · maker/checker separation",
+    account: "Account",
+    password: "Password",
+    signIn: "Sign in",
+    signOut: "Sign out",
+    queue: "Open operations",
+    audit: "Audit trail",
+    refresh: "Refresh",
+    empty: "There are no open funds operations.",
+    evidence: "Lender evidence-vault reference",
+    reason: "Failure reason code",
+    maker: "Maker verify",
+    checker: "Checker approve",
+    record: "Record bank action",
+    settle: "Confirm settlement",
+    fail: "Mark failed",
+    viewAudit: "View audit",
+    loginFailed: "Sign-in failed. Check account, password, or role.",
+    actionFailed:
+      "The action was not completed. Check role, state, and evidence reference.",
+    expired: "Your session has expired. Please sign in again.",
+    noAccess: "You do not have permission for this action.",
+    evidenceRequired: "This action requires a lender evidence-vault reference.",
+  },
+  km: {
+    title: "ប្រតិបត្តិការហិរញ្ញវត្ថុស្ថាប័ន",
+    subtitle:
+      "ប្រតិបត្តិការដោយដៃដែលគ្រប់គ្រង · បំបែកអ្នកធ្វើ និងអ្នកត្រួតពិនិត្យ",
+    account: "គណនី",
+    password: "ពាក្យសម្ងាត់",
+    signIn: "ចូលប្រើ",
+    signOut: "ចាកចេញ",
+    queue: "ប្រតិបត្តិការកំពុងរង់ចាំ",
+    audit: "កំណត់ត្រាសវនកម្ម",
+    refresh: "ធ្វើឱ្យថ្មី",
+    empty: "មិនមានប្រតិបត្តិការកំពុងរង់ចាំទេ។",
+    evidence: "លេខយោងឃ្លាំងភស្តុតាងរបស់ស្ថាប័ន",
+    reason: "លេខកូដមូលហេតុបរាជ័យ",
+    maker: "ផ្ទៀងផ្ទាត់ដោយអ្នកធ្វើ",
+    checker: "អនុម័តដោយអ្នកត្រួតពិនិត្យ",
+    record: "កត់ត្រាប្រតិបត្តិការធនាគារ",
+    settle: "បញ្ជាក់ការទូទាត់",
+    fail: "សម្គាល់ថាបរាជ័យ",
+    viewAudit: "មើលសវនកម្ម",
+    loginFailed: "មិនអាចចូលប្រើបានទេ។ សូមពិនិត្យគណនី ពាក្យសម្ងាត់ ឬសិទ្ធិ។",
+    actionFailed: "មិនអាចបញ្ចប់ប្រតិបត្តិការបានទេ។",
+    expired: "សម័យរបស់អ្នកបានផុតកំណត់។ សូមចូលប្រើម្តងទៀត។",
+    noAccess: "អ្នកមិនមានសិទ្ធិសម្រាប់ប្រតិបត្តិការនេះទេ។",
+    evidenceRequired:
+      "ប្រតិបត្តិការនេះត្រូវការលេខយោងឃ្លាំងភស្តុតាងរបស់ស្ថាប័ន។",
+  },
+};
+const ADMIN_COPY: Record<Language, Record<string, string>> = {
+  "zh-CN": {
+    title: "账号与角色管理",
+    create: "创建账号",
+    active: "启用",
+    disabled: "已停用",
+    disable: "停用账号",
+    roles: "角色",
+    language: "语言",
+  },
+  en: {
+    title: "Account and role management",
+    create: "Create account",
+    active: "Active",
+    disabled: "Disabled",
+    disable: "Disable account",
+    roles: "Roles",
+    language: "Language",
+  },
+  km: {
+    title: "ការគ្រប់គ្រងគណនី និងតួនាទី",
+    create: "បង្កើតគណនី",
+    active: "សកម្ម",
+    disabled: "បានបិទ",
+    disable: "បិទគណនី",
+    roles: "តួនាទី",
+    language: "ភាសា",
+  },
+};
+
+function csrf(): string | undefined {
+  return document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("__Host-payease_lender_operator_csrf="))
+    ?.slice("__Host-payease_lender_operator_csrf=".length);
 }
-
-function isServiceCaseDetail(payload: unknown): payload is ServiceCaseDetail {
-  return (
-    Boolean(payload) &&
-    typeof payload === "object" &&
-    typeof (payload as { caseNo?: unknown }).caseNo === "string" &&
-    typeof (payload as { applicationNo?: unknown }).applicationNo ===
-      "string" &&
-    typeof (payload as { message?: unknown }).message === "string" &&
-    typeof (payload as { status?: unknown }).status === "string"
-  );
-}
-
-function isRepaymentWorkItemQueue(
-  payload: unknown,
-): payload is { items: RepaymentWorkItem[] } {
-  if (!payload || typeof payload !== "object") return false;
-  const items = (payload as { items?: unknown }).items;
-  return (
-    Array.isArray(items) &&
-    items.every(
-      (entry) =>
-        entry &&
-        typeof entry === "object" &&
-        typeof (entry as { workItemId?: unknown }).workItemId === "string" &&
-        typeof (entry as { applicationNo?: unknown }).applicationNo ===
-          "string",
-    )
-  );
-}
-
-function isCollectionExceptionQueue(
-  payload: unknown,
-): payload is { items: CollectionExceptionItem[] } {
-  if (!payload || typeof payload !== "object") return false;
-  const items = (payload as { items?: unknown }).items;
-  return (
-    Array.isArray(items) &&
-    items.every(
-      (entry) =>
-        entry &&
-        typeof entry === "object" &&
-        typeof (entry as { exceptionId?: unknown }).exceptionId === "string" &&
-        typeof (entry as { applicationNo?: unknown }).applicationNo ===
-          "string",
-    )
-  );
-}
-const shell = {
-  maxWidth: 960,
-  margin: "0 auto",
-  padding: 24,
-  fontFamily: "system-ui, sans-serif",
-} as const;
-const card = {
-  border: "1px solid #cbd5e1",
-  borderRadius: 10,
-  padding: 20,
-  marginTop: 20,
-} as const;
-const form = { display: "grid", gap: 10, maxWidth: 520 } as const;
-
 async function api(path: string, init?: RequestInit): Promise<Response> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(init?.headers as Record<string, string> | undefined),
-  };
-  if (
-    ["POST", "PUT", "PATCH", "DELETE"].includes(
-      (init?.method ?? "GET").toUpperCase(),
-    )
-  ) {
-    const token = document.cookie
-      .split(";")
-      .map((part) => part.trim())
-      .find((part) => part.startsWith("__Host-payease_admin_csrf="))
-      ?.slice("__Host-payease_admin_csrf=".length);
-    if (token) headers["X-CSRF-Token"] = token;
+  const headers = new Headers(init?.headers);
+  headers.set("content-type", "application/json");
+  if ((init?.method ?? "GET").toUpperCase() !== "GET") {
+    const token = csrf();
+    if (token) headers.set("x-csrf-token", token);
   }
-  return fetch(`/api${path}`, {
+  return fetch(`${apiBase}${path}`, {
     ...init,
     credentials: "include",
     headers,
   });
 }
-
-function SignIn({
-  complete,
-  initialError = "",
-}: {
-  complete: (identity: Identity) => void;
-  initialError?: string;
-}): JSX.Element {
-  const [language, setLanguage] = useState<LenderLanguage>("en");
-  const [loginName, setLoginName] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState(initialError);
-  const copy = LENDER_COPY[language];
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setError("");
-    try {
-      const login = await api("/v1/local/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ loginName, password }),
-      });
-      if (!login.ok) return setError(copy.loginFailed);
-      const me = await api("/v1/local/auth/me");
-      if (!me.ok) return setError(copy.sessionFailed);
-      // Do not overwrite the language a returning lender operator selected in
-      // their last authenticated session. They can change it after sign-in,
-      // where the explicit account preference update is still persisted.
-      complete((await me.json()) as Identity);
-    } catch {
-      setError(copy.sessionFailed);
-    }
-  };
-  return (
-    <main style={shell}>
-      <section style={card}>
-        <h1>{copy.title}</h1>
-        <p>{copy.signInDescription}</p>
-        <form onSubmit={submit} style={form}>
-          <label>
-            {copy.account}
-            <input
-              autoComplete="username"
-              value={loginName}
-              onChange={(e) => setLoginName(e.target.value)}
-              required
-            />
-          </label>
-          <label>
-            {copy.password}
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </label>
-          <label>
-            {language === "en"
-              ? "Language"
-              : language === "zh-CN"
-                ? "语言"
-                : "ភាសា"}
-            <select
-              value={language}
-              onChange={(event) =>
-                setLanguage(event.target.value as LenderLanguage)
-              }
-            >
-              <option value="en">English</option>
-              <option value="zh-CN">中文</option>
-              <option value="km">ខ្មែរ</option>
-            </select>
-          </label>
-          <button>{copy.signIn}</button>
-          {error ? <p role="alert">{error}</p> : null}
-        </form>
-      </section>
-    </main>
-  );
+function money(amountMinor: string, currency: string): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(Number(BigInt(amountMinor)) / 100);
 }
-
-type Action = {
-  labelKey: LenderActionKey;
-  route: string;
-  body: () => object;
-  roles: string[];
-};
-
-const actionsRequiringIdempotency = new Set([
-  "lender-initial-review",
-  "lender-final-review",
-  "disbursement-release",
-  "disbursement-confirmation",
-  "repayment-write-off",
-  "repayment-confirmation",
-]);
+function nextAction(
+  operation: Operation,
+  roles: string[],
+): { eventType: string; copyKey: string; evidence: boolean } | undefined {
+  if (operation.status === "REQUESTED" && roles.includes("LENDER_WALLET_MAKER"))
+    return { eventType: "MAKER_VERIFIED", copyKey: "maker", evidence: false };
+  if (
+    operation.status === "MAKER_VERIFIED" &&
+    roles.includes("LENDER_WALLET_CHECKER")
+  )
+    return {
+      eventType: "CHECKER_APPROVED",
+      copyKey: "checker",
+      evidence: false,
+    };
+  if (
+    operation.status === "CHECKER_APPROVED" &&
+    roles.includes("LENDER_WALLET_MAKER")
+  )
+    return {
+      eventType: "BANK_TRANSFER_RECORDED",
+      copyKey: "record",
+      evidence: true,
+    };
+  if (
+    operation.status === "BANK_TRANSFER_RECORDED" &&
+    roles.includes("LENDER_WALLET_CHECKER")
+  )
+    return { eventType: "SETTLED", copyKey: "settle", evidence: true };
+  return undefined;
+}
 
 export function App(): JSX.Element {
   const [identity, setIdentity] = useState<Identity>();
-  const [checking, setChecking] = useState(true);
-  const [applicationNo, setApplicationNo] = useState("");
-  const [applicationSummary, setApplicationSummary] =
-    useState<LenderApplicationSummary>();
-  const [applicationLoading, setApplicationLoading] = useState(false);
-  const [applicationNotice, setApplicationNotice] = useState("");
-  const [reasonCode, setReasonCode] = useState("MANUAL_APPROVAL");
-  const [reviewDecision, setReviewDecision] =
-    useState<ReviewDecision>("APPROVED");
-  const [approvedAmountMinor, setApprovedAmountMinor] = useState("5000");
-  const [serviceFeeMinor, setServiceFeeMinor] = useState("0");
-  const [totalRepayableMinor, setTotalRepayableMinor] = useState("5000");
-  const [installmentCount, setInstallmentCount] = useState("1");
-  const [firstDueDate, setFirstDueDate] = useState("");
-  const [evidenceReference, setEvidenceReference] = useState("MANUAL-RECEIPT-");
+  const [language, setLanguage] = useState<Language>("en");
+  const [loginName, setLoginName] = useState("");
+  const [password, setPassword] = useState("");
+  const [operations, setOperations] = useState<Operation[]>([]);
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [accounts, setAccounts] = useState<OperatorAccount[]>([]);
+  const [newAccountLogin, setNewAccountLogin] = useState("");
+  const [newAccountPassword, setNewAccountPassword] = useState("");
+  const [newAccountRoles, setNewAccountRoles] = useState<string[]>([
+    "LENDER_WALLET_MAKER",
+  ]);
+  const [selected, setSelected] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
-  const [signInError, setSignInError] = useState("");
-  const [runningAction, setRunningAction] = useState<string>();
-  const [pendingIdempotencyKeys, setPendingIdempotencyKeys] = useState<
-    Record<string, string>
-  >({});
-  const [referredServiceCases, setReferredServiceCases] = useState<
-    ReferredServiceCase[]
-  >([]);
-  const [selectedServiceCase, setSelectedServiceCase] =
-    useState<ServiceCaseDetail>();
-  const [serviceCaseReasonCode, setServiceCaseReasonCode] = useState(
-    "LENDER_RESPONSE_RECORDED",
-  );
-  const [serviceCaseBusy, setServiceCaseBusy] = useState(false);
-  const [serviceCaseNotice, setServiceCaseNotice] = useState("");
-  const [repaymentWorkItems, setRepaymentWorkItems] = useState<
-    RepaymentWorkItem[]
-  >([]);
-  const [repaymentQueueBusy, setRepaymentQueueBusy] = useState(false);
-  const [repaymentQueueNotice, setRepaymentQueueNotice] = useState("");
-  const [collectionExceptions, setCollectionExceptions] = useState<
-    CollectionExceptionItem[]
-  >([]);
-  const [collectionExceptionBusy, setCollectionExceptionBusy] = useState(false);
-  const [collectionExceptionNotice, setCollectionExceptionNotice] =
-    useState("");
-  const [exceptionReasonCode, setExceptionReasonCode] = useState(
-    "ALTERNATE_COLLECTION_RECORDED",
-  );
-  const [exceptionEvidenceReference, setExceptionEvidenceReference] = useState(
-    "EXCEPTION-RESOLUTION-",
-  );
+  const c = COPY[identity?.preferredLanguage ?? language];
+  const adminCopy = ADMIN_COPY[identity?.preferredLanguage ?? language];
+  const text = (key: string) => c[key] ?? key;
+  const loadQueue = async () => {
+    const response = await api("/v1/lender-operator/manual-operations/open");
+    if (response.status === 401) throw new Error("unauthenticated");
+    if (!response.ok) throw new Error("queue");
+    setOperations(
+      ((await response.json()) as { operations: Operation[] }).operations,
+    );
+  };
+  const loadAudit = async (operationRef: string) => {
+    const response = await api(
+      `/v1/lender-operator/manual-operations/${encodeURIComponent(operationRef)}/audit`,
+    );
+    if (!response.ok) throw new Error("audit");
+    setSelected(operationRef);
+    setAudit(((await response.json()) as { events: AuditEvent[] }).events);
+  };
+  const loadAccounts = async () => {
+    const response = await api("/v1/lender-operator/admin/accounts");
+    if (!response.ok) throw new Error("accounts");
+    setAccounts(
+      ((await response.json()) as { accounts: OperatorAccount[] }).accounts,
+    );
+  };
   useEffect(() => {
-    api("/v1/local/auth/me")
-      .then(async (r) => {
-        if (r.ok) setIdentity((await r.json()) as Identity);
+    api("/v1/lender-operator/auth/me")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const next = (await response.json()) as Identity;
+        setIdentity(next);
+        setLanguage(next.preferredLanguage);
       })
-      .finally(() => setChecking(false));
+      .catch(() => undefined);
   }, []);
-  if (checking) return <main style={shell}>{LENDER_COPY.en.checking}</main>;
-  if (!identity)
-    return <SignIn complete={setIdentity} initialError={signInError} />;
-  const copy = LENDER_COPY[identity.preferredLanguage];
-  const finalTermsValid = hasValidFinalReviewTerms({
-    approvedAmountMinor,
-    serviceFeeMinor,
-    totalRepayableMinor,
-    installmentCount: Number(installmentCount),
-    firstDueDate,
-  });
-  const actions: Action[] = [
-    {
-      labelKey: "initialReview",
-      route: "lender-initial-review",
-      body: () => ({ decision: reviewDecision, reasonCode }),
-      roles: ["LENDER_CREDIT_OFFICER"],
-    },
-    {
-      labelKey: "finalReview",
-      route: "lender-final-review",
-      body: () =>
-        finalReviewPayload(reviewDecision, reasonCode, {
-          approvedAmountMinor,
-          serviceFeeMinor,
-          totalRepayableMinor,
-          installmentCount: Number(installmentCount),
-          firstDueDate,
-        }),
-      roles: ["LENDER_CREDIT_REVIEWER"],
-    },
-    {
-      labelKey: "resolveReapplication",
-      route: "reapplication-condition-resolved",
-      body: () => ({ reasonCode }),
-      roles: ["LENDER_CREDIT_OFFICER"],
-    },
-    {
-      labelKey: "confirmContract",
-      route: "contract-confirmation",
-      body: () => ({ evidenceReference }),
-      roles: ["LENDER_CONTRACT_OFFICER"],
-    },
-    {
-      labelKey: "openDisbursement",
-      route: "open-disbursement",
-      body: () => ({ reasonCode }),
-      roles: ["LENDER_DISBURSEMENT_MAKER"],
-    },
-    {
-      labelKey: "disbursementMaker",
-      route: "disbursement-release",
-      body: () => ({ reasonCode }),
-      roles: ["LENDER_DISBURSEMENT_MAKER"],
-    },
-    {
-      labelKey: "disbursementChecker",
-      route: "disbursement-confirmation",
-      body: () => ({ reasonCode, evidenceReference }),
-      roles: ["LENDER_DISBURSEMENT_CHECKER"],
-    },
-    {
-      labelKey: "activateRepayment",
-      route: "activate-repayment",
-      body: () => ({ reasonCode }),
-      roles: ["LENDER_REPAYMENT_MAKER"],
-    },
-    {
-      labelKey: "repaymentMaker",
-      route: "repayment-write-off",
-      body: () => ({ reasonCode }),
-      roles: ["LENDER_REPAYMENT_MAKER"],
-    },
-    {
-      labelKey: "repaymentChecker",
-      route: "repayment-confirmation",
-      body: () => ({ reasonCode, evidenceReference }),
-      roles: ["LENDER_REPAYMENT_CHECKER"],
-    },
-  ];
-  const hasOperationRole = actions.some((item) =>
-    item.roles.some((role) => identity.roles.includes(role)),
-  );
-  const available = applicationSummary
-    ? actions.filter(
-        (item) =>
-          item.roles.some((role) => identity.roles.includes(role)) &&
-          allowedLenderActionRoutes(applicationSummary).includes(item.route),
-      )
-    : [];
-  const loadApplication = async (applicationNoOverride?: string) => {
-    const target = (applicationNoOverride ?? applicationNo).trim();
-    if (!target) return;
-    setApplicationLoading(true);
-    setApplicationNotice("");
-    try {
-      const response = await api(
-        `/v1/local/applications/${encodeURIComponent(target)}`,
-      );
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      const summary = response.ok
-        ? parseLenderApplicationSummary(payload)
-        : undefined;
-      if (!summary) {
-        setApplicationSummary(undefined);
-        setApplicationNotice(copy.applicationLoadFailed);
-        return;
-      }
-      setApplicationNo(summary.application.applicationNo);
-      setApplicationSummary(summary);
-    } finally {
-      setApplicationLoading(false);
-    }
-  };
-  const run = async (action: Action) => {
-    setRunningAction(action.route);
-    setNotice("");
-    try {
-      const idempotencyKey = actionsRequiringIdempotency.has(action.route)
-        ? (pendingIdempotencyKeys[action.route] ?? crypto.randomUUID())
-        : undefined;
-      if (idempotencyKey && !pendingIdempotencyKeys[action.route]) {
-        setPendingIdempotencyKeys((current) => ({
-          ...current,
-          [action.route]: idempotencyKey,
-        }));
-      }
-      const idempotencyHeaders: HeadersInit | undefined = idempotencyKey
-        ? { "Idempotency-Key": idempotencyKey }
-        : undefined;
-      const result = await lenderActionNotice(
-        () =>
-          api(
-            `/v1/local/applications/${encodeURIComponent(applicationNo)}/${action.route}`,
-            {
-              method: "POST",
-              body: JSON.stringify(action.body()),
-              headers: idempotencyHeaders,
-            },
-          ),
-        copy,
-      );
-      if (idempotencyKey && !result.deliveryUncertain) {
-        setPendingIdempotencyKeys((current) => {
-          const { [action.route]: _completedKey, ...remaining } = current;
-          return remaining;
-        });
-      }
-      if (result.sessionExpired) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      setNotice(result.notice);
-      if (!result.deliveryUncertain && !result.sessionExpired) {
-        await loadApplication();
-        if (
-          ["repayment-write-off", "repayment-confirmation"].includes(
-            action.route,
-          ) &&
-          hasLenderRepaymentRole
-        ) {
-          await loadRepaymentWorkItems();
-          await loadCollectionExceptions();
-        }
-      }
-    } finally {
-      // A client-side error after the request must not permanently lock the
-      // manual approval console's controls.
-      setRunningAction(undefined);
-    }
-  };
-  const logout = async () => {
-    await api("/v1/local/auth/logout", { method: "POST" });
-    setIdentity(undefined);
-  };
-  const updateLanguage = async (
-    preferredLanguage: Identity["preferredLanguage"],
-  ) => {
-    const response = await api("/v1/local/auth/me/preferred-language", {
-      method: "PATCH",
-      body: JSON.stringify({ preferredLanguage }),
-    });
-    if (response.ok)
-      setIdentity((current) =>
-        current ? { ...current, preferredLanguage } : current,
-      );
-  };
-  const hasLenderRepaymentRole = identity.roles.some((role) =>
-    ["LENDER_REPAYMENT_MAKER", "LENDER_REPAYMENT_CHECKER"].includes(role),
-  );
-  const hasLenderComplaintRole = identity.roles.includes(
-    "LENDER_COMPLAINT_OFFICER",
-  );
-  const loadRepaymentWorkItems = async () => {
-    setRepaymentQueueBusy(true);
-    setRepaymentQueueNotice("");
-    try {
-      const response = await api("/v1/local/lender-repayment-work-items/open");
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      if (!response.ok || !isRepaymentWorkItemQueue(payload)) {
-        setRepaymentQueueNotice(copy.queueLoadFailed);
-        return;
-      }
-      setRepaymentWorkItems(payload.items);
-    } finally {
-      setRepaymentQueueBusy(false);
-    }
-  };
-  const loadCollectionExceptions = async () => {
-    setCollectionExceptionBusy(true);
-    setCollectionExceptionNotice("");
-    try {
-      const response = await api("/v1/local/lender-collection-exceptions/open");
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      if (!response.ok || !isCollectionExceptionQueue(payload)) {
-        setCollectionExceptionNotice(copy.exceptionLoadFailed);
-        return;
-      }
-      setCollectionExceptions(payload.items);
-    } finally {
-      setCollectionExceptionBusy(false);
-    }
-  };
-  const loadReferredServiceCases = async () => {
-    setServiceCaseBusy(true);
-    setServiceCaseNotice("");
-    try {
-      const response = await api("/v1/local/service-cases/referred-to-lender");
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      if (!response.ok || !isReferredServiceCaseQueue(payload)) {
-        setServiceCaseNotice(copy.complaintLoadFailed);
-        return;
-      }
-      setReferredServiceCases(payload.cases);
-    } finally {
-      setServiceCaseBusy(false);
-    }
-  };
-  const viewServiceCase = async (caseNo: string) => {
-    setServiceCaseBusy(true);
-    setServiceCaseNotice("");
-    try {
-      const response = await api(
-        `/v1/local/service-cases/${encodeURIComponent(caseNo)}`,
-      );
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      if (!response.ok || !isServiceCaseDetail(payload)) {
-        setServiceCaseNotice(copy.complaintLoadFailed);
-        return;
-      }
-      setSelectedServiceCase(payload);
-    } finally {
-      setServiceCaseBusy(false);
-    }
-  };
-  const resolveServiceCase = async () => {
-    if (!selectedServiceCase) return;
-    setServiceCaseBusy(true);
-    setServiceCaseNotice("");
-    try {
-      const response = await api(
-        `/v1/local/service-cases/${encodeURIComponent(selectedServiceCase.caseNo)}/lender-resolution`,
-        {
-          method: "POST",
-          body: JSON.stringify({ reasonCode: serviceCaseReasonCode }),
-        },
-      );
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      if (
-        !response.ok ||
-        !payload ||
-        typeof payload !== "object" ||
-        (payload as { status?: unknown }).status !== "RESOLVED"
-      ) {
-        setServiceCaseNotice(copy.complaintResolveFailed);
-        return;
-      }
-      setSelectedServiceCase((current) =>
-        current ? { ...current, status: "RESOLVED" } : current,
-      );
-      setServiceCaseNotice(`${copy.recorded}: ${selectedServiceCase.caseNo}`);
-      await loadReferredServiceCases();
-    } finally {
-      setServiceCaseBusy(false);
-    }
-  };
-  const useRepaymentWorkItem = async (item: RepaymentWorkItem) => {
-    const next = applyRepaymentWorkItemSelection(item);
-    setApplicationNo(next.applicationNo);
-    setReasonCode(next.reasonCode);
-    setEvidenceReference(next.evidenceReference);
-    setNotice(`${copy.recorded}: ${item.workItemId}`);
-    await loadApplication(next.applicationNo);
-  };
-  const resolveCollectionException = async (
-    exception: CollectionExceptionItem,
-  ) => {
-    setCollectionExceptionBusy(true);
-    setCollectionExceptionNotice("");
-    try {
-      const response = await api(
-        `/v1/local/lender-collection-exceptions/${encodeURIComponent(exception.exceptionId)}/resolve`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            reasonCode: exceptionReasonCode,
-            evidenceReference: exceptionEvidenceReference,
-          }),
-        },
-      );
-      if (response.status === 401) {
-        setSignInError(copy.sessionExpired);
-        setIdentity(undefined);
-        return;
-      }
-      const payload: unknown = await response.json().catch(() => undefined);
-      if (
-        !response.ok ||
-        !payload ||
-        typeof payload !== "object" ||
-        (payload as { status?: unknown }).status !== "RESOLVED"
-      ) {
-        setCollectionExceptionNotice(copy.exceptionLoadFailed);
-        return;
-      }
-      setCollectionExceptionNotice(
-        `${copy.exceptionResolved}: ${exception.exceptionId}`,
-      );
-      await loadCollectionExceptions();
-      await loadRepaymentWorkItems();
-    } finally {
-      setCollectionExceptionBusy(false);
-    }
-  };
   useEffect(() => {
-    if (!hasLenderRepaymentRole) return;
-    void loadRepaymentWorkItems();
-    void loadCollectionExceptions();
-    const timer = window.setInterval(() => {
-      void loadRepaymentWorkItems();
-      void loadCollectionExceptions();
-    }, LENDER_REPAYMENT_QUEUE_AUTO_REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [hasLenderRepaymentRole, identity?.loginName]);
-  return (
-    <main style={shell}>
-      <header
-        style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
-      >
-        <div>
-          <h1>{copy.title}</h1>
-          <p>
-            {copy.signedInAs}: {identity.loginName} ·{" "}
-            <select
-              value={identity.preferredLanguage}
-              onChange={(e) =>
-                void updateLanguage(
-                  e.target.value as Identity["preferredLanguage"],
-                )
-              }
-            >
-              <option value="zh-CN">中文</option>
-              <option value="en">English</option>
-              <option value="km">ខ្មែរ</option>
-            </select>
-          </p>
-        </div>
-        <button onClick={logout}>{copy.signOut}</button>
-      </header>
-      <section style={card}>
-        <h2>{copy.manualApproval}</h2>
-        <p>{copy.manualApprovalDescription}</p>
-        <div style={form}>
-          <label>
-            {copy.applicationNumber}
-            <input
-              value={applicationNo}
-              onChange={(e) => {
-                setApplicationNo(e.target.value);
-                setApplicationSummary(undefined);
-                setApplicationNotice("");
-              }}
-              placeholder="APP-…"
-              required
-            />
-          </label>
-          <button
-            disabled={!applicationNo.trim() || applicationLoading}
-            onClick={() => void loadApplication()}
-          >
-            {applicationLoading ? "…" : copy.loadApplication}
-          </button>
-          {applicationNotice ? <p role="alert">{applicationNotice}</p> : null}
-          {applicationSummary ? (
-            <section style={{ ...card, marginTop: 0, background: "#f8fafc" }}>
-              <h3>{copy.applicationSnapshot}</h3>
-              <dl
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto 1fr",
-                  gap: 8,
-                }}
-              >
-                <dt>{copy.applicationStatus}</dt>
-                <dd>
-                  {lenderApplicationStatusLabel(
-                    applicationSummary.application.status,
-                    identity.preferredLanguage,
-                  )}
-                </dd>
-                <dt>{copy.requestedAmount}</dt>
-                <dd>
-                  {formatHuman(applicationSummary.application.requestedAmount)}
-                </dd>
-                <dt>{copy.tenor}</dt>
-                <dd>{applicationSummary.application.tenorDays}</dd>
-                {applicationSummary.application.approvedAmount ? (
-                  <>
-                    <dt>{copy.approvedAmountSummary}</dt>
-                    <dd>
-                      {formatHuman(
-                        applicationSummary.application.approvedAmount,
-                      )}
-                    </dd>
-                  </>
-                ) : null}
-                {applicationSummary.terms ? (
-                  <>
-                    <dt>
-                      {lenderServiceFeeSummaryLabel(identity.preferredLanguage)}
-                    </dt>
-                    <dd>{formatHuman(applicationSummary.terms.serviceFee)}</dd>
-                    <dt>{copy.loanTerms}</dt>
-                    <dd>
-                      {formatHuman(applicationSummary.terms.totalRepayable)} ·{" "}
-                      {applicationSummary.terms.installmentCount} ·{" "}
-                      {applicationSummary.terms.firstDueDate}
-                    </dd>
-                  </>
-                ) : null}
-                <dt>{copy.repaymentProgress}</dt>
-                <dd>
-                  {applicationSummary.repayment.paidPeriods} /{" "}
-                  {applicationSummary.repayment.unpaidPeriods} ·{" "}
-                  {formatHuman(applicationSummary.repayment.outstanding)}
-                </dd>
-              </dl>
-              {available.length === 0 ? (
-                <p>{copy.noActionForCurrentStatus}</p>
-              ) : null}
-            </section>
-          ) : null}
-          <label>
-            {copy.reasonCode}
-            <input
-              value={reasonCode}
-              onChange={(e) => setReasonCode(e.target.value)}
-              required
-            />
-          </label>
-          {identity.roles.some((role) =>
-            ["LENDER_CREDIT_OFFICER", "LENDER_CREDIT_REVIEWER"].includes(role),
-          ) ? (
+    if (identity) void loadQueue().catch(() => setNotice(text("actionFailed")));
+  }, [identity?.loginName]);
+  useEffect(() => {
+    if (identity?.roles.includes("LENDER_WALLET_ADMIN")) {
+      void loadAccounts().catch(() => setNotice(text("actionFailed")));
+    }
+  }, [identity?.loginName]);
+  const signIn = async (event: FormEvent) => {
+    event.preventDefault();
+    setNotice("");
+    const response = await api("/v1/lender-operator/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ loginName, password }),
+    });
+    if (!response.ok) return setNotice(text("loginFailed"));
+    const me = await api("/v1/lender-operator/auth/me");
+    if (!me.ok) return setNotice(text("loginFailed"));
+    const next = (await me.json()) as Identity;
+    setIdentity(next);
+    setLanguage(next.preferredLanguage);
+  };
+  const action = async (
+    operation: Operation,
+    eventType: string,
+    failed = false,
+  ) => {
+    if (
+      ["BANK_TRANSFER_RECORDED", "SETTLED", "FAILED"].includes(eventType) &&
+      !evidence.trim()
+    )
+      return setNotice(text("evidenceRequired"));
+    if (failed && !reason.trim()) return setNotice(text("reason"));
+    const response = await api(
+      `/v1/lender-operator/manual-operations/${encodeURIComponent(operation.operationRef)}/actions`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          eventType,
+          ...(evidence.trim() ? { evidenceReference: evidence.trim() } : {}),
+          ...(failed ? { reasonCode: reason.trim() } : {}),
+        }),
+      },
+    );
+    if (response.status === 401) return setIdentity(undefined);
+    if (response.status === 403) return setNotice(text("noAccess"));
+    if (!response.ok) return setNotice(text("actionFailed"));
+    setEvidence("");
+    setReason("");
+    await loadQueue();
+    await loadAudit(operation.operationRef);
+  };
+  const signOut = async () => {
+    await api("/v1/lender-operator/auth/logout", { method: "POST" });
+    setIdentity(undefined);
+    setOperations([]);
+    setAudit([]);
+    setAccounts([]);
+  };
+  const createAccount = async (event: FormEvent) => {
+    event.preventDefault();
+    const response = await api("/v1/lender-operator/admin/accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        loginName: newAccountLogin,
+        password: newAccountPassword,
+        preferredLanguage: identity?.preferredLanguage ?? language,
+        roles: newAccountRoles,
+      }),
+    });
+    if (!response.ok) return setNotice(text("actionFailed"));
+    setNewAccountLogin("");
+    setNewAccountPassword("");
+    await loadAccounts();
+  };
+  const disableAccount = async (accountId: string) => {
+    const response = await api(
+      `/v1/lender-operator/admin/accounts/${encodeURIComponent(accountId)}`,
+      { method: "PATCH", body: JSON.stringify({ isActive: false }) },
+    );
+    if (!response.ok) return setNotice(text("actionFailed"));
+    await loadAccounts();
+  };
+  const updateAccount = async (
+    accountId: string,
+    patch: Readonly<{ isActive?: boolean; roles?: string[] }>,
+  ) => {
+    const response = await api(
+      `/v1/lender-operator/admin/accounts/${encodeURIComponent(accountId)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    );
+    if (!response.ok) return setNotice(text("actionFailed"));
+    await loadAccounts();
+  };
+  if (!identity)
+    return (
+      <main className="lender-shell">
+        <section className="lender-card login-card">
+          <h1>{c.title}</h1>
+          <p>{c.subtitle}</p>
+          <form onSubmit={(event) => void signIn(event)}>
             <label>
-              {copy.creditDecision}
+              {c.account}
+              <input
+                autoComplete="username"
+                value={loginName}
+                onChange={(event) => setLoginName(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              {c.password}
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Language
               <select
-                value={reviewDecision}
+                value={language}
                 onChange={(event) =>
-                  setReviewDecision(event.target.value as ReviewDecision)
+                  setLanguage(event.target.value as Language)
                 }
               >
-                <option value="APPROVED">{copy.approve}</option>
-                <option value="REJECTED">{copy.reject}</option>
-                <option value="RETURNED">{copy.returnForCorrection}</option>
+                <option value="en">English</option>
+                <option value="zh-CN">中文</option>
+                <option value="km">ខ្មែរ</option>
               </select>
             </label>
-          ) : null}
-          {identity.roles.includes("LENDER_CREDIT_REVIEWER") &&
-          reviewDecision === "APPROVED" ? (
-            <>
-              <label>
-                {copy.approvedAmount}
-                <input
-                  inputMode="numeric"
-                  value={approvedAmountMinor}
-                  onChange={(event) =>
-                    setApprovedAmountMinor(event.target.value)
-                  }
-                  required
-                />
-              </label>
-              <label>
-                {copy.serviceFee}
-                <input
-                  inputMode="numeric"
-                  value={serviceFeeMinor}
-                  onChange={(event) => setServiceFeeMinor(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                {copy.totalRepayable}
-                <input
-                  inputMode="numeric"
-                  value={totalRepayableMinor}
-                  onChange={(event) =>
-                    setTotalRepayableMinor(event.target.value)
-                  }
-                  required
-                />
-              </label>
-              <label>
-                {copy.installments}
-                <input
-                  inputMode="numeric"
-                  value={installmentCount}
-                  onChange={(event) => setInstallmentCount(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                {copy.firstDueDate}
-                <input
-                  type="date"
-                  value={firstDueDate}
-                  onChange={(event) => setFirstDueDate(event.target.value)}
-                  required
-                />
-              </label>
-            </>
-          ) : null}
-          <label>
-            {copy.evidenceReference}
-            <input
-              value={evidenceReference}
-              onChange={(e) => setEvidenceReference(e.target.value)}
-              required
-            />
-          </label>
+            <button type="submit">{c.signIn}</button>
+          </form>
+          {notice ? <p role="alert">{notice}</p> : null}
+        </section>
+      </main>
+    );
+  return (
+    <main className="lender-shell">
+      <header>
+        <div>
+          <h1>{c.title}</h1>
+          <p>
+            {identity.loginName} · {identity.roles.join(", ")}
+          </p>
         </div>
-        <div
-          style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}
-        >
-          {available.map((action) => (
-            <button
-              key={action.route}
-              disabled={
-                !applicationSummary ||
-                Boolean(runningAction) ||
-                (action.route === "lender-final-review" &&
-                  reviewDecision === "APPROVED" &&
-                  !finalTermsValid)
-              }
-              onClick={() => void run(action)}
-            >
-              {runningAction === action.route
-                ? "…"
-                : copy.actions[action.labelKey]}
-            </button>
-          ))}
-        </div>
-        {!hasOperationRole ? <p>{copy.noRole}</p> : null}
-        {available.some((action) => action.route === "lender-final-review") &&
-        reviewDecision === "APPROVED" &&
-        !finalTermsValid ? (
-          <p role="alert">{copy.invalidFinalReviewTerms}</p>
-        ) : null}
-        {notice ? (
-          <pre role="status" style={{ whiteSpace: "pre-wrap" }}>
-            {notice}
-          </pre>
-        ) : null}
-      </section>
-      {hasLenderRepaymentRole ? (
-        <>
-          <section style={card} aria-label={copy.repaymentQueue}>
-            <h2>{copy.repaymentQueue}</h2>
-            <p>{copy.repaymentQueueDescription}</p>
-            <button
-              disabled={repaymentQueueBusy}
-              onClick={() => void loadRepaymentWorkItems()}
-            >
-              {repaymentQueueBusy ? "…" : copy.refreshRepaymentQueue}
-            </button>
-            {repaymentWorkItems.length === 0 ? (
-              <p>{copy.noRepaymentWorkItems}</p>
-            ) : (
-              <ul>
-                {repaymentWorkItems.map((item) => (
-                  <li key={item.workItemId} style={{ marginTop: 10 }}>
-                    <button
-                      disabled={repaymentQueueBusy}
-                      onClick={() => void useRepaymentWorkItem(item)}
-                    >
-                      {copy.useWorkItem}: {item.applicationNo}
-                    </button>{" "}
-                    <small>
-                      #{item.collectionSequence} ·{" "}
-                      {item.selectedRepaymentMethod} · {item.collectionResult} ·{" "}
-                      {item.workItemStatus} · {item.reportedAmountMinor}
-                    </small>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {repaymentQueueNotice ? (
-              <p role="status">{repaymentQueueNotice}</p>
-            ) : null}
-          </section>
-          <section style={card} aria-label={copy.collectionExceptions}>
-            <h2>{copy.collectionExceptions}</h2>
-            <p>{copy.collectionExceptionsDescription}</p>
-            <button
-              disabled={collectionExceptionBusy}
-              onClick={() => void loadCollectionExceptions()}
-            >
-              {collectionExceptionBusy ? "…" : copy.refreshCollectionExceptions}
-            </button>
-            <div style={{ ...form, marginTop: 12 }}>
-              <label>
-                {copy.exceptionReasonCode}
-                <input
-                  value={exceptionReasonCode}
-                  onChange={(event) =>
-                    setExceptionReasonCode(event.target.value.toUpperCase())
-                  }
-                  pattern="[A-Z0-9_]{3,64}"
-                  required
-                />
-              </label>
-              <label>
-                {copy.exceptionEvidenceReference}
-                <input
-                  value={exceptionEvidenceReference}
-                  onChange={(event) =>
-                    setExceptionEvidenceReference(event.target.value)
-                  }
-                  required
-                />
-              </label>
-            </div>
-            {collectionExceptions.length === 0 ? (
-              <p>{copy.noCollectionExceptions}</p>
-            ) : (
-              <ul>
-                {collectionExceptions.map((exception) => (
-                  <li key={exception.exceptionId} style={{ marginTop: 10 }}>
-                    <button
-                      disabled={
-                        collectionExceptionBusy ||
-                        !canResolveCollectionException({
-                          roles: identity.roles,
-                          reasonCode: exceptionReasonCode,
-                          evidenceReference: exceptionEvidenceReference,
-                        })
-                      }
-                      onClick={() => void resolveCollectionException(exception)}
-                    >
-                      {copy.resolveException}: {exception.applicationNo}
-                    </button>{" "}
-                    <small>
-                      #{exception.collectionSequence} ·{" "}
-                      {exception.selectedRepaymentMethod} ·{" "}
-                      {exception.exceptionType} · {exception.reasonCode}
-                    </small>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {collectionExceptionNotice ? (
-              <p role="status">{collectionExceptionNotice}</p>
-            ) : null}
-          </section>
-        </>
+        <button onClick={() => void signOut()}>{c.signOut}</button>
+      </header>
+      {notice ? (
+        <p role="alert" className="notice">
+          {notice}
+        </p>
       ) : null}
-      {hasLenderComplaintRole ? (
-        <section style={card} aria-label={copy.complaintResolution}>
-          <h2>{copy.complaintResolution}</h2>
-          <p>{copy.complaintResolutionDescription}</p>
-          <button
-            disabled={serviceCaseBusy}
-            onClick={() => void loadReferredServiceCases()}
-          >
-            {serviceCaseBusy ? "…" : copy.refreshComplaintQueue}
-          </button>
-          {referredServiceCases.length === 0 ? (
-            <p>{copy.noReferredComplaints}</p>
-          ) : (
-            <ul>
-              {referredServiceCases.map((serviceCase) => (
-                <li key={serviceCase.caseNo} style={{ marginTop: 10 }}>
+      <section className="lender-card">
+        <div className="section-heading">
+          <h2>{c.queue}</h2>
+          <button onClick={() => void loadQueue()}>{c.refresh}</button>
+        </div>
+        {operations.length === 0 ? (
+          <p>{c.empty}</p>
+        ) : (
+          operations.map((operation) => {
+            const next = nextAction(operation, identity.roles);
+            return (
+              <article className="operation" key={operation.operationRef}>
+                <div>
+                  <strong>
+                    {operation.operationType} · {operation.status}
+                  </strong>
+                  <p>
+                    {operation.applicationNo} · {operation.orderRef}
+                  </p>
+                  <p>
+                    {money(operation.requestedAmountMinor, operation.currency)}{" "}
+                    · {operation.fundsOrderStatus}
+                  </p>
+                </div>
+                <div className="operation-actions">
                   <button
-                    disabled={serviceCaseBusy}
-                    onClick={() => void viewServiceCase(serviceCase.caseNo)}
+                    onClick={() => void loadAudit(operation.operationRef)}
                   >
-                    {copy.viewComplaint}: {serviceCase.caseNo}
-                  </button>{" "}
-                  <small>
-                    {lenderServiceCaseTypeLabel(
-                      serviceCase.caseType,
-                      identity.preferredLanguage,
-                    )}{" "}
-                    · {serviceCase.applicationNo}
-                  </small>
-                </li>
-              ))}
-            </ul>
-          )}
-          {selectedServiceCase ? (
-            <section style={{ ...card, marginTop: 16, background: "#f8fafc" }}>
-              <h3>{selectedServiceCase.caseNo}</h3>
-              <p>
-                <strong>{copy.complaintContentAudited}</strong>
-              </p>
-              <p style={{ whiteSpace: "pre-wrap" }}>
-                {selectedServiceCase.message}
-              </p>
-              {selectedServiceCase.status === "RESOLVED" ? (
-                <p role="status">{copy.recorded}</p>
-              ) : (
-                <>
-                  <label>
-                    {copy.finalResolutionReasonCode}
-                    <input
-                      value={serviceCaseReasonCode}
-                      onChange={(event) =>
-                        setServiceCaseReasonCode(
-                          event.target.value.toUpperCase(),
-                        )
-                      }
-                      pattern="[A-Z0-9_]{3,64}"
-                      required
-                    />
-                  </label>
-                  <button
-                    disabled={
-                      serviceCaseBusy ||
-                      !/^[A-Z0-9_]{3,64}$/.test(serviceCaseReasonCode)
-                    }
-                    onClick={() => void resolveServiceCase()}
-                  >
-                    {serviceCaseBusy ? "…" : copy.resolveComplaint}
+                    {c.viewAudit}
                   </button>
-                </>
-              )}
-            </section>
-          ) : null}
-          {serviceCaseNotice ? <p role="status">{serviceCaseNotice}</p> : null}
+                  {next ? (
+                    <button
+                      onClick={() => void action(operation, next.eventType)}
+                    >
+                      {c[next.copyKey]}
+                    </button>
+                  ) : null}
+                  {operation.status === "BANK_TRANSFER_RECORDED" &&
+                  identity.roles.includes("LENDER_WALLET_CHECKER") ? (
+                    <button
+                      className="danger"
+                      onClick={() => void action(operation, "FAILED", true)}
+                    >
+                      {c.fail}
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })
+        )}
+        <label>
+          {c.evidence}
+          <input
+            value={evidence}
+            onChange={(event) => setEvidence(event.target.value)}
+            placeholder="vault://lender/..."
+          />
+        </label>
+        <label>
+          {c.reason}
+          <input
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+      </section>
+      {identity.roles.includes("LENDER_WALLET_ADMIN") ? (
+        <section className="lender-card">
+          <div className="section-heading">
+            <h2>{adminCopy.title}</h2>
+            <button onClick={() => void loadAccounts()}>{c.refresh}</button>
+          </div>
+          <form
+            className="admin-form"
+            onSubmit={(event) => void createAccount(event)}
+          >
+            <label>
+              {c.account}
+              <input
+                value={newAccountLogin}
+                onChange={(event) => setNewAccountLogin(event.target.value)}
+                pattern="[a-z0-9._-]{3,64}"
+                required
+              />
+            </label>
+            <label>
+              {c.password}
+              <input
+                type="password"
+                value={newAccountPassword}
+                onChange={(event) => setNewAccountPassword(event.target.value)}
+                minLength={12}
+                required
+              />
+            </label>
+            <label>
+              {adminCopy.roles}
+              <select
+                multiple
+                value={newAccountRoles}
+                onChange={(event) =>
+                  setNewAccountRoles(
+                    Array.from(event.currentTarget.selectedOptions).map(
+                      (option) => option.value,
+                    ),
+                  )
+                }
+              >
+                <option value="LENDER_WALLET_MAKER">LENDER_WALLET_MAKER</option>
+                <option value="LENDER_WALLET_CHECKER">
+                  LENDER_WALLET_CHECKER
+                </option>
+                <option value="LENDER_WALLET_ADMIN">LENDER_WALLET_ADMIN</option>
+              </select>
+            </label>
+            <button type="submit">{adminCopy.create}</button>
+          </form>
+          {accounts.map((account) => (
+            <article className="operation" key={account.accountId}>
+              <div>
+                <strong>{account.loginName}</strong>
+                <p>
+                  {account.roles.join(", ")} · {account.preferredLanguage}
+                </p>
+              </div>
+              <div className="operation-actions">
+                <span>
+                  {account.isActive ? adminCopy.active : adminCopy.disabled}
+                </span>
+                <select
+                  multiple
+                  aria-label={`${account.loginName} ${adminCopy.roles}`}
+                  value={account.roles}
+                  onChange={(event) =>
+                    void updateAccount(account.accountId, {
+                      roles: Array.from(
+                        event.currentTarget.selectedOptions,
+                      ).map((option) => option.value),
+                    })
+                  }
+                  disabled={account.accountId === identity.accountId}
+                >
+                  <option value="LENDER_WALLET_MAKER">
+                    LENDER_WALLET_MAKER
+                  </option>
+                  <option value="LENDER_WALLET_CHECKER">
+                    LENDER_WALLET_CHECKER
+                  </option>
+                  <option value="LENDER_WALLET_ADMIN">
+                    LENDER_WALLET_ADMIN
+                  </option>
+                </select>
+                {account.isActive &&
+                account.accountId !== identity.accountId ? (
+                  <button
+                    className="danger"
+                    onClick={() => void disableAccount(account.accountId)}
+                  >
+                    {adminCopy.disable}
+                  </button>
+                ) : !account.isActive ? (
+                  <button
+                    onClick={() =>
+                      void updateAccount(account.accountId, { isActive: true })
+                    }
+                  >
+                    {adminCopy.active}
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ))}
         </section>
       ) : null}
+      <section className="lender-card">
+        <h2>{c.audit}</h2>
+        {selected ? <p>{selected}</p> : null}
+        <ol>
+          {audit.map((event) => (
+            <li key={event.eventRef}>
+              <strong>{event.eventType}</strong> · {event.actorRole} ·{" "}
+              {event.occurredAt}
+              {event.evidenceReference ? ` · ${event.evidenceReference}` : ""}
+              {event.reasonCode ? ` · ${event.reasonCode}` : ""}
+            </li>
+          ))}
+        </ol>
+      </section>
     </main>
   );
 }

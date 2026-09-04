@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { walletChannelCallbackHeaders } from "../src/protocol.js";
+import { hashLenderOperatorPassword } from "../src/operator-passwords.js";
 
 const integrationDatabaseUrl = process.env.PAYEASE_TEST_DATABASE_URL;
 const integration = integrationDatabaseUrl ? describe : describe.skip;
@@ -13,6 +14,7 @@ const schemaName = `wallet_http_${randomUUID().replace(/-/g, "")}`;
 const sourceDirectory = dirname(fileURLToPath(import.meta.url));
 const migrationsDirectory = join(sourceDirectory, "..", "db", "migrations");
 const walletOrigin = "https://wallet.test";
+const lenderOperatorOrigin = "https://lender.test";
 
 type WalletServerModule = typeof import("../src/server.js");
 
@@ -40,6 +42,45 @@ function cookieFromSetCookie(
   );
   expect(match).toBeTruthy();
   return match!.split(";")[0]!;
+}
+
+async function loginOperator(args: {
+  loginName: string;
+  password: string;
+  roleCode:
+    "LENDER_WALLET_MAKER" | "LENDER_WALLET_CHECKER" | "LENDER_WALLET_ADMIN";
+}): Promise<Readonly<{ cookieHeader: string; csrfToken: string }>> {
+  const passwordHash = await hashLenderOperatorPassword(args.password);
+  const created = await adminClient.query<{ id: string }>(
+    `INSERT INTO lender_operator_accounts (login_name, password_hash)
+     VALUES ($1, $2)
+     RETURNING id`,
+    [args.loginName, passwordHash],
+  );
+  await adminClient.query(
+    `INSERT INTO lender_operator_account_roles (account_id, role_code)
+     VALUES ($1, $2)`,
+    [created.rows[0]!.id, args.roleCode],
+  );
+  const login = await serverModule.app.inject({
+    method: "POST",
+    url: "/v1/lender-operator/auth/login",
+    headers: { origin: lenderOperatorOrigin },
+    payload: { loginName: args.loginName, password: args.password },
+  });
+  expect(login.statusCode).toBe(200);
+  const sessionCookie = cookieFromSetCookie(
+    login.headers["set-cookie"],
+    "__Host-payease_lender_operator_session",
+  );
+  const csrfCookie = cookieFromSetCookie(
+    login.headers["set-cookie"],
+    "__Host-payease_lender_operator_csrf",
+  );
+  return {
+    cookieHeader: `${sessionCookie}; ${csrfCookie}`,
+    csrfToken: csrfCookie.split("=")[1]!,
+  };
 }
 
 integration("lender-wallet-service HTTP integration", () => {
@@ -72,6 +113,7 @@ integration("lender-wallet-service HTTP integration", () => {
     );
     process.env.PAYEASE_LENDER_CHANNEL_CALLBACK_SECRET = "channel-test-secret";
     process.env.PAYEASE_LENDER_WALLET_PUBLIC_ORIGIN = walletOrigin;
+    process.env.PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN = lenderOperatorOrigin;
     process.env.PAYEASE_LENDER_WALLET_INTERNAL_TOKEN =
       "internal-wallet-test-token-123456";
 
@@ -102,6 +144,83 @@ integration("lender-wallet-service HTTP integration", () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({ code: "LENDER_WALLET_SESSION_REQUIRED" });
+  });
+
+  it("uses independent lender-only login, role lookup, origin and CSRF checks", async () => {
+    const password = "local-lender-operator-password";
+    const passwordHash = await hashLenderOperatorPassword(password);
+    const created = await adminClient.query<{ id: string }>(
+      `INSERT INTO lender_operator_accounts
+        (login_name, password_hash, preferred_language)
+       VALUES ('lender.maker', $1, 'km')
+       RETURNING id`,
+      [passwordHash],
+    );
+    await adminClient.query(
+      `INSERT INTO lender_operator_account_roles (account_id, role_code)
+       VALUES ($1, 'LENDER_WALLET_MAKER')`,
+      [created.rows[0]!.id],
+    );
+    const wrongOrigin = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/auth/login",
+      headers: { origin: "https://evil.example" },
+      payload: { loginName: "lender.maker", password },
+    });
+    expect(wrongOrigin.statusCode).toBe(403);
+
+    const login = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/auth/login",
+      headers: { origin: lenderOperatorOrigin },
+      payload: { loginName: "lender.maker", password },
+    });
+    expect(login.statusCode).toBe(200);
+    expect(login.json()).toEqual({ preferredLanguage: "km" });
+    const sessionCookie = cookieFromSetCookie(
+      login.headers["set-cookie"],
+      "__Host-payease_lender_operator_session",
+    );
+    const csrfCookie = cookieFromSetCookie(
+      login.headers["set-cookie"],
+      "__Host-payease_lender_operator_csrf",
+    );
+    const cookieHeader = `${sessionCookie}; ${csrfCookie}`;
+    const me = await serverModule.app.inject({
+      method: "GET",
+      url: "/v1/lender-operator/auth/me",
+      headers: { cookie: cookieHeader },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json()).toEqual({
+      accountId: created.rows[0]!.id,
+      loginName: "lender.maker",
+      preferredLanguage: "km",
+      roles: ["LENDER_WALLET_MAKER"],
+    });
+
+    const missingCsrf = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/auth/logout",
+      headers: { origin: lenderOperatorOrigin, cookie: cookieHeader },
+    });
+    expect(missingCsrf.statusCode).toBe(403);
+    const logout = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/auth/logout",
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: cookieHeader,
+        "x-csrf-token": csrfCookie.split("=")[1]!,
+      },
+    });
+    expect(logout.statusCode).toBe(204);
+    const expired = await serverModule.app.inject({
+      method: "GET",
+      url: "/v1/lender-operator/auth/me",
+      headers: { cookie: cookieHeader },
+    });
+    expect(expired.statusCode).toBe(401);
   });
 
   it("rejects cross-origin authorization confirmation before reading the wallet session", async () => {
@@ -415,5 +534,198 @@ integration("lender-wallet-service HTTP integration", () => {
     expect(response.json()).toEqual({
       code: "WALLET_CHANNEL_CALLBACK_OUT_OF_ORDER",
     });
+  });
+
+  it("requires independent maker/checker sessions to advance a controlled manual operation", async () => {
+    const order = await adminClient.query<{ id: string }>(
+      `SELECT id
+         FROM create_lender_wallet_funds_order(
+           'APP-MANUAL-001', 'wallet-manual-001', 'WALLET-MANUAL-001',
+           'WITHDRAWAL', 5300, 'USD', 'manual-order-idempotency-001',
+           'applicant:APP-MANUAL-001', 'manual-order-created-001', '{}'::jsonb
+         )`,
+    );
+    const operation = await adminClient.query<{ id: string }>(
+      `SELECT id
+         FROM create_lender_wallet_manual_operation(
+           $1, 'applicant:APP-MANUAL-001', 'manual-operation-requested-001', '{}'::jsonb
+         )`,
+      [order.rows[0]!.id],
+    );
+    const maker = await loginOperator({
+      loginName: "lender.manual.maker",
+      password: "controlled-maker-password",
+      roleCode: "LENDER_WALLET_MAKER",
+    });
+    const checker = await loginOperator({
+      loginName: "lender.manual.checker",
+      password: "controlled-checker-password",
+      roleCode: "LENDER_WALLET_CHECKER",
+    });
+    const queue = await serverModule.app.inject({
+      method: "GET",
+      url: "/v1/lender-operator/manual-operations/open",
+      headers: { cookie: maker.cookieHeader },
+    });
+    expect(queue.statusCode).toBe(200);
+    expect(
+      queue
+        .json<{ operations: Array<{ operationRef: string }> }>()
+        .operations.some((item) => item.operationRef === operation.rows[0]!.id),
+    ).toBe(true);
+    const initialAudit = await serverModule.app.inject({
+      method: "GET",
+      url: `/v1/lender-operator/manual-operations/${operation.rows[0]!.id}/audit`,
+      headers: { cookie: maker.cookieHeader },
+    });
+    expect(initialAudit.statusCode).toBe(200);
+    expect(initialAudit.json()).toMatchObject({
+      operationRef: operation.rows[0]!.id,
+      events: [expect.objectContaining({ eventType: "REQUESTED" })],
+    });
+
+    const action = async (
+      session: Readonly<{ cookieHeader: string; csrfToken: string }>,
+      eventType: string,
+      extra: Record<string, string> = {},
+    ) =>
+      serverModule.app.inject({
+        method: "POST",
+        url: `/v1/lender-operator/manual-operations/${operation.rows[0]!.id}/actions`,
+        headers: {
+          origin: lenderOperatorOrigin,
+          cookie: session.cookieHeader,
+          "x-csrf-token": session.csrfToken,
+        },
+        payload: { eventType, ...extra },
+      });
+
+    expect((await action(maker, "MAKER_VERIFIED")).statusCode).toBe(200);
+    expect((await action(maker, "CHECKER_APPROVED")).statusCode).toBe(403);
+    expect((await action(checker, "CHECKER_APPROVED")).statusCode).toBe(200);
+    expect(
+      (
+        await action(maker, "BANK_TRANSFER_RECORDED", {
+          evidenceReference: "vault://lender/manual/transfer-001",
+        })
+      ).statusCode,
+    ).toBe(200);
+    const settled = await action(checker, "SETTLED", {
+      evidenceReference: "vault://lender/manual/settlement-001",
+    });
+    expect(settled.statusCode).toBe(200);
+    expect(settled.json()).toMatchObject({
+      status: "SETTLED",
+      orderRef: "WALLET-MANUAL-001",
+      fundsOrderStatus: "SETTLED",
+    });
+    const outbox = await adminClient.query<{ event_type: string }>(
+      `SELECT event_type
+         FROM wallet_operation_result_outbox
+        WHERE order_ref = 'WALLET-MANUAL-001'
+        ORDER BY created_at ASC`,
+    );
+    expect(outbox.rows.map((row) => row.event_type)).toEqual([
+      "AUTHORIZED",
+      "PROCESSING",
+      "SETTLED",
+    ]);
+    const finalAudit = await serverModule.app.inject({
+      method: "GET",
+      url: `/v1/lender-operator/manual-operations/${operation.rows[0]!.id}/audit`,
+      headers: { cookie: checker.cookieHeader },
+    });
+    expect(finalAudit.statusCode).toBe(200);
+    expect(
+      finalAudit
+        .json<{ events: Array<{ eventType: string }> }>()
+        .events.map((event) => event.eventType),
+    ).toEqual([
+      "REQUESTED",
+      "MAKER_VERIFIED",
+      "CHECKER_APPROVED",
+      "BANK_TRANSFER_RECORDED",
+      "SETTLED",
+    ]);
+  });
+
+  it("allows only a lender-domain administrator to provision and disable operator accounts", async () => {
+    const admin = await loginOperator({
+      loginName: "lender.wallet.admin",
+      password: "controlled-admin-password",
+      roleCode: "LENDER_WALLET_ADMIN",
+    });
+    const maker = await loginOperator({
+      loginName: "lender.wallet.nonadmin",
+      password: "controlled-nonadmin-password",
+      roleCode: "LENDER_WALLET_MAKER",
+    });
+    const blocked = await serverModule.app.inject({
+      method: "GET",
+      url: "/v1/lender-operator/admin/accounts",
+      headers: { cookie: maker.cookieHeader },
+    });
+    expect(blocked.statusCode).toBe(403);
+    const created = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/admin/accounts",
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: admin.cookieHeader,
+        "x-csrf-token": admin.csrfToken,
+      },
+      payload: {
+        loginName: "lender.wallet.newchecker",
+        password: "controlled-newchecker-password",
+        preferredLanguage: "zh-CN",
+        roles: ["LENDER_WALLET_CHECKER"],
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const accountId = created.json<{ accountId: string }>().accountId;
+    const accounts = await serverModule.app.inject({
+      method: "GET",
+      url: "/v1/lender-operator/admin/accounts",
+      headers: { cookie: admin.cookieHeader },
+    });
+    expect(accounts.statusCode).toBe(200);
+    const adminAccountId = accounts
+      .json<{ accounts: Array<{ accountId: string; loginName: string }> }>()
+      .accounts.find(
+        (account) => account.loginName === "lender.wallet.admin",
+      )?.accountId;
+    expect(adminAccountId).toBeTruthy();
+    const selfDisable = await serverModule.app.inject({
+      method: "PATCH",
+      url: `/v1/lender-operator/admin/accounts/${adminAccountId}`,
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: admin.cookieHeader,
+        "x-csrf-token": admin.csrfToken,
+      },
+      payload: { isActive: false },
+    });
+    expect(selfDisable.statusCode).toBe(409);
+    const disableNewChecker = await serverModule.app.inject({
+      method: "PATCH",
+      url: `/v1/lender-operator/admin/accounts/${accountId}`,
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: admin.cookieHeader,
+        "x-csrf-token": admin.csrfToken,
+      },
+      payload: { isActive: false },
+    });
+    expect(disableNewChecker.statusCode).toBe(204);
+    const newCheckerLogin = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/auth/login",
+      headers: { origin: lenderOperatorOrigin },
+      payload: {
+        loginName: "lender.wallet.newchecker",
+        password: "controlled-newchecker-password",
+      },
+    });
+    expect(newCheckerLogin.statusCode).toBe(401);
   });
 });

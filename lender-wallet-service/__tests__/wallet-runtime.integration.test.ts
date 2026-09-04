@@ -357,4 +357,103 @@ integration("lender-wallet-service runtime migration gate", () => {
       { event_type: "SETTLED", actor_ref: "worker-3" },
     ]);
   });
+
+  it("enforces a lender-only maker/checker manual-bank-operation evidence chain", async () => {
+    const order = await client.query<{ id: string }>(
+      `SELECT id
+         FROM create_lender_wallet_funds_order(
+                'APP-MANUAL-001',
+                'wallet-ext-manual-001',
+                'ORD-MANUAL-001',
+                'WITHDRAWAL',
+                1500,
+                'USD',
+                'order-idem-manual-001',
+                'applicant-001',
+                'order-event-created-manual-001',
+                '{}'::jsonb
+              )`,
+    );
+    const created = await client.query<{ id: string; status: string }>(
+      `SELECT id, status
+         FROM create_lender_wallet_manual_operation(
+                $1,
+                'applicant-001',
+                'manual-event-requested-001',
+                '{}'::jsonb
+              )`,
+      [order.rows[0]!.id],
+    );
+    expect(created.rows[0]!.status).toBe("REQUESTED");
+
+    await expect(
+      client.query(
+        `UPDATE lender_wallet_manual_operation_cases
+            SET status = 'SETTLED'
+          WHERE id = $1`,
+        [created.rows[0]!.id],
+      ),
+    ).rejects.toThrow(/manual operation updates must go through/i);
+
+    await client.query(
+      `SELECT status
+         FROM transition_lender_wallet_manual_operation(
+                $1, 'manual-event-maker-001', 'MAKER_VERIFIED',
+                'maker-001', 'MAKER', NULL, NULL, '{}'::jsonb
+              )`,
+      [created.rows[0]!.id],
+    );
+    await expect(
+      client.query(
+        `SELECT status
+           FROM transition_lender_wallet_manual_operation(
+                  $1, 'manual-event-checker-same-001', 'CHECKER_APPROVED',
+                  'maker-001', 'CHECKER', NULL, NULL, '{}'::jsonb
+                )`,
+        [created.rows[0]!.id],
+      ),
+    ).rejects.toThrow(/checker must differ from maker/i);
+    await client.query(
+      `SELECT status
+         FROM transition_lender_wallet_manual_operation(
+                $1, 'manual-event-checker-001', 'CHECKER_APPROVED',
+                'checker-001', 'CHECKER', NULL, NULL, '{}'::jsonb
+              )`,
+      [created.rows[0]!.id],
+    );
+    await expect(
+      client.query(
+        `SELECT status
+           FROM transition_lender_wallet_manual_operation(
+                  $1, 'manual-event-bank-no-proof-001', 'BANK_TRANSFER_RECORDED',
+                  'maker-001', 'MAKER', NULL, NULL, '{}'::jsonb
+                )`,
+        [created.rows[0]!.id],
+      ),
+    ).rejects.toThrow(/requires evidence reference/i);
+    const settled = await client.query<{ status: string }>(
+      `SELECT status
+         FROM transition_lender_wallet_manual_operation(
+                $1, 'manual-event-bank-001', 'BANK_TRANSFER_RECORDED',
+                'maker-001', 'MAKER', 'vault://lender/manual/transfer-001', NULL, '{}'::jsonb
+              )`,
+      [created.rows[0]!.id],
+    );
+    expect(settled.rows[0]!.status).toBe("BANK_TRANSFER_RECORDED");
+    const final = await client.query<{ status: string }>(
+      `SELECT status
+         FROM transition_lender_wallet_manual_operation(
+                $1, 'manual-event-settled-001', 'SETTLED',
+                'checker-001', 'CHECKER', 'vault://lender/manual/settlement-001', NULL, '{}'::jsonb
+              )`,
+      [created.rows[0]!.id],
+    );
+    expect(final.rows[0]!.status).toBe("SETTLED");
+    await expect(
+      client.query(
+        `DELETE FROM lender_wallet_manual_operation_events
+          WHERE event_ref = 'manual-event-settled-001'`,
+      ),
+    ).rejects.toThrow(/append-only wallet fact table/i);
+  });
 });

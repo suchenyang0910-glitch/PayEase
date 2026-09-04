@@ -1,0 +1,133 @@
+:root {
+  color: #172033;
+  background: #f4f7fb;
+  font-family:
+    Inter, "Noto Sans Khmer", "Microsoft YaHei", system-ui, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  border: 0;
+  border-radius: 9px;
+  background: #2167cf;
+  color: #fff;
+  cursor: pointer;
+  padding: 9px 13px;
+  font-weight: 650;
+}
+button:hover {
+  background: #1955ae;
+}
+button.danger {
+  background: #b83938;
+}
+input,
+select {
+  border: 1px solid #c8d4e5;
+  border-radius: 8px;
+  padding: 10px;
+  width: 100%;
+  background: #fff;
+}
+label {
+  display: grid;
+  gap: 6px;
+  color: #45546d;
+  font-size: 14px;
+}
+.lender-shell {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+}
+.lender-shell > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.lender-shell h1 {
+  margin: 0;
+  color: #10396f;
+  font-size: 25px;
+}
+.lender-shell h2 {
+  margin: 0;
+  font-size: 19px;
+}
+.lender-shell p {
+  color: #5a687e;
+}
+.lender-card {
+  background: #fff;
+  border: 1px solid #dbe5f1;
+  border-radius: 14px;
+  box-shadow: 0 6px 20px rgba(31, 66, 113, 0.06);
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 22px;
+}
+.login-card {
+  max-width: 440px;
+  margin: 12vh auto;
+}
+.login-card form {
+  display: grid;
+  gap: 13px;
+}
+.section-heading,
+.operation,
+.operation-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.operation {
+  border-top: 1px solid #e8edf5;
+  padding: 15px 0;
+}
+.operation p {
+  margin: 5px 0 0;
+  font-size: 14px;
+}
+.operation-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.notice {
+  background: #fff7e6;
+  border: 1px solid #f2d092;
+  border-radius: 8px;
+  color: #7c5100 !important;
+  padding: 10px;
+}
+ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+}
+@media (max-width: 640px) {
+  .lender-shell {
+    padding: 18px 12px 32px;
+  }
+  .operation,
+  .lender-shell > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .operation-actions {
+    justify-content: flex-start;
+  }
+}

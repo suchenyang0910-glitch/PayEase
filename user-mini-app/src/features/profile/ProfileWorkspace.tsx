@@ -16,6 +16,8 @@ type ProfileWorkspaceProps = Readonly<{
   currentFactory: string | null;
   applicationSummary: string;
   billSummary: string;
+  kycLocationLabel: string;
+  kycLocationSummary: string;
   languageLabel: string;
   serviceCaseType: ServiceCaseType;
   onServiceCaseTypeChange: (value: ServiceCaseType) => void;
@@ -42,6 +44,8 @@ export function ProfileWorkspace({
   currentFactory,
   applicationSummary,
   billSummary,
+  kycLocationLabel,
+  kycLocationSummary,
   languageLabel,
   serviceCaseType,
   onServiceCaseTypeChange,
@@ -117,6 +121,10 @@ export function ProfileWorkspace({
                 : "វិក្កយបត្ររបស់ខ្ញុំ"}
           </dt>
           <dd aria-label="My bill">{billSummary}</dd>
+        </div>
+        <div>
+          <dt>{kycLocationLabel}</dt>
+          <dd aria-label={kycLocationLabel}>{kycLocationSummary}</dd>
         </div>
         <div>
           <dt>{copy.language}</dt>

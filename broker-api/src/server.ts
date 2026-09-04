@@ -1,6 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import Fastify from "fastify";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
+import { readFileSync } from "node:fs";
+import type { ServerOptions as HttpsServerOptions } from "node:https";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { Pool, type PoolClient } from "pg";
 import { z } from "zod";
 import {
@@ -26,6 +33,7 @@ import {
   employerCollectionVerificationSchema,
   employerVerificationSchema,
   employerTenantCreateSchema,
+  kycLocationEvidenceCreateSchema,
   lenderFinalReviewSchema,
   lenderCollectionExceptionResolutionSchema,
   lenderCollectionWorkItemCreateSchema,
@@ -38,7 +46,12 @@ import {
   repaymentDualControlSchema,
   reconciliationAssignSchema,
   reconciliationResolutionSchema,
+  serviceAreaZoneCreateSchema,
+  serviceAreaZoneDraftPatchSchema,
+  serviceAreaZoneRetireSchema,
+  serviceAreaZoneReviewSchema,
   telegramSessionSchema,
+  walletOperationJumpCreateSchema,
 } from "./validation.js";
 import { hashPassword, verifyLoginPassword } from "./passwords.js";
 import {
@@ -46,6 +59,7 @@ import {
   buildRepaymentSchedule,
   formatApplicantLoanSummary,
   summarizeRepaymentSchedule,
+  type ApplicantLoanSummary,
   type RepaymentScheduleItem,
 } from "./repayment.js";
 import {
@@ -58,8 +72,14 @@ import {
   sha256Hex,
   signDomainEventRequest,
   stableJson,
+  type DomainEventEnvelope,
   verifyDomainEventSignature,
 } from "./domain-events.js";
+import {
+  walletBrokerExchangeHeadersSchema,
+  walletBrokerExchangeRequestSchema,
+  walletBrokerExchangeResponseSchema,
+} from "@payease/shared-security";
 import {
   buildApplicantNotification,
   buildApplicantNotificationId,
@@ -98,6 +118,10 @@ import {
 import { runDatabaseMigrations } from "./database-migrations.js";
 import { applicantRejectionNoticeCode } from "./applicant-rejection-notice.js";
 import {
+  buildWalletOperationJump,
+  configuredWalletOperationJumpSettings,
+} from "./wallet-operation-jumps.js";
+import {
   cookieValue,
   csrfCookie,
   csrfCompatibilityCookie,
@@ -105,6 +129,15 @@ import {
   expiredCsrfCompatibilityCookie,
   hasValidDoubleSubmitCsrf,
 } from "./csrf.js";
+import {
+  isInsideCambodia,
+  parseZonePolygon,
+  polygonContainsPoint,
+  polygonOverlaps,
+  type LocationAssessmentResult,
+  type ParsedZonePolygon,
+  type Point,
+} from "./service-area-zones.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -120,8 +153,77 @@ if (!databaseUrl) {
   );
 }
 
+function loadBrokerInternalMtlsServerOptions():
+  | (HttpsServerOptions & {
+      requestCert: true;
+      rejectUnauthorized: false;
+    })
+  | undefined {
+  const certPath = process.env.PAYEASE_BROKER_MTLS_SERVER_CERT_PATH?.trim();
+  const keyPath = process.env.PAYEASE_BROKER_MTLS_SERVER_KEY_PATH?.trim();
+  const caPath = process.env.PAYEASE_BROKER_MTLS_CA_CERT_PATH?.trim();
+  if (!certPath && !keyPath && !caPath) {
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error(
+        "Broker internal mTLS is required but server certificate paths are missing.",
+      );
+    }
+    return undefined;
+  }
+  if (!certPath || !keyPath || !caPath) {
+    throw new Error(
+      "PAYEASE_BROKER_MTLS_SERVER_CERT_PATH, PAYEASE_BROKER_MTLS_SERVER_KEY_PATH, and PAYEASE_BROKER_MTLS_CA_CERT_PATH must all be configured together.",
+    );
+  }
+  return {
+    cert: readFileSync(certPath),
+    key: readFileSync(keyPath),
+    ca: readFileSync(caPath),
+    requestCert: true,
+    rejectUnauthorized: false,
+    ...(process.env.PAYEASE_BROKER_MTLS_SERVER_KEY_PASSPHRASE
+      ? {
+          passphrase: process.env.PAYEASE_BROKER_MTLS_SERVER_KEY_PASSPHRASE,
+        }
+      : {}),
+  };
+}
+
+function brokerInternalMtlsListenSettings(): Readonly<{
+  host: string;
+  port: number;
+}> {
+  const host = process.env.PAYEASE_BROKER_INTERNAL_MTLS_HOST?.trim();
+  const port = Number(process.env.PAYEASE_BROKER_INTERNAL_MTLS_PORT);
+  if (!host) {
+    throw new Error(
+      "PAYEASE_BROKER_INTERNAL_MTLS_HOST is required for the isolated lender listener.",
+    );
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      "PAYEASE_BROKER_INTERNAL_MTLS_PORT must be an integer from 1 to 65535.",
+    );
+  }
+  return { host, port };
+}
+
+const brokerInternalMtlsServerOptions = loadBrokerInternalMtlsServerOptions();
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
-const app = Fastify({ logger: true, bodyLimit: 4 * 1024 * 1024 });
+const app = Fastify({
+  logger: true,
+  bodyLimit: 4 * 1024 * 1024,
+});
+// Public applicant and back-office traffic stays on this listener. The lender
+// transport is intentionally isolated below so a reverse proxy can terminate
+// public TLS without breaking peer-certificate verification.
+const internalMtlsApp = brokerInternalMtlsServerOptions
+  ? Fastify({
+      logger: true,
+      bodyLimit: 4 * 1024 * 1024,
+      https: brokerInternalMtlsServerOptions,
+    })
+  : undefined;
 app.addContentTypeParser(
   /^multipart\/form-data/i,
   { parseAs: "buffer" },
@@ -363,7 +465,10 @@ type ApplicantApplicationDraft = z.infer<
   typeof applicantApplicationDraftSchema
 >;
 type RepaymentMethod =
-  "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
+  | "SMILE_WALLET_AUTHORIZATION"
+  | "EMPLOYER_PAYROLL_DEDUCTION"
+  | "USER_DIRECT_DEBIT"
+  | "USER_MANUAL_PAYMENT";
 const SALARY_LOAN_V2_COLLECTION_SCOPE = "PRINCIPAL_AND_INTEREST" as const;
 type SalaryLoanV2CollectionScope = typeof SALARY_LOAN_V2_COLLECTION_SCOPE;
 type LenderCollectionSourceType =
@@ -418,17 +523,15 @@ async function loadEmployerRepaymentConfig(
 ): Promise<EmployerRepaymentConfig> {
   if (!employerTenantId) {
     return {
-      availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
-      defaultRepaymentMethod: "USER_MANUAL_PAYMENT",
+      availableRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
+      defaultRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       employerPayrollRuleVersion: null,
     };
   }
   const rule = await client.query<{
     rule_code: string;
-    allowed_repayment_methods: RepaymentMethod[];
-    default_repayment_method: RepaymentMethod;
   }>(
-    `SELECT rule_code, allowed_repayment_methods, default_repayment_method
+    `SELECT rule_code
                FROM employer_payroll_rules
               WHERE employer_tenant_id = $1
                 AND workflow_version = 'SALARY_LOAN_V2'
@@ -439,18 +542,14 @@ async function loadEmployerRepaymentConfig(
   );
   if (!rule.rowCount) {
     return {
-      availableRepaymentMethods: ["USER_MANUAL_PAYMENT"],
-      defaultRepaymentMethod: "USER_MANUAL_PAYMENT",
+      availableRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
+      defaultRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       employerPayrollRuleVersion: null,
     };
   }
-  const availableRepaymentMethods =
-    rule.rows[0]!.allowed_repayment_methods.length > 0
-      ? rule.rows[0]!.allowed_repayment_methods
-      : (["USER_MANUAL_PAYMENT"] as const);
   return {
-    availableRepaymentMethods,
-    defaultRepaymentMethod: rule.rows[0]!.default_repayment_method,
+    availableRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
+    defaultRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
     employerPayrollRuleVersion: rule.rows[0]!.rule_code,
   };
 }
@@ -588,6 +687,9 @@ app.addHook("onRequest", async (request, reply) => {
     request.method === "GET" && requestPath === "/v1/local/public/profile/view";
   const isPublicApplicantDraft =
     requestPath === "/v1/local/public/application-draft";
+  const isPublicKycLocationEvidence =
+    requestPath === "/v1/local/public/kyc-location-evidence" ||
+    requestPath === "/v1/local/public/kyc-location-evidence/status";
   const isPublicApplicantNotification =
     requestPath === "/v1/local/public/notifications" ||
     requestPath === "/v1/local/public/notifications/read-all" ||
@@ -604,11 +706,18 @@ app.addHook("onRequest", async (request, reply) => {
   const isTelegramBotWebhook =
     request.method === "POST" &&
     /^\/v1\/local\/internal\/telegram-bot-updates\/\d{5,20}$/.test(requestPath);
+  const isIncomingDomainEventTransport =
+    request.method === "POST" &&
+    requestPath === "/v1/local/domain-events/inbox/receive";
+  const isWalletBrokerExchangeTransport =
+    request.method === "POST" &&
+    requestPath === "/v1/local/wallet-operation-jumps/exchange";
   const isApplicantStateChange =
     isPublicUserApplicationSubmission ||
     isPublicTelegramSession ||
     ((request.method === "PUT" || request.method === "DELETE") &&
       isPublicApplicantDraft) ||
+    (request.method === "POST" && isPublicKycLocationEvidence) ||
     ((request.method === "POST" || request.method === "DELETE") &&
       isPublicApplicantNotification) ||
     isPublicApplicantLanguagePreference ||
@@ -628,6 +737,8 @@ app.addHook("onRequest", async (request, reply) => {
     !isPublicUserApplicationSubmission &&
     !isPublicTelegramSession &&
     !isPublicApplicantLanguagePreference &&
+    !isIncomingDomainEventTransport &&
+    !isWalletBrokerExchangeTransport &&
     !isTelegramBotWebhook &&
     requestPath !== "/v1/local/auth/login" &&
     requestPath !== "/v1/local/auth/bootstrap";
@@ -681,10 +792,13 @@ app.addHook("onRequest", async (request, reply) => {
     isPublicApplicantPhoneVerification ||
     isPublicApplicantProfileView ||
     isPublicApplicantDraft ||
+    isPublicKycLocationEvidence ||
     isPublicApplicantNotification ||
     isPublicUserApplicationView ||
     isPublicTelegramEntryPoints ||
     isPublicEmployerTenantList ||
+    isIncomingDomainEventTransport ||
+    isWalletBrokerExchangeTransport ||
     // Telegram invokes this server-to-server endpoint without a browser or
     // an admin cookie. Its handler below performs its own per-Bot webhook
     // secret authentication, so it must not fall through to admin-session
@@ -777,6 +891,18 @@ function requirePaymentProofReviewRole(
     !roles.includes("BROKER_OFFICER") &&
     !roles.includes("LENDER_REPAYMENT_CHECKER")
   ) {
+    reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
+    return false;
+  }
+  return true;
+}
+
+function requireKycLocationReadRole(
+  request: { adminIdentity?: { roles: string[] } },
+  reply: any,
+): boolean {
+  const roles = request.adminIdentity?.roles ?? [];
+  if (!roles.includes("BROKER_OFFICER") && !roles.includes("OPS_ADMIN")) {
     reply.code(403).send({ code: "FORBIDDEN__ROLE_OUT_OF_SCOPE" });
     return false;
   }
@@ -912,6 +1038,82 @@ function requestHeaderValue(
   return Array.isArray(header) ? undefined : header?.trim();
 }
 
+function configuredWalletBrokerServiceSecrets(): Readonly<
+  Record<
+    string,
+    Readonly<{
+      algorithm: "HMAC-SHA256";
+      secret: string;
+    }>
+  >
+> {
+  const sharedSecret = process.env.PAYEASE_LENDER_WALLET_SHARED_SECRET?.trim();
+  if (!sharedSecret && process.env.NODE_ENV !== "test") {
+    throw new Error("PAYEASE_LENDER_WALLET_SHARED_SECRET is required.");
+  }
+  return {
+    "lender-wallet-hmac-v1": {
+      algorithm: "HMAC-SHA256",
+      secret: sharedSecret ?? `lender_wallet_test_only_${"*".repeat(40)}`,
+    },
+  };
+}
+
+function requireBrokerInternalMtls(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  if (!brokerInternalMtlsServerOptions) {
+    return true;
+  }
+  const socket = request.raw.socket as {
+    encrypted?: boolean;
+    authorized?: boolean;
+    getPeerCertificate?: () => { subject?: { CN?: string } };
+  };
+  if (!socket.encrypted || !socket.authorized) {
+    reply.code(401).send({ code: "CLIENT_CERT_REQUIRED" });
+    return false;
+  }
+  const expectedCn =
+    process.env.PAYEASE_BROKER_TRUSTED_LENDER_WALLET_CLIENT_CN?.trim();
+  if (expectedCn) {
+    const presentedCn = socket.getPeerCertificate?.().subject?.CN;
+    if (presentedCn !== expectedCn) {
+      reply.code(403).send({ code: "CLIENT_CERT_SUBJECT_FORBIDDEN" });
+      return false;
+    }
+  }
+  return true;
+}
+
+function verifyWalletBrokerServiceSignature(args: {
+  method: string;
+  path: string;
+  headers: z.infer<typeof walletBrokerExchangeHeadersSchema>;
+  bodySha256: string;
+}): boolean {
+  const configured = configuredWalletBrokerServiceSecrets()[args.headers.keyId];
+  if (!configured || configured.algorithm !== args.headers.algorithm) {
+    return false;
+  }
+  const expected = signDomainEventRequest({
+    method: args.method,
+    path: args.path,
+    timestampMillis: args.headers.timestampMillis,
+    nonce: args.headers.nonce,
+    keyId: args.headers.keyId,
+    bodySha256: args.bodySha256,
+    secret: configured.secret,
+  });
+  const actualBuffer = Buffer.from(args.headers.signature.toLowerCase(), "hex");
+  const expectedBuffer = Buffer.from(expected, "hex");
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+}
+
 async function manualActionReplay(
   client: PoolClient,
   application: ApplicationRow,
@@ -966,6 +1168,434 @@ async function recordManualActionResult(
       JSON.stringify(responseBody),
     ],
   );
+}
+
+type AdminActionName =
+  | "SERVICE_AREA_ZONE_CREATE"
+  | "SERVICE_AREA_ZONE_PATCH"
+  | "SERVICE_AREA_ZONE_SUBMIT_REVIEW"
+  | "SERVICE_AREA_ZONE_REVIEW"
+  | "SERVICE_AREA_ZONE_ACTIVATE"
+  | "SERVICE_AREA_ZONE_RETIRE";
+
+type AdminActionReplay =
+  | Readonly<{
+      kind: "new";
+      idempotencyKey: string;
+      requestFingerprint: string;
+    }>
+  | Readonly<{
+      kind: "replay";
+      responseStatus: number;
+      responseBody: Record<string, unknown>;
+    }>
+  | Readonly<{ kind: "key-reused" }>;
+
+type ServiceAreaZoneStatus = "DRAFT" | "PENDING_REVIEW" | "ACTIVE" | "RETIRED";
+
+type ZoneScopeType = "PLATFORM" | "EMPLOYER_TENANT";
+
+type ServiceAreaZoneRow = Readonly<{
+  id: string;
+  zone_ref: string;
+  version: number;
+  display_name: string;
+  scope_type: ZoneScopeType;
+  employer_tenant_id: string | null;
+  polygon_geojson: unknown;
+  polygon_bbox: Record<string, number>;
+  status: ServiceAreaZoneStatus;
+  effective_from: string;
+  effective_until: string | null;
+  change_reason: string;
+  created_by_user_ref: string;
+  submitted_by_user_ref: string | null;
+  submitted_at: string | null;
+  reviewed_by_user_ref: string | null;
+  reviewed_at: string | null;
+  activated_by_user_ref: string | null;
+  activated_at: string | null;
+  retired_by_user_ref: string | null;
+  retired_at: string | null;
+  created_at: string;
+  updated_at: string;
+}>;
+
+type AssessedServiceAreaZone = Readonly<{
+  id: string;
+  zoneRef: string;
+  version: number;
+  scopeType: ZoneScopeType;
+  employerTenantId: string | null;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  polygon: ParsedZonePolygon;
+}>;
+
+type KycLocationStatusRow = Readonly<{
+  assessment_result: LocationAssessmentResult;
+  submitted_at: string;
+}>;
+
+const KYC_LOCATION_RULE_VERSION = "KYC_LOCATION_RULE_V1";
+const DEFAULT_KYC_LOCATION_ACCURACY_THRESHOLD_METERS = 200;
+
+function configuredKycLocationAccuracyThresholdMeters(): number {
+  const raw =
+    process.env.PAYEASE_KYC_LOCATION_ACCURACY_THRESHOLD_METERS?.trim();
+  const parsed = raw
+    ? Number(raw)
+    : DEFAULT_KYC_LOCATION_ACCURACY_THRESHOLD_METERS;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_KYC_LOCATION_ACCURACY_THRESHOLD_METERS;
+}
+
+async function adminActionReplay(
+  client: PoolClient,
+  actionName: AdminActionName,
+  actorUserRef: string,
+  idempotencyKey: string,
+  requestBody: object,
+): Promise<AdminActionReplay> {
+  const requestFingerprint = eventHash([JSON.stringify(requestBody)]);
+  const existing = await client.query<{
+    request_fingerprint: string;
+    response_status: number;
+    response_body: Record<string, unknown>;
+  }>(
+    `SELECT request_fingerprint, response_status, response_body
+       FROM admin_action_idempotency
+      WHERE action_name = $1 AND actor_user_ref = $2 AND idempotency_key = $3
+      FOR UPDATE`,
+    [actionName, actorUserRef, idempotencyKey],
+  );
+  const recorded = existing.rows[0];
+  if (!recorded) return { kind: "new", idempotencyKey, requestFingerprint };
+  if (recorded.request_fingerprint !== requestFingerprint) {
+    return { kind: "key-reused" };
+  }
+  return {
+    kind: "replay",
+    responseStatus: recorded.response_status,
+    responseBody: recorded.response_body,
+  };
+}
+
+async function recordAdminActionResult(
+  client: PoolClient,
+  actionName: AdminActionName,
+  actorUserRef: string,
+  replay: Extract<AdminActionReplay, { kind: "new" }>,
+  responseStatus: number,
+  responseBody: Record<string, unknown>,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO admin_action_idempotency
+      (action_name, actor_user_ref, idempotency_key, request_fingerprint,
+       response_status, response_body)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [
+      actionName,
+      actorUserRef,
+      replay.idempotencyKey,
+      replay.requestFingerprint,
+      responseStatus,
+      JSON.stringify(responseBody),
+    ],
+  );
+}
+
+function serviceAreaZoneResponse(
+  zone: ServiceAreaZoneRow,
+): Record<string, unknown> {
+  return {
+    zoneRef: zone.zone_ref,
+    version: zone.version,
+    displayName: zone.display_name,
+    scopeType: zone.scope_type,
+    employerTenantId: zone.employer_tenant_id,
+    polygonGeoJson: zone.polygon_geojson,
+    polygonBbox: zone.polygon_bbox,
+    status: zone.status,
+    effectiveFrom: zone.effective_from,
+    effectiveUntil: zone.effective_until,
+    changeReason: zone.change_reason,
+    createdBy: zone.created_by_user_ref,
+    submittedBy: zone.submitted_by_user_ref,
+    submittedAt: zone.submitted_at,
+    reviewedBy: zone.reviewed_by_user_ref,
+    reviewedAt: zone.reviewed_at,
+    activatedBy: zone.activated_by_user_ref,
+    activatedAt: zone.activated_at,
+    retiredBy: zone.retired_by_user_ref,
+    retiredAt: zone.retired_at,
+    createdAt: zone.created_at,
+    updatedAt: zone.updated_at,
+  };
+}
+
+function zoneRowToAssessmentZone(row: {
+  id: string;
+  zone_ref: string;
+  version: number;
+  scope_type: ZoneScopeType;
+  employer_tenant_id: string | null;
+  effective_from: string;
+  effective_until: string | null;
+  polygon_geojson: unknown;
+}): AssessedServiceAreaZone {
+  return {
+    id: row.id,
+    zoneRef: row.zone_ref,
+    version: row.version,
+    scopeType: row.scope_type,
+    employerTenantId: row.employer_tenant_id,
+    effectiveFrom: row.effective_from,
+    effectiveUntil: row.effective_until,
+    polygon: parseZonePolygon(row.polygon_geojson),
+  };
+}
+
+async function loadZoneVersionForUpdate(
+  client: PoolClient,
+  zoneRef: string,
+  version: number,
+): Promise<ServiceAreaZoneRow | undefined> {
+  const result = await client.query<ServiceAreaZoneRow>(
+    `SELECT id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+            polygon_geojson, polygon_bbox, status, effective_from::text,
+            effective_until::text, change_reason, created_by_user_ref,
+            submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+            reviewed_at::text, activated_by_user_ref, activated_at::text,
+            retired_by_user_ref, retired_at::text, created_at::text, updated_at::text
+       FROM service_area_zone_versions
+      WHERE zone_ref = $1 AND version = $2
+      FOR UPDATE`,
+    [zoneRef, version],
+  );
+  return result.rows[0];
+}
+
+async function loadActiveServiceAreaZones(
+  client: PoolClient,
+  scopeType: ZoneScopeType,
+  employerTenantId: string | null,
+  effectiveAt: string,
+): Promise<AssessedServiceAreaZone[]> {
+  const result = await client.query<{
+    id: string;
+    zone_ref: string;
+    version: number;
+    scope_type: ZoneScopeType;
+    employer_tenant_id: string | null;
+    effective_from: string;
+    effective_until: string | null;
+    polygon_geojson: unknown;
+  }>(
+    `SELECT id, zone_ref, version, scope_type, employer_tenant_id,
+            effective_from::text, effective_until::text, polygon_geojson
+       FROM service_area_zone_versions
+      WHERE status = 'ACTIVE'
+        AND scope_type = $1
+        AND (
+          ($1 = 'PLATFORM' AND employer_tenant_id IS NULL) OR
+          ($1 = 'EMPLOYER_TENANT' AND employer_tenant_id = $2)
+        )
+        AND effective_from <= $3::timestamptz
+        AND (effective_until IS NULL OR effective_until > $3::timestamptz)
+      ORDER BY version DESC`,
+    [scopeType, employerTenantId, effectiveAt],
+  );
+  return result.rows.map(zoneRowToAssessmentZone);
+}
+
+function assessZones(
+  point: Point,
+  zones: readonly AssessedServiceAreaZone[],
+): { matched: boolean; zone?: AssessedServiceAreaZone } {
+  for (const zone of zones) {
+    if (polygonContainsPoint(zone.polygon, point)) {
+      return { matched: true, zone };
+    }
+  }
+  return { matched: false };
+}
+
+async function assessKycLocationEvidence(args: {
+  client: PoolClient;
+  userId: string;
+  applicationId?: string | null;
+  employerTenantId?: string | null;
+  evidenceId: string;
+  point: Point;
+  horizontalAccuracyMeters: number;
+  effectiveAt: string;
+}): Promise<{
+  assessmentResult: LocationAssessmentResult;
+  assessedScopeType: ZoneScopeType;
+  employerTenantId: string | null;
+  matchedZoneRef: string | null;
+  matchedZoneVersion: number | null;
+}> {
+  const threshold = configuredKycLocationAccuracyThresholdMeters();
+  if (args.horizontalAccuracyMeters > threshold) {
+    return {
+      assessmentResult: "LOW_ACCURACY",
+      assessedScopeType: args.employerTenantId ? "EMPLOYER_TENANT" : "PLATFORM",
+      employerTenantId: args.employerTenantId ?? null,
+      matchedZoneRef: null,
+      matchedZoneVersion: null,
+    };
+  }
+  if (!isInsideCambodia(args.point)) {
+    return {
+      assessmentResult: "OUT_OF_COUNTRY",
+      assessedScopeType: args.employerTenantId ? "EMPLOYER_TENANT" : "PLATFORM",
+      employerTenantId: args.employerTenantId ?? null,
+      matchedZoneRef: null,
+      matchedZoneVersion: null,
+    };
+  }
+
+  const tenantZones = args.employerTenantId
+    ? await loadActiveServiceAreaZones(
+        args.client,
+        "EMPLOYER_TENANT",
+        args.employerTenantId,
+        args.effectiveAt,
+      )
+    : [];
+  const selectedTenantZones =
+    tenantZones.length > 0
+      ? tenantZones
+      : await loadActiveServiceAreaZones(
+          args.client,
+          "PLATFORM",
+          null,
+          args.effectiveAt,
+        );
+  const match = assessZones(args.point, selectedTenantZones);
+  return {
+    assessmentResult: match.matched ? "MATCH" : "OUT_OF_ZONE",
+    assessedScopeType:
+      tenantZones.length > 0 && args.employerTenantId
+        ? "EMPLOYER_TENANT"
+        : "PLATFORM",
+    employerTenantId:
+      tenantZones.length > 0 && args.employerTenantId
+        ? args.employerTenantId
+        : null,
+    matchedZoneRef: match.zone?.zoneRef ?? null,
+    matchedZoneVersion: match.zone?.version ?? null,
+  };
+}
+
+async function insertKycLocationAssessment(args: {
+  client: PoolClient;
+  evidenceId: string;
+  userId: string;
+  applicationId?: string | null;
+  employerTenantId?: string | null;
+  actorUserRef: string;
+  assessmentResult: LocationAssessmentResult;
+  assessedScopeType: ZoneScopeType;
+  matchedZoneRef: string | null;
+  matchedZoneVersion: number | null;
+}): Promise<void> {
+  await args.client.query(
+    `INSERT INTO kyc_location_assessments
+      (evidence_id, user_id, application_id, assessment_result, assessed_scope_type,
+       employer_tenant_id, matched_zone_ref, matched_zone_version, rule_version,
+       actor_user_ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      args.evidenceId,
+      args.userId,
+      args.applicationId ?? null,
+      args.assessmentResult,
+      args.assessedScopeType,
+      args.employerTenantId ?? null,
+      args.matchedZoneRef,
+      args.matchedZoneVersion,
+      KYC_LOCATION_RULE_VERSION,
+      args.actorUserRef,
+    ],
+  );
+}
+
+function kycLocationStatusResponse(
+  row: KycLocationStatusRow,
+): NonNullable<ApplicantLoanSummary["kycLocation"]> {
+  return {
+    assessmentResult: row.assessment_result,
+    submittedAt: row.submitted_at,
+  };
+}
+
+async function loadLatestKycLocationStatus(args: {
+  client: PoolClient | Pool;
+  userId: string;
+  applicationId?: string | null;
+}): Promise<undefined | NonNullable<ApplicantLoanSummary["kycLocation"]>> {
+  const result = await args.client.query<KycLocationStatusRow>(
+    `SELECT assessment.assessment_result,
+            evidence.created_at::text AS submitted_at
+       FROM kyc_location_evidence evidence
+       JOIN kyc_location_assessments assessment
+         ON assessment.evidence_id = evidence.id
+      WHERE evidence.user_id = $1
+        AND ($2::uuid IS NULL OR assessment.application_id = $2 OR assessment.application_id IS NULL)
+      ORDER BY
+        CASE WHEN $2::uuid IS NOT NULL AND assessment.application_id = $2 THEN 0 ELSE 1 END,
+        assessment.assessed_at DESC,
+        evidence.created_at DESC
+      LIMIT 1`,
+    [args.userId, args.applicationId ?? null],
+  );
+  const row = result.rows[0];
+  return row ? kycLocationStatusResponse(row) : undefined;
+}
+
+async function loadOverlappingActiveZoneVersions(args: {
+  client: PoolClient;
+  zoneId: string;
+  scopeType: ZoneScopeType;
+  employerTenantId: string | null;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+}): Promise<AssessedServiceAreaZone[]> {
+  const result = await args.client.query<{
+    id: string;
+    zone_ref: string;
+    version: number;
+    scope_type: ZoneScopeType;
+    employer_tenant_id: string | null;
+    effective_from: string;
+    effective_until: string | null;
+    polygon_geojson: unknown;
+  }>(
+    `SELECT id, zone_ref, version, scope_type, employer_tenant_id,
+            effective_from::text, effective_until::text, polygon_geojson
+       FROM service_area_zone_versions
+      WHERE status = 'ACTIVE'
+        AND id <> $1
+        AND scope_type = $2
+        AND (
+          ($2 = 'PLATFORM' AND employer_tenant_id IS NULL) OR
+          ($2 = 'EMPLOYER_TENANT' AND employer_tenant_id = $3)
+        )
+        AND tstzrange(effective_from, COALESCE(effective_until, 'infinity'::timestamptz), '[)')
+            && tstzrange($4::timestamptz, COALESCE($5::timestamptz, 'infinity'::timestamptz), '[)')`,
+    [
+      args.zoneId,
+      args.scopeType,
+      args.employerTenantId,
+      args.effectiveFrom,
+      args.effectiveUntil,
+    ],
+  );
+  return result.rows.map(zoneRowToAssessmentZone);
 }
 
 async function lockApplication(
@@ -1263,8 +1893,6 @@ async function createRepaymentSchedule(
         | { nodeRef: string; scheduleType: "LAST_DAY_OF_MONTH" }
       >;
       collection_payee_ref: string;
-      payroll_deduction_authorization_ref: string | null;
-      direct_debit_authorization_ref: string | null;
     }>(
       `SELECT quote.principal_amount_minor::text,
               quote.lender_interest_minor::text,
@@ -1277,16 +1905,12 @@ async function createRepaymentSchedule(
               COALESCE(preference.employer_payroll_rule_version, rule.rule_code)
                 AS employer_payroll_rule_version,
               rule.payroll_nodes,
-              preference.collection_payee_ref,
-              auth_snapshot.payroll_deduction_authorization_ref,
-              auth_snapshot.direct_debit_authorization_ref
+              preference.collection_payee_ref
          FROM application_v2_quote_snapshots quote
          JOIN applications application_row
            ON application_row.id = quote.application_id
          JOIN application_repayment_preferences preference
            ON preference.application_id = quote.application_id
-         LEFT JOIN application_authorization_snapshots auth_snapshot
-           ON auth_snapshot.application_id = quote.application_id
          LEFT JOIN LATERAL (
            SELECT rule_code, payroll_nodes
              FROM employer_payroll_rules
@@ -1316,12 +1940,6 @@ async function createRepaymentSchedule(
       selectedRepaymentMethod: row.selected_repayment_method,
       employerPayrollRuleVersion: row.employer_payroll_rule_version,
       payrollNodes: row.payroll_nodes,
-      payrollDeductionAuthorizationRef:
-        row.selected_repayment_method === "EMPLOYER_PAYROLL_DEDUCTION"
-          ? row.payroll_deduction_authorization_ref
-          : row.selected_repayment_method === "USER_DIRECT_DEBIT"
-            ? row.direct_debit_authorization_ref
-            : null,
       collectionPayeeRef: row.collection_payee_ref,
       productRuleVersion: row.product_rule_version,
       lenderInterestRuleVersion: row.lender_interest_rule_version,
@@ -1625,6 +2243,156 @@ async function loadRepaymentPreferenceForUpdate(
     [applicationId],
   );
   return result.rows[0];
+}
+
+async function loadWalletProjectionForUpdate(
+  client: PoolClient,
+  applicationId: string,
+): Promise<
+  | undefined
+  | Readonly<{
+      wallet_status: string;
+      available_balance_minor: string;
+    }>
+> {
+  const result = await client.query<{
+    wallet_status: string;
+    available_balance_minor: string;
+  }>(
+    `SELECT wallet_status, available_balance_minor::text
+       FROM lender_wallet_projection_snapshots
+      WHERE application_id = $1
+      FOR UPDATE`,
+    [applicationId],
+  );
+  return result.rows[0];
+}
+
+async function applyLenderWalletProjectionEvent(
+  client: PoolClient,
+  application: Readonly<{ id: string }>,
+  envelope: DomainEventEnvelope,
+): Promise<void> {
+  const payload = z
+    .object({
+      externalWalletRef: z.string().min(3).max(128),
+      walletStatus: z.enum(["WALLET_AVAILABLE"]),
+      availableBalanceMinor: z.string().regex(/^\d+$/),
+      currency: z.literal("USD"),
+    })
+    .strict()
+    .parse(envelope.payload);
+  await client.query(
+    `INSERT INTO lender_wallet_projection_snapshots
+       (application_id, external_wallet_ref, wallet_status,
+        available_balance_minor, currency, last_callback_event_id,
+        last_projected_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+     ON CONFLICT (application_id) DO UPDATE SET
+       external_wallet_ref = EXCLUDED.external_wallet_ref,
+       wallet_status = EXCLUDED.wallet_status,
+       available_balance_minor = EXCLUDED.available_balance_minor,
+       currency = EXCLUDED.currency,
+       last_callback_event_id = EXCLUDED.last_callback_event_id,
+       last_projected_at = now(),
+       updated_at = now()`,
+    [
+      application.id,
+      payload.externalWalletRef,
+      payload.walletStatus,
+      payload.availableBalanceMinor,
+      payload.currency,
+      envelope.eventId,
+    ],
+  );
+  await addAuditEvent(
+    client,
+    application.id,
+    "WALLET_CREDIT_PROJECTED",
+    "lender-domain-event",
+    {
+      externalWalletRef: payload.externalWalletRef,
+      availableBalanceMinor: payload.availableBalanceMinor,
+      callbackEventId: envelope.eventId,
+    },
+  );
+}
+
+async function applyLenderWalletOperationResultEvent(
+  client: PoolClient,
+  application: Readonly<{ id: string }>,
+  envelope: DomainEventEnvelope,
+): Promise<void> {
+  const payload = z
+    .object({
+      externalWalletRef: z.string().min(3).max(128),
+      orderRef: z.string().min(3).max(128),
+      operationType: z.enum(["WITHDRAWAL", "REPAYMENT"]),
+      operationStatus: z.enum([
+        "AUTHORIZED",
+        "PROCESSING",
+        "SETTLED",
+        "FAILED",
+      ]),
+      requestedAmountMinor: z.string().regex(/^\d+$/),
+      settledAmountMinor: z.string().regex(/^\d+$/).nullable(),
+      currency: z.literal("USD"),
+    })
+    .strict()
+    .parse(envelope.payload);
+  await client.query(
+    `INSERT INTO lender_wallet_operation_projection_snapshots
+       (application_id, order_ref, operation_type, operation_status,
+        requested_amount_minor, settled_amount_minor, currency,
+        last_callback_event_id, last_projected_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+     ON CONFLICT (application_id, order_ref) DO UPDATE SET
+       operation_status = EXCLUDED.operation_status,
+       requested_amount_minor = EXCLUDED.requested_amount_minor,
+       settled_amount_minor = EXCLUDED.settled_amount_minor,
+       currency = EXCLUDED.currency,
+       last_callback_event_id = EXCLUDED.last_callback_event_id,
+       last_projected_at = now(),
+       updated_at = now()`,
+    [
+      application.id,
+      payload.orderRef,
+      payload.operationType,
+      payload.operationStatus,
+      payload.requestedAmountMinor,
+      payload.settledAmountMinor,
+      payload.currency,
+      envelope.eventId,
+    ],
+  );
+  await addAuditEvent(
+    client,
+    application.id,
+    "WALLET_OPERATION_RESULT_PROJECTED",
+    "lender-domain-event",
+    {
+      orderRef: payload.orderRef,
+      operationType: payload.operationType,
+      operationStatus: payload.operationStatus,
+      callbackEventId: envelope.eventId,
+    },
+  );
+}
+
+async function processIncomingDomainEvent(
+  client: PoolClient,
+  application: Readonly<{ id: string }>,
+  envelope: DomainEventEnvelope,
+): Promise<"RECEIVED" | "PROCESSED"> {
+  if (envelope.eventType === "WALLET_CREDIT_CONFIRMED") {
+    await applyLenderWalletProjectionEvent(client, application, envelope);
+    return "PROCESSED";
+  }
+  if (envelope.eventType === "WALLET_OPERATION_RESULT") {
+    await applyLenderWalletOperationResultEvent(client, application, envelope);
+    return "PROCESSED";
+  }
+  return "RECEIVED";
 }
 
 async function loadRepaymentInstallmentForCollection(
@@ -2398,6 +3166,18 @@ function incomingDomainEventOrderingError(
       ? undefined
       : "EVENT_OUT_OF_ORDER__DISBURSEMENT";
   }
+  if (eventType === "WALLET_CREDIT_CONFIRMED") {
+    return ["DISBURSED", "REPAYMENT_ACTIVE"].includes(applicationStatus ?? "")
+      ? undefined
+      : "EVENT_OUT_OF_ORDER__WALLET_CREDIT";
+  }
+  if (eventType === "WALLET_OPERATION_RESULT") {
+    return ["DISBURSED", "REPAYMENT_ACTIVE", "COLLECTION_EXCEPTION"].includes(
+      applicationStatus ?? "",
+    )
+      ? undefined
+      : "EVENT_OUT_OF_ORDER__WALLET_OPERATION";
+  }
   if (
     eventType === "COLLECTION_ACCEPTED" ||
     eventType === "COLLECTION_EXCEPTION"
@@ -2531,7 +3311,11 @@ app.get("/v1/local/domain-events/inbox", async (request, reply) => {
   return { items: rows.rows };
 });
 
-app.post("/v1/local/domain-events/inbox/receive", async (request, reply) => {
+const handleIncomingDomainEvent = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => {
+  if (!requireBrokerInternalMtls(request, reply)) return;
   const envelope = domainEventEnvelopeSchema.parse(request.body);
   const headers = domainEventHeadersSchema.parse({
     algorithm: requestHeaderValue(request.headers["x-payease-algo"]),
@@ -2609,7 +3393,8 @@ app.post("/v1/local/domain-events/inbox/receive", async (request, reply) => {
           envelope.eventType,
           application.status,
         );
-    const processingStatus = orderingError ? "DEAD_LETTER" : "RECEIVED";
+    let processingStatus: "RECEIVED" | "PROCESSED" | "DEAD_LETTER" =
+      orderingError ? "DEAD_LETTER" : "RECEIVED";
     await client.query(
       `INSERT INTO domain_event_inbox
         (event_id, event_type, event_version, source_domain, target_domain,
@@ -2657,6 +3442,21 @@ app.post("/v1/local/domain-events/inbox/receive", async (request, reply) => {
         payloadSha256: envelope.payloadSha256,
         payload: envelope.payload,
       });
+    } else if (application) {
+      processingStatus = await processIncomingDomainEvent(
+        client,
+        application,
+        envelope,
+      );
+      if (processingStatus === "PROCESSED") {
+        await client.query(
+          `UPDATE domain_event_inbox
+              SET processing_status = 'PROCESSED',
+                  processed_at = now()
+            WHERE event_id = $1`,
+          [envelope.eventId],
+        );
+      }
     }
     await client.query("COMMIT");
     return reply.code(202).send({
@@ -2670,7 +3470,16 @@ app.post("/v1/local/domain-events/inbox/receive", async (request, reply) => {
   } finally {
     client.release();
   }
-});
+};
+
+if (internalMtlsApp) {
+  internalMtlsApp.post(
+    "/v1/local/domain-events/inbox/receive",
+    handleIncomingDomainEvent,
+  );
+} else {
+  app.post("/v1/local/domain-events/inbox/receive", handleIncomingDomainEvent);
+}
 
 app.post("/v1/local/auth/bootstrap", async (request, reply) => {
   const input = bootstrapAdminSchema.parse(request.body);
@@ -3503,6 +4312,844 @@ app.put("/v1/local/admin/accounts/:loginName/roles", async (request, reply) => {
   }
 });
 
+app.get("/v1/local/admin/service-area-zones", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const result = await pool.query<ServiceAreaZoneRow>(
+    `SELECT id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+            polygon_geojson, polygon_bbox, status, effective_from::text,
+            effective_until::text, change_reason, created_by_user_ref,
+            submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+            reviewed_at::text, activated_by_user_ref, activated_at::text,
+            retired_by_user_ref, retired_at::text, created_at::text, updated_at::text
+       FROM service_area_zone_versions
+      ORDER BY zone_ref ASC, version DESC`,
+  );
+  return { zones: result.rows.map(serviceAreaZoneResponse) };
+});
+
+app.post("/v1/local/admin/service-area-zones", async (request, reply) => {
+  if (!(await requireOpsAdmin(request, reply))) return;
+  const idempotencyKey = manualActionIdempotencyKey(
+    request.headers["idempotency-key"],
+  );
+  if (!idempotencyKey) {
+    return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+  }
+  const input = serviceAreaZoneCreateSchema.parse(request.body);
+  const actorUserRef = request.adminIdentity!.loginName;
+  const parsedPolygon = parseZonePolygon(input.polygonGeoJson);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const replay = await adminActionReplay(
+      client,
+      "SERVICE_AREA_ZONE_CREATE",
+      actorUserRef,
+      idempotencyKey,
+      input,
+    );
+    if (replay.kind === "replay") {
+      await client.query("ROLLBACK");
+      return reply.code(replay.responseStatus).send(replay.responseBody);
+    }
+    if (replay.kind === "key-reused") {
+      await client.query("ROLLBACK");
+      return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+    }
+    if (input.employerTenantId) {
+      const tenant = await client.query(
+        `SELECT 1 FROM employer_tenants
+          WHERE id = $1 AND is_active = true
+          FOR KEY SHARE`,
+        [input.employerTenantId],
+      );
+      if (!tenant.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(422).send({ code: "EMPLOYER_TENANT_UNAVAILABLE" });
+      }
+    }
+    const latest = await client.query<{ version: number }>(
+      `SELECT version
+         FROM service_area_zone_versions
+        WHERE zone_ref = $1
+        ORDER BY version DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [input.zoneRef],
+    );
+    const nextVersion = (latest.rows[0]?.version ?? 0) + 1;
+    const created = await client.query<ServiceAreaZoneRow>(
+      `INSERT INTO service_area_zone_versions
+        (zone_ref, version, display_name, scope_type, employer_tenant_id,
+         polygon_geojson, polygon_bbox, status, effective_from, effective_until,
+         change_reason, created_by_user_ref)
+       VALUES
+        ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, 'DRAFT', $8, $9, $10, $11)
+       RETURNING id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+                 polygon_geojson, polygon_bbox, status, effective_from::text,
+                 effective_until::text, change_reason, created_by_user_ref,
+                 submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+                 reviewed_at::text, activated_by_user_ref, activated_at::text,
+                 retired_by_user_ref, retired_at::text, created_at::text, updated_at::text`,
+      [
+        input.zoneRef,
+        nextVersion,
+        input.displayName,
+        input.scopeType,
+        input.employerTenantId ?? null,
+        JSON.stringify(parsedPolygon.geoJson),
+        JSON.stringify(parsedPolygon.bbox),
+        input.effectiveFrom,
+        input.effectiveUntil ?? null,
+        input.changeReason,
+        actorUserRef,
+      ],
+    );
+    const zone = created.rows[0]!;
+    const responseBody = { zone: serviceAreaZoneResponse(zone) };
+    await addAuditEvent(
+      client,
+      zone.id,
+      "SERVICE_AREA_ZONE_CREATED",
+      actorUserRef,
+      {
+        zoneRef: zone.zone_ref,
+        version: zone.version,
+        scopeType: zone.scope_type,
+        employerTenantId: zone.employer_tenant_id,
+        effectiveFrom: zone.effective_from,
+        effectiveUntil: zone.effective_until,
+      },
+      "SERVICE_AREA_ZONE",
+    );
+    await recordAdminActionResult(
+      client,
+      "SERVICE_AREA_ZONE_CREATE",
+      actorUserRef,
+      replay,
+      201,
+      responseBody,
+    );
+    await client.query("COMMIT");
+    return reply.code(201).send(responseBody);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.patch(
+  "/v1/local/admin/service-area-zones/:zoneRef/drafts/:version",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({
+        zoneRef: z.string().regex(/^ZONE-[A-Z0-9-]{3,64}$/),
+        version: z.coerce.number().int().min(1),
+      })
+      .parse(request.params);
+    const input = serviceAreaZoneDraftPatchSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const parsedPolygon = parseZonePolygon(input.polygonGeoJson);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const replay = await adminActionReplay(
+        client,
+        "SERVICE_AREA_ZONE_PATCH",
+        actorUserRef,
+        idempotencyKey,
+        { ...params, ...input },
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      if (input.employerTenantId) {
+        const tenant = await client.query(
+          `SELECT 1 FROM employer_tenants
+            WHERE id = $1 AND is_active = true
+            FOR KEY SHARE`,
+          [input.employerTenantId],
+        );
+        if (!tenant.rowCount) {
+          await client.query("ROLLBACK");
+          return reply.code(422).send({ code: "EMPLOYER_TENANT_UNAVAILABLE" });
+        }
+      }
+      const current = await loadZoneVersionForUpdate(
+        client,
+        params.zoneRef,
+        params.version,
+      );
+      if (!current) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_AREA_ZONE_NOT_FOUND" });
+      }
+      if (current.status !== "DRAFT") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "SERVICE_AREA_ZONE_NOT_EDITABLE",
+          currentStatus: current.status,
+        });
+      }
+      const updated = await client.query<ServiceAreaZoneRow>(
+        `UPDATE service_area_zone_versions
+            SET display_name = $3,
+                scope_type = $4,
+                employer_tenant_id = $5,
+                polygon_geojson = $6::jsonb,
+                polygon_bbox = $7::jsonb,
+                effective_from = $8,
+                effective_until = $9,
+                change_reason = $10,
+                updated_at = now()
+          WHERE zone_ref = $1 AND version = $2
+        RETURNING id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+                  polygon_geojson, polygon_bbox, status, effective_from::text,
+                  effective_until::text, change_reason, created_by_user_ref,
+                  submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+                  reviewed_at::text, activated_by_user_ref, activated_at::text,
+                  retired_by_user_ref, retired_at::text, created_at::text, updated_at::text`,
+        [
+          params.zoneRef,
+          params.version,
+          input.displayName,
+          input.scopeType,
+          input.employerTenantId ?? null,
+          JSON.stringify(parsedPolygon.geoJson),
+          JSON.stringify(parsedPolygon.bbox),
+          input.effectiveFrom,
+          input.effectiveUntil ?? null,
+          input.changeReason,
+        ],
+      );
+      const zone = updated.rows[0]!;
+      const responseBody = { zone: serviceAreaZoneResponse(zone) };
+      await addAuditEvent(
+        client,
+        zone.id,
+        "SERVICE_AREA_ZONE_PATCHED",
+        actorUserRef,
+        { zoneRef: zone.zone_ref, version: zone.version },
+        "SERVICE_AREA_ZONE",
+      );
+      await recordAdminActionResult(
+        client,
+        "SERVICE_AREA_ZONE_PATCH",
+        actorUserRef,
+        replay,
+        200,
+        responseBody,
+      );
+      await client.query("COMMIT");
+      return responseBody;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/admin/service-area-zones/:zoneRef/drafts/:version/submit-review",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({
+        zoneRef: z.string().regex(/^ZONE-[A-Z0-9-]{3,64}$/),
+        version: z.coerce.number().int().min(1),
+      })
+      .parse(request.params);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const replay = await adminActionReplay(
+        client,
+        "SERVICE_AREA_ZONE_SUBMIT_REVIEW",
+        actorUserRef,
+        idempotencyKey,
+        params,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const current = await loadZoneVersionForUpdate(
+        client,
+        params.zoneRef,
+        params.version,
+      );
+      if (!current) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_AREA_ZONE_NOT_FOUND" });
+      }
+      if (current.status !== "DRAFT") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "SERVICE_AREA_ZONE_NOT_EDITABLE",
+          currentStatus: current.status,
+        });
+      }
+      parseZonePolygon(current.polygon_geojson);
+      const updated = await client.query<ServiceAreaZoneRow>(
+        `UPDATE service_area_zone_versions
+            SET status = 'PENDING_REVIEW',
+                submitted_by_user_ref = $3,
+                submitted_at = now(),
+                updated_at = now()
+          WHERE zone_ref = $1 AND version = $2
+        RETURNING id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+                  polygon_geojson, polygon_bbox, status, effective_from::text,
+                  effective_until::text, change_reason, created_by_user_ref,
+                  submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+                  reviewed_at::text, activated_by_user_ref, activated_at::text,
+                  retired_by_user_ref, retired_at::text, created_at::text, updated_at::text`,
+        [params.zoneRef, params.version, actorUserRef],
+      );
+      const zone = updated.rows[0]!;
+      const responseBody = { zone: serviceAreaZoneResponse(zone) };
+      await addAuditEvent(
+        client,
+        zone.id,
+        "SERVICE_AREA_ZONE_SUBMITTED_FOR_REVIEW",
+        actorUserRef,
+        { zoneRef: zone.zone_ref, version: zone.version },
+        "SERVICE_AREA_ZONE",
+      );
+      await recordAdminActionResult(
+        client,
+        "SERVICE_AREA_ZONE_SUBMIT_REVIEW",
+        actorUserRef,
+        replay,
+        200,
+        responseBody,
+      );
+      await client.query("COMMIT");
+      return responseBody;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/admin/service-area-zones/:zoneRef/versions/:version/review",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({
+        zoneRef: z.string().regex(/^ZONE-[A-Z0-9-]{3,64}$/),
+        version: z.coerce.number().int().min(1),
+      })
+      .parse(request.params);
+    const input = serviceAreaZoneReviewSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const replay = await adminActionReplay(
+        client,
+        "SERVICE_AREA_ZONE_REVIEW",
+        actorUserRef,
+        idempotencyKey,
+        { ...params, ...input },
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const current = await loadZoneVersionForUpdate(
+        client,
+        params.zoneRef,
+        params.version,
+      );
+      if (!current) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_AREA_ZONE_NOT_FOUND" });
+      }
+      if (current.status !== "PENDING_REVIEW") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "SERVICE_AREA_ZONE_NOT_REVIEWABLE",
+          currentStatus: current.status,
+        });
+      }
+      if (current.created_by_user_ref === actorUserRef) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "SERVICE_AREA_ZONE_DUAL_CONTROL_REQUIRED" });
+      }
+      if (current.reviewed_by_user_ref) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "SERVICE_AREA_ZONE_ALREADY_REVIEWED" });
+      }
+      const updated = await client.query<ServiceAreaZoneRow>(
+        `UPDATE service_area_zone_versions
+            SET reviewed_by_user_ref = $3,
+                reviewed_at = now(),
+                updated_at = now()
+          WHERE zone_ref = $1 AND version = $2
+        RETURNING id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+                  polygon_geojson, polygon_bbox, status, effective_from::text,
+                  effective_until::text, change_reason, created_by_user_ref,
+                  submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+                  reviewed_at::text, activated_by_user_ref, activated_at::text,
+                  retired_by_user_ref, retired_at::text, created_at::text, updated_at::text`,
+        [params.zoneRef, params.version, actorUserRef],
+      );
+      const zone = updated.rows[0]!;
+      const responseBody = { zone: serviceAreaZoneResponse(zone) };
+      await addAuditEvent(
+        client,
+        zone.id,
+        "SERVICE_AREA_ZONE_REVIEWED",
+        actorUserRef,
+        {
+          zoneRef: zone.zone_ref,
+          version: zone.version,
+          reviewNote: input.reviewNote,
+        },
+        "SERVICE_AREA_ZONE",
+      );
+      await recordAdminActionResult(
+        client,
+        "SERVICE_AREA_ZONE_REVIEW",
+        actorUserRef,
+        replay,
+        200,
+        responseBody,
+      );
+      await client.query("COMMIT");
+      return responseBody;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/admin/service-area-zones/:zoneRef/versions/:version/activate",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({
+        zoneRef: z.string().regex(/^ZONE-[A-Z0-9-]{3,64}$/),
+        version: z.coerce.number().int().min(1),
+      })
+      .parse(request.params);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const replay = await adminActionReplay(
+        client,
+        "SERVICE_AREA_ZONE_ACTIVATE",
+        actorUserRef,
+        idempotencyKey,
+        params,
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const current = await loadZoneVersionForUpdate(
+        client,
+        params.zoneRef,
+        params.version,
+      );
+      if (!current) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_AREA_ZONE_NOT_FOUND" });
+      }
+      if (current.status !== "PENDING_REVIEW") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "SERVICE_AREA_ZONE_NOT_ACTIVATABLE",
+          currentStatus: current.status,
+        });
+      }
+      if (!current.reviewed_by_user_ref) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "SERVICE_AREA_ZONE_REVIEW_REQUIRED" });
+      }
+      if (current.created_by_user_ref === actorUserRef) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "SERVICE_AREA_ZONE_DUAL_CONTROL_REQUIRED" });
+      }
+      const candidatePolygon = parseZonePolygon(current.polygon_geojson);
+      const overlapping = await loadOverlappingActiveZoneVersions({
+        client,
+        zoneId: current.id,
+        scopeType: current.scope_type,
+        employerTenantId: current.employer_tenant_id,
+        effectiveFrom: current.effective_from,
+        effectiveUntil: current.effective_until,
+      });
+      const conflicting = overlapping.find((zone) =>
+        polygonOverlaps(candidatePolygon, zone.polygon),
+      );
+      if (conflicting) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "SERVICE_AREA_ZONE_OVERLAPS_ACTIVE_ZONE",
+          conflictingZoneRef: conflicting.zoneRef,
+          conflictingZoneVersion: conflicting.version,
+        });
+      }
+      const updated = await client.query<ServiceAreaZoneRow>(
+        `UPDATE service_area_zone_versions
+            SET status = 'ACTIVE',
+                activated_by_user_ref = $3,
+                activated_at = now(),
+                updated_at = now()
+          WHERE zone_ref = $1 AND version = $2
+        RETURNING id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+                  polygon_geojson, polygon_bbox, status, effective_from::text,
+                  effective_until::text, change_reason, created_by_user_ref,
+                  submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+                  reviewed_at::text, activated_by_user_ref, activated_at::text,
+                  retired_by_user_ref, retired_at::text, created_at::text, updated_at::text`,
+        [params.zoneRef, params.version, actorUserRef],
+      );
+      const zone = updated.rows[0]!;
+      const responseBody = { zone: serviceAreaZoneResponse(zone) };
+      await addAuditEvent(
+        client,
+        zone.id,
+        "SERVICE_AREA_ZONE_ACTIVATED",
+        actorUserRef,
+        { zoneRef: zone.zone_ref, version: zone.version },
+        "SERVICE_AREA_ZONE",
+      );
+      await recordAdminActionResult(
+        client,
+        "SERVICE_AREA_ZONE_ACTIVATE",
+        actorUserRef,
+        replay,
+        200,
+        responseBody,
+      );
+      await client.query("COMMIT");
+      return responseBody;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.post(
+  "/v1/local/admin/service-area-zones/:zoneRef/versions/:version/retire",
+  async (request, reply) => {
+    if (!(await requireOpsAdmin(request, reply))) return;
+    const idempotencyKey = manualActionIdempotencyKey(
+      request.headers["idempotency-key"],
+    );
+    if (!idempotencyKey) {
+      return reply.code(400).send({ code: "IDEMPOTENCY_KEY_REQUIRED" });
+    }
+    const params = z
+      .object({
+        zoneRef: z.string().regex(/^ZONE-[A-Z0-9-]{3,64}$/),
+        version: z.coerce.number().int().min(1),
+      })
+      .parse(request.params);
+    const input = serviceAreaZoneRetireSchema.parse(request.body);
+    const actorUserRef = request.adminIdentity!.loginName;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const replay = await adminActionReplay(
+        client,
+        "SERVICE_AREA_ZONE_RETIRE",
+        actorUserRef,
+        idempotencyKey,
+        { ...params, ...input },
+      );
+      if (replay.kind === "replay") {
+        await client.query("ROLLBACK");
+        return reply.code(replay.responseStatus).send(replay.responseBody);
+      }
+      if (replay.kind === "key-reused") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code: "IDEMPOTENCY_KEY_REUSED" });
+      }
+      const current = await loadZoneVersionForUpdate(
+        client,
+        params.zoneRef,
+        params.version,
+      );
+      if (!current) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "SERVICE_AREA_ZONE_NOT_FOUND" });
+      }
+      if (current.status !== "ACTIVE") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "SERVICE_AREA_ZONE_NOT_RETIRABLE",
+          currentStatus: current.status,
+        });
+      }
+      const updated = await client.query<ServiceAreaZoneRow>(
+        `UPDATE service_area_zone_versions
+            SET status = 'RETIRED',
+                retired_by_user_ref = $3,
+                retired_at = now(),
+                updated_at = now()
+          WHERE zone_ref = $1 AND version = $2
+        RETURNING id, zone_ref, version, display_name, scope_type, employer_tenant_id,
+                  polygon_geojson, polygon_bbox, status, effective_from::text,
+                  effective_until::text, change_reason, created_by_user_ref,
+                  submitted_by_user_ref, submitted_at::text, reviewed_by_user_ref,
+                  reviewed_at::text, activated_by_user_ref, activated_at::text,
+                  retired_by_user_ref, retired_at::text, created_at::text, updated_at::text`,
+        [params.zoneRef, params.version, actorUserRef],
+      );
+      const zone = updated.rows[0]!;
+      const responseBody = { zone: serviceAreaZoneResponse(zone) };
+      await addAuditEvent(
+        client,
+        zone.id,
+        "SERVICE_AREA_ZONE_RETIRED",
+        actorUserRef,
+        {
+          zoneRef: zone.zone_ref,
+          version: zone.version,
+          retireReason: input.retireReason,
+        },
+        "SERVICE_AREA_ZONE",
+      );
+      await recordAdminActionResult(
+        client,
+        "SERVICE_AREA_ZONE_RETIRE",
+        actorUserRef,
+        replay,
+        200,
+        responseBody,
+      );
+      await client.query("COMMIT");
+      return responseBody;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get("/v1/local/admin/kyc-location-evidence", async (request, reply) => {
+  if (!requireKycLocationReadRole(request, reply)) return;
+  const result = await pool.query<{
+    evidence_ref: string;
+    source: string;
+    consent_version: string;
+    submitted_at: string;
+    application_no: string | null;
+    assessment_result: LocationAssessmentResult | null;
+    assessed_scope_type: ZoneScopeType | null;
+    employer_tenant_id: string | null;
+    matched_zone_ref: string | null;
+    matched_zone_version: number | null;
+    assessed_at: string | null;
+  }>(
+    `SELECT evidence.evidence_ref,
+            evidence.source,
+            evidence.consent_version,
+            evidence.created_at::text AS submitted_at,
+            application_row.application_no,
+            assessment.assessment_result,
+            assessment.assessed_scope_type,
+            assessment.employer_tenant_id,
+            assessment.matched_zone_ref,
+            assessment.matched_zone_version,
+            assessment.assessed_at::text
+       FROM kyc_location_evidence evidence
+       LEFT JOIN LATERAL (
+         SELECT application_id, assessment_result, assessed_scope_type,
+                employer_tenant_id, matched_zone_ref, matched_zone_version,
+                assessed_at
+           FROM kyc_location_assessments
+          WHERE evidence_id = evidence.id
+          ORDER BY assessed_at DESC
+          LIMIT 1
+       ) assessment ON true
+       LEFT JOIN applications application_row
+         ON application_row.id = assessment.application_id
+      ORDER BY evidence.created_at DESC
+      LIMIT 100`,
+  );
+  return {
+    items: result.rows.map((row) => ({
+      evidenceRef: row.evidence_ref,
+      source: row.source,
+      consentVersion: row.consent_version,
+      submittedAt: row.submitted_at,
+      applicationNo: row.application_no,
+      assessmentResult: row.assessment_result,
+      assessedScopeType: row.assessed_scope_type,
+      employerTenantId: row.employer_tenant_id,
+      matchedZoneRef: row.matched_zone_ref,
+      matchedZoneVersion: row.matched_zone_version,
+      assessedAt: row.assessed_at,
+    })),
+  };
+});
+
+app.get(
+  "/v1/local/admin/kyc-location-evidence/:evidenceRef",
+  async (request, reply) => {
+    if (!requireKycLocationReadRole(request, reply)) return;
+    const params = z
+      .object({
+        evidenceRef: z.string().regex(/^KYCLOC-[A-Z0-9]{8,32}$/),
+      })
+      .parse(request.params);
+    const evidence = await pool.query<{
+      id: string;
+      evidence_ref: string;
+      source: string;
+      consent_version: string;
+      submitted_at: string;
+      application_no: string | null;
+      assessment_result: LocationAssessmentResult | null;
+      assessed_scope_type: ZoneScopeType | null;
+      employer_tenant_id: string | null;
+      matched_zone_ref: string | null;
+      matched_zone_version: number | null;
+      assessed_at: string | null;
+      rule_version: string | null;
+    }>(
+      `SELECT evidence.id,
+              evidence.evidence_ref,
+              evidence.source,
+              evidence.consent_version,
+              evidence.created_at::text AS submitted_at,
+              application_row.application_no,
+              assessment.assessment_result,
+              assessment.assessed_scope_type,
+              assessment.employer_tenant_id,
+              assessment.matched_zone_ref,
+              assessment.matched_zone_version,
+              assessment.assessed_at::text,
+              assessment.rule_version
+         FROM kyc_location_evidence evidence
+         LEFT JOIN LATERAL (
+           SELECT application_id, assessment_result, assessed_scope_type,
+                  employer_tenant_id, matched_zone_ref, matched_zone_version,
+                  assessed_at, rule_version
+             FROM kyc_location_assessments
+            WHERE evidence_id = evidence.id
+            ORDER BY assessed_at DESC
+            LIMIT 1
+         ) assessment ON true
+         LEFT JOIN applications application_row
+           ON application_row.id = assessment.application_id
+        WHERE evidence.evidence_ref = $1`,
+      [params.evidenceRef],
+    );
+    const row = evidence.rows[0];
+    if (!row) {
+      return reply.code(404).send({ code: "KYC_LOCATION_EVIDENCE_NOT_FOUND" });
+    }
+    const audit = await pool.query<{
+      event_type: string;
+      actor_user_ref: string;
+      occurred_at: string;
+      payload: Record<string, unknown>;
+    }>(
+      `SELECT event_type, actor_user_ref, occurred_at::text, payload
+         FROM audit_events
+        WHERE entity_type = 'KYC_LOCATION_EVIDENCE' AND entity_id = $1
+        ORDER BY occurred_at ASC, id ASC`,
+      [row.id],
+    );
+    return {
+      evidence: {
+        evidenceRef: row.evidence_ref,
+        source: row.source,
+        consentVersion: row.consent_version,
+        submittedAt: row.submitted_at,
+        applicationNo: row.application_no,
+        assessmentResult: row.assessment_result,
+        assessedScopeType: row.assessed_scope_type,
+        employerTenantId: row.employer_tenant_id,
+        matchedZoneRef: row.matched_zone_ref,
+        matchedZoneVersion: row.matched_zone_version,
+        assessedAt: row.assessed_at,
+        ruleVersion: row.rule_version,
+      },
+      audit: audit.rows.map((entry) => ({
+        eventType: entry.event_type,
+        actorUserRef: entry.actor_user_ref,
+        occurredAt: entry.occurred_at,
+        payload: entry.payload,
+      })),
+    };
+  },
+);
+
 const createStageHandler = (
   expectedStatus: string,
   stage: string,
@@ -3878,23 +5525,9 @@ app.get("/v1/local/public/employer-tenants", async () => {
   const result = await pool.query<{
     id: string;
     display_name: string;
-    allowed_repayment_methods: RepaymentMethod[] | null;
-    default_repayment_method: RepaymentMethod | null;
   }>(
-    `SELECT tenant.id,
-                    tenant.display_name,
-                    rule.allowed_repayment_methods,
-                    rule.default_repayment_method
-               FROM employer_tenants AS tenant
-               LEFT JOIN LATERAL (
-                 SELECT allowed_repayment_methods, default_repayment_method
-                   FROM employer_payroll_rules
-                  WHERE employer_tenant_id = tenant.id
-                    AND workflow_version = 'SALARY_LOAN_V2'
-                    AND retired_at IS NULL
-                  ORDER BY published_at DESC
-                  LIMIT 1
-               ) AS rule ON true
+    `SELECT tenant.id, tenant.display_name
+       FROM employer_tenants AS tenant
       WHERE is_active = true
       ORDER BY display_name ASC`,
   );
@@ -3902,11 +5535,8 @@ app.get("/v1/local/public/employer-tenants", async () => {
     tenants: result.rows.map((tenant) => ({
       id: tenant.id,
       displayName: tenant.display_name,
-      availableRepaymentMethods: tenant.allowed_repayment_methods?.length
-        ? tenant.allowed_repayment_methods
-        : ["USER_MANUAL_PAYMENT"],
-      defaultRepaymentMethod:
-        tenant.default_repayment_method ?? "USER_MANUAL_PAYMENT",
+      availableRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
+      defaultRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
     })),
   };
 });
@@ -3920,6 +5550,7 @@ app.get("/v1/local/public/profile/view", async (request, reply) => {
     return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
   }
   const user = await pool.query<{
+    user_id: string;
     preferred_language: "km" | "en" | "zh-CN";
     telegram_display_name: string | null;
     telegram_username: string | null;
@@ -3932,6 +5563,7 @@ app.get("/v1/local/public/profile/view", async (request, reply) => {
     bill_status: string | null;
   }>(
     `SELECT
+       u.id AS user_id,
        u.preferred_language,
        u.telegram_display_name,
        u.telegram_username,
@@ -3967,6 +5599,10 @@ app.get("/v1/local/public/profile/view", async (request, reply) => {
   if (!profile) {
     return reply.code(404).send({ code: "APPLICANT_PROFILE_NOT_FOUND" });
   }
+  const kycLocation = await loadLatestKycLocationStatus({
+    client: pool,
+    userId: profile.user_id,
+  });
   return {
     displayName: profile.telegram_display_name,
     username: profile.telegram_username,
@@ -3979,6 +5615,7 @@ app.get("/v1/local/public/profile/view", async (request, reply) => {
         : "NOT_STARTED",
     employerDisplayName: profile.employer_display_name,
     language: profile.preferred_language,
+    kycLocation: kycLocation ?? null,
     ...(profile.active_application_no && profile.active_application_status
       ? {
           activeApplication: {
@@ -4157,6 +5794,186 @@ app.post(
       return reply.code(401).send({ code: "TELEGRAM_SESSION_REQUIRED" });
     }
     return reply.code(204).send();
+  },
+);
+
+app.post("/v1/local/public/kyc-location-evidence", async (request, reply) => {
+  const applicant = await authenticatedApplicantUser(
+    request.headers.cookie,
+    request.headers["user-agent"],
+  );
+  if (!applicant) {
+    return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+  }
+  const input = kycLocationEvidenceCreateSchema.parse(request.body);
+  const capturedAtMillis = new Date(input.capturedAt).getTime();
+  const now = Date.now();
+  if (
+    !Number.isFinite(capturedAtMillis) ||
+    capturedAtMillis < now - 10 * 60 * 1000 ||
+    capturedAtMillis > now + 60 * 1000
+  ) {
+    return reply
+      .code(422)
+      .send({ code: "KYC_LOCATION_CAPTURED_AT_OUT_OF_WINDOW" });
+  }
+  let latitudeEncrypted: Buffer;
+  let longitudeEncrypted: Buffer;
+  let horizontalAccuracyEncrypted: Buffer;
+  let capturedAtEncrypted: Buffer;
+  let piiKeyVersion: string;
+  try {
+    latitudeEncrypted = encryptPersonalValue(String(input.latitude));
+    longitudeEncrypted = encryptPersonalValue(String(input.longitude));
+    horizontalAccuracyEncrypted = encryptPersonalValue(
+      String(input.horizontalAccuracyMeters),
+    );
+    capturedAtEncrypted = encryptPersonalValue(input.capturedAt);
+    piiKeyVersion = personalDataKeyVersion();
+  } catch (error) {
+    request.log.error({ err: error }, "kyc location storage unavailable");
+    return reply.code(503).send({ code: "KYC_LOCATION_STORAGE_UNAVAILABLE" });
+  }
+  const point: Point = {
+    latitude: input.latitude,
+    longitude: input.longitude,
+  };
+  const evidenceRef = `KYCLOC-${randomBytes(8).toString("hex").toUpperCase()}`;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let employerTenantId: string | null = null;
+    const draft = await client.query<{ draft_payload_encrypted: Buffer }>(
+      `SELECT draft_payload_encrypted
+         FROM applicant_application_drafts
+        WHERE user_id = $1`,
+      [applicant.id],
+    );
+    if (draft.rowCount) {
+      try {
+        employerTenantId =
+          parseApplicantApplicationDraft(draft.rows[0]!.draft_payload_encrypted)
+            .employerTenantId || null;
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          "kyc location draft read unavailable",
+        );
+        await client.query("ROLLBACK");
+        return reply
+          .code(503)
+          .send({ code: "APPLICATION_DRAFT_STORAGE_UNAVAILABLE" });
+      }
+      if (employerTenantId) {
+        const tenant = await client.query(
+          `SELECT 1 FROM employer_tenants
+            WHERE id = $1 AND is_active = true
+            FOR KEY SHARE`,
+          [employerTenantId],
+        );
+        if (!tenant.rowCount) employerTenantId = null;
+      }
+    }
+    const evidence = await client.query<{ id: string; created_at: string }>(
+      `INSERT INTO kyc_location_evidence
+        (evidence_ref, user_id, application_id, latitude_encrypted, longitude_encrypted,
+         horizontal_accuracy_encrypted, captured_at_encrypted, consent_version,
+         source, pii_key_version)
+       VALUES
+        ($1, $2, NULL, $3::bytea, $4::bytea, $5::bytea, $6::bytea, $7,
+         'TELEGRAM_LOCATION_MANAGER', $8)
+       RETURNING id, created_at::text`,
+      [
+        evidenceRef,
+        applicant.id,
+        latitudeEncrypted,
+        longitudeEncrypted,
+        horizontalAccuracyEncrypted,
+        capturedAtEncrypted,
+        input.consentVersion,
+        piiKeyVersion,
+      ],
+    );
+    const assessment = await assessKycLocationEvidence({
+      client,
+      userId: applicant.id,
+      employerTenantId,
+      evidenceId: evidence.rows[0]!.id,
+      point,
+      horizontalAccuracyMeters: input.horizontalAccuracyMeters,
+      effectiveAt: input.capturedAt,
+    });
+    await insertKycLocationAssessment({
+      client,
+      evidenceId: evidence.rows[0]!.id,
+      userId: applicant.id,
+      employerTenantId: assessment.employerTenantId,
+      actorUserRef: "SYSTEM",
+      assessmentResult: assessment.assessmentResult,
+      assessedScopeType: assessment.assessedScopeType,
+      matchedZoneRef: assessment.matchedZoneRef,
+      matchedZoneVersion: assessment.matchedZoneVersion,
+    });
+    await addAuditEvent(
+      client,
+      evidence.rows[0]!.id,
+      "KYC_LOCATION_EVIDENCE_SUBMITTED",
+      applicant.telegramUserRef,
+      {
+        evidenceRef,
+        consentVersion: input.consentVersion,
+        source: "TELEGRAM_LOCATION_MANAGER",
+      },
+      "KYC_LOCATION_EVIDENCE",
+    );
+    await addAuditEvent(
+      client,
+      evidence.rows[0]!.id,
+      "KYC_LOCATION_EVIDENCE_ASSESSED",
+      "SYSTEM",
+      {
+        evidenceRef,
+        assessmentResult: assessment.assessmentResult,
+        assessedScopeType: assessment.assessedScopeType,
+        employerTenantId: assessment.employerTenantId,
+        matchedZoneRef: assessment.matchedZoneRef,
+        matchedZoneVersion: assessment.matchedZoneVersion,
+        ruleVersion: KYC_LOCATION_RULE_VERSION,
+      },
+      "KYC_LOCATION_EVIDENCE",
+    );
+    await client.query("COMMIT");
+    return reply.code(201).send({
+      kycLocation: {
+        assessmentResult: assessment.assessmentResult,
+        submittedAt: evidence.rows[0]!.created_at,
+      },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.get(
+  "/v1/local/public/kyc-location-evidence/status",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicantUser(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    return {
+      kycLocation:
+        (await loadLatestKycLocationStatus({
+          client: pool,
+          userId: applicant.id,
+        })) ?? null,
+    };
   },
 );
 
@@ -4450,11 +6267,7 @@ app.post("/v1/local/applications", async (request, reply) => {
         availableRepaymentMethods,
         employerRepaymentConfig.employerPayrollRuleVersion,
         SALARY_LOAN_V2_COLLECTION_SCOPE,
-        input.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION"
-          ? "EMPLOYER_PAYROLL_RUN"
-          : input.selectedRepaymentMethod === "USER_DIRECT_DEBIT"
-            ? "LICENSED_LENDER_DIRECT_DEBIT"
-            : "LICENSED_LENDER_MANUAL_COLLECTION",
+        "LICENSED_LENDER_SMILE_WALLET",
       ],
     );
     await client.query(
@@ -4470,17 +6283,13 @@ app.post("/v1/local/applications", async (request, reply) => {
         input.authorizationSnapshot.employerVerificationAuthorized,
         input.authorizationSnapshot.serviceAgreementAuthorized,
         input.authorizationSnapshot.postDisbursementBrokerageAuthorized,
-        input.authorizationSnapshot.payrollDeductionAuthorized,
-        input.authorizationSnapshot.directDebitAuthorized,
+        false,
+        false,
         authorizationReference("AUTH-EMPLOYER"),
         authorizationReference("AUTH-SERVICE"),
         authorizationReference("AUTH-BROKERAGE"),
-        input.authorizationSnapshot.payrollDeductionAuthorized
-          ? authorizationReference("AUTH-PAYROLL")
-          : null,
-        input.authorizationSnapshot.directDebitAuthorized
-          ? authorizationReference("AUTH-DIRECT-DEBIT")
-          : null,
+        null,
+        null,
       ],
     );
     await client.query(
@@ -4557,6 +6366,7 @@ app.get(
     }
     const result = await pool.query<{
       id: string;
+      user_id: string;
       application_no: string;
       requested_amount_minor: string;
       currency: string;
@@ -4572,7 +6382,7 @@ app.get(
       created_at: string;
       updated_at: string;
     }>(
-      `SELECT applications.id, applications.application_no, applications.requested_amount_minor::text,
+      `SELECT applications.id, applications.user_id, applications.application_no, applications.requested_amount_minor::text,
             applications.currency, applications.tenor_days, applications.status,
             applications.workflow_version,
             approved_amount_minor::text, rejection_condition_resolved, supplement_requested,
@@ -4616,6 +6426,11 @@ app.get(
     );
     const experience = await loadApplicantExperienceData(application.id);
     const timeline = await loadApplicantTimeline(application.id);
+    const kycLocation = await loadLatestKycLocationStatus({
+      client: pool,
+      userId: application.user_id,
+      applicationId: application.id,
+    });
     const workflowSnapshot = await pool.query<{
       selected_repayment_method: string | null;
       available_repayment_methods: string[] | null;
@@ -4686,10 +6501,6 @@ app.get(
           postDisbursementBrokerageAuthorized:
             workflowSnapshot.rows[0]?.post_disbursement_brokerage_authorized ??
             false,
-          payrollDeductionAuthorized:
-            workflowSnapshot.rows[0]?.payroll_deduction_authorized ?? false,
-          directDebitAuthorized:
-            workflowSnapshot.rows[0]?.direct_debit_authorized ?? false,
         },
         recordDetail: {
           createdAt: application.created_at,
@@ -4703,6 +6514,7 @@ app.get(
         },
         repaymentProof: experience.repaymentProof,
         reassessmentRequest: experience.reassessmentRequest,
+        kycLocation,
         timeline,
       },
     );
@@ -4937,6 +6749,281 @@ app.post(
       unread: false,
       readAt: result.rows[0]!.read_at,
     };
+  },
+);
+
+const handleWalletOperationJumpExchange = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => {
+  if (!requireBrokerInternalMtls(request, reply)) return;
+  const input = walletBrokerExchangeRequestSchema.parse(request.body);
+  const headers = walletBrokerExchangeHeadersSchema.parse({
+    algorithm: requestHeaderValue(request.headers["x-payease-wallet-algo"]),
+    keyId: requestHeaderValue(request.headers["x-payease-wallet-key-id"]),
+    nonce: requestHeaderValue(request.headers["x-payease-wallet-nonce"]),
+    timestampMillis: requestHeaderValue(
+      request.headers["x-payease-wallet-timestamp-millis"],
+    ),
+    signature: requestHeaderValue(
+      request.headers["x-payease-wallet-signature"],
+    ),
+  });
+  if (
+    !isDomainEventTimestampWithinWindow({
+      timestampMillis: headers.timestampMillis,
+    })
+  ) {
+    return reply.code(408).send({ code: "WALLET_EXCHANGE_STALE_TIMESTAMP" });
+  }
+  const transportBodySha256 = sha256Hex(stableJson(input));
+  if (
+    !verifyWalletBrokerServiceSignature({
+      method: "POST",
+      path: "/v1/local/wallet-operation-jumps/exchange",
+      headers,
+      bodySha256: transportBodySha256,
+    })
+  ) {
+    return reply.code(401).send({ code: "WALLET_EXCHANGE_BAD_SIGNATURE" });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const consumedJump = await client.query<{
+      application_id: string;
+      jump_ref: string;
+      operation_type: "WITHDRAWAL" | "REPAYMENT";
+      expires_at: string;
+    }>(
+      `UPDATE wallet_operation_jumps
+            SET consumed_at = now(),
+                updated_at = now()
+          WHERE jump_ref = $1
+            AND jump_token_hash = $2
+            AND operation_type = $3
+            AND consumed_at IS NULL
+            AND revoked_at IS NULL
+            AND expires_at > now()
+          RETURNING application_id, jump_ref, operation_type, expires_at::text`,
+      [
+        input.jumpRef,
+        createHash("sha256").update(input.jumpToken).digest("hex"),
+        input.operationType,
+      ],
+    );
+    if (!consumedJump.rowCount) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ code: "WALLET_OPERATION_JUMP_NOT_FOUND" });
+    }
+    const application = await client.query<{ application_no: string }>(
+      `SELECT application_no
+           FROM applications
+          WHERE id = $1`,
+      [consumedJump.rows[0]!.application_id],
+    );
+    if (!application.rowCount) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+    }
+    const walletProjection = await client.query<{
+      external_wallet_ref: string | null;
+      wallet_status: string;
+      available_balance_minor: string;
+    }>(
+      `SELECT external_wallet_ref,
+                wallet_status,
+                available_balance_minor::text
+           FROM lender_wallet_projection_snapshots
+          WHERE application_id = $1`,
+      [consumedJump.rows[0]!.application_id],
+    );
+    const projection = walletProjection.rows[0];
+    const payload = walletBrokerExchangeResponseSchema.parse({
+      applicationNo: application.rows[0]!.application_no,
+      walletOperationJumpRef: consumedJump.rows[0]!.jump_ref,
+      operationType: consumedJump.rows[0]!.operation_type,
+      externalWalletRef: projection?.external_wallet_ref ?? null,
+      walletStatus: projection?.wallet_status ?? "WALLET_PENDING",
+      availableBalanceMinor: projection?.available_balance_minor ?? "0",
+      currency: "USD",
+      brokerSessionNonce: randomBytes(16).toString("hex"),
+      // PostgreSQL's ::text representation may use a numeric timezone offset
+      // (for example, +00). The cross-domain schema requires RFC 3339 UTC
+      // form, so normalize the database timestamp before signing the response.
+      expiresAt: new Date(consumedJump.rows[0]!.expires_at).toISOString(),
+    });
+    await addAuditEvent(
+      client,
+      consumedJump.rows[0]!.application_id,
+      "WALLET_OPERATION_JUMP_CONSUMED",
+      "lender-wallet-service",
+      {
+        walletOperationJumpRef: consumedJump.rows[0]!.jump_ref,
+        operationType: consumedJump.rows[0]!.operation_type,
+        walletStatus: payload.walletStatus,
+      },
+    );
+    await client.query("COMMIT");
+    return payload;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+if (internalMtlsApp) {
+  internalMtlsApp.post(
+    "/v1/local/wallet-operation-jumps/exchange",
+    handleWalletOperationJumpExchange,
+  );
+} else {
+  app.post(
+    "/v1/local/wallet-operation-jumps/exchange",
+    handleWalletOperationJumpExchange,
+  );
+}
+
+app.post(
+  "/v1/local/public/applications/:applicationNo/wallet-operation-jumps",
+  async (request, reply) => {
+    const applicant = await authenticatedApplicant(
+      request.headers.cookie,
+      request.headers["user-agent"],
+    );
+    if (!applicant) {
+      return reply.code(401).send({ code: "TELEGRAM_AUTH_REQUIRED" });
+    }
+    const params = z
+      .object({ applicationNo: z.string().min(1) })
+      .parse(request.params);
+    const input = walletOperationJumpCreateSchema.parse(request.body);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const application = await lockApplicantOwnedApplication(
+        client,
+        params.applicationNo,
+        applicant.telegramUserRef,
+      );
+      if (!application) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "APPLICATION_NOT_FOUND" });
+      }
+      if (
+        input.operationType === "REPAYMENT" &&
+        application.status !== "REPAYMENT_ACTIVE"
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "WALLET_OPERATION_NOT_AVAILABLE",
+          currentStatus: application.status,
+        });
+      }
+      if (
+        input.operationType === "WITHDRAWAL" &&
+        application.status !== "DISBURSED" &&
+        application.status !== "REPAYMENT_ACTIVE"
+      ) {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          code: "WALLET_OPERATION_NOT_AVAILABLE",
+          currentStatus: application.status,
+        });
+      }
+      if (input.operationType === "WITHDRAWAL") {
+        const walletProjection = await loadWalletProjectionForUpdate(
+          client,
+          application.id,
+        );
+        const availableBalance = BigInt(
+          walletProjection?.available_balance_minor ?? "0",
+        );
+        if (
+          walletProjection?.wallet_status !== "WALLET_AVAILABLE" ||
+          availableBalance <= 0n
+        ) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({
+            code: "WALLET_OPERATION_NOT_AVAILABLE",
+            currentStatus: application.status,
+            walletStatus: walletProjection?.wallet_status ?? "WALLET_PENDING",
+          });
+        }
+      }
+      let settings;
+      try {
+        settings = configuredWalletOperationJumpSettings();
+      } catch (error) {
+        request.log.error(
+          { err: error },
+          "wallet operation jump misconfigured",
+        );
+        await client.query("ROLLBACK");
+        return reply.code(503).send({ code: "SMILE_WALLET_UNAVAILABLE" });
+      }
+      if (!settings) {
+        await client.query("ROLLBACK");
+        return reply.code(503).send({ code: "SMILE_WALLET_UNAVAILABLE" });
+      }
+      const jump = buildWalletOperationJump({
+        settings,
+        operationType: input.operationType,
+      });
+      await client.query(
+        `UPDATE wallet_operation_jumps
+            SET revoked_at = now(),
+                updated_at = now()
+          WHERE application_id = $1
+            AND operation_type = $2
+            AND consumed_at IS NULL
+            AND revoked_at IS NULL
+            AND expires_at > now()`,
+        [application.id, input.operationType],
+      );
+      await client.query(
+        `INSERT INTO wallet_operation_jumps
+          (application_id, jump_ref, operation_type, jump_token_hash,
+           target_host, expires_at, created_by_user_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          application.id,
+          jump.walletOperationJumpRef,
+          input.operationType,
+          jump.jumpTokenHash,
+          jump.targetHost,
+          jump.expiresAt,
+          applicant.telegramUserRef,
+        ],
+      );
+      await addAuditEvent(
+        client,
+        application.id,
+        "WALLET_OPERATION_JUMP_CREATED",
+        applicant.telegramUserRef,
+        {
+          walletOperationJumpRef: jump.walletOperationJumpRef,
+          operationType: input.operationType,
+          targetHost: jump.targetHost,
+          expiresAt: jump.expiresAt,
+        },
+      );
+      await client.query("COMMIT");
+      return {
+        applicationNo: params.applicationNo,
+        operationType: input.operationType,
+        walletOperationJumpRef: jump.walletOperationJumpRef,
+        walletOperationUrl: jump.walletOperationUrl,
+        expiresAt: jump.expiresAt,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 );
 
@@ -9050,6 +11137,7 @@ app.post("/v1/local/reconciliation/:workItemId/close", (request, reply) =>
 );
 
 const close = async (): Promise<void> => {
+  await internalMtlsApp?.close();
   await app.close();
   await pool.end();
 };
@@ -9058,6 +11146,7 @@ if (process.env.NODE_ENV !== "test") {
   // Fail before opening the port when real applicant authentication would be
   // impossible. Per-request configuration is still used so a compromised Bot
   // can be disabled without a restart.
+  configuredWalletBrokerServiceSecrets();
   if (requiresTelegramAuthentication()) {
     requireTelegramRecoveryTopology();
     requireConfiguredApplicantOrigins();
@@ -9069,11 +11158,15 @@ if (process.env.NODE_ENV !== "test") {
   await runDatabaseMigrations(pool);
   const port = Number(process.env.PORT ?? 3100);
   const host = process.env.HOST ?? "127.0.0.1";
-  app.listen({ host, port }).catch(async (error) => {
+  const internalListener = brokerInternalMtlsListenSettings();
+  try {
+    await app.listen({ host, port });
+    await internalMtlsApp!.listen(internalListener);
+  } catch (error) {
     app.log.error(error);
     await close();
     process.exit(1);
-  });
+  }
 }
 
-export { app, close };
+export { app, close, internalMtlsApp };

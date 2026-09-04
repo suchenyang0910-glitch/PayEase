@@ -55,7 +55,7 @@ concurrency:
 
 env:
   CI: "true"
-  NODE_VERSION: "20.17.0"
+  NODE_VERSION: "22.13.1"
   PNPM_VERSION: "9.12.0"
 
 jobs:
@@ -112,6 +112,7 @@ jobs:
       - name: Prepare workspace package declarations for typecheck
         run: |
           pnpm --filter @payease/shared-money run build
+          pnpm --filter @payease/shared-security run build
           pnpm --filter @payease/v1-domain run build
 
       - name: CI-02 Typecheck (tsc strict + noUncheckedIndexedAccess)

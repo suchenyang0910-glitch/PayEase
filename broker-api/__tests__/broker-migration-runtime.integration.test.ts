@@ -349,6 +349,140 @@ integration("broker runtime migration gate", () => {
     );
   });
 
+  it("stores append-only KYC evidence and assessments plus draft-only service area mutations", async () => {
+    const user = await client.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('broker-runtime-kyc-zone-user', 'en')
+       RETURNING id`,
+    );
+    await client.query(
+      `INSERT INTO service_area_zone_versions
+        (zone_ref, version, display_name, scope_type, employer_tenant_id,
+         polygon_geojson, polygon_bbox, status, effective_from, effective_until,
+         change_reason, created_by_user_ref, submitted_by_user_ref, submitted_at,
+         reviewed_by_user_ref, reviewed_at, activated_by_user_ref, activated_at)
+       VALUES (
+         'ZONE-RUNTIME-001', 1, 'Runtime active zone', 'PLATFORM', NULL,
+         $1::jsonb, $2::jsonb, 'ACTIVE', '2026-09-01T00:00:00.000Z', NULL,
+         'Runtime rollout', 'ops-maker', 'ops-maker', now(),
+         'ops-checker', now(), 'ops-checker', now()
+       )`,
+      [
+        JSON.stringify({
+          type: "Polygon",
+          coordinates: [
+            [
+              [104.9, 11.56],
+              [104.94, 11.56],
+              [104.94, 11.6],
+              [104.9, 11.6],
+              [104.9, 11.56],
+            ],
+          ],
+        }),
+        JSON.stringify({
+          minLongitude: 104.9,
+          maxLongitude: 104.94,
+          minLatitude: 11.56,
+          maxLatitude: 11.6,
+        }),
+      ],
+    );
+    const evidence = await client.query<{ id: string }>(
+      `INSERT INTO kyc_location_evidence
+        (evidence_ref, user_id, application_id, latitude_encrypted, longitude_encrypted,
+         horizontal_accuracy_encrypted, captured_at_encrypted, consent_version,
+         source, pii_key_version)
+       VALUES (
+         'KYCLOC-RUNTIME001', $1, NULL, '\\x01'::bytea, '\\x02'::bytea,
+         '\\x03'::bytea, '\\x04'::bytea, 'KYC_LOCATION_V1',
+         'TELEGRAM_LOCATION_MANAGER', 'test-key-v1'
+       )
+       RETURNING id`,
+      [user.rows[0]!.id],
+    );
+    const assessment = await client.query<{ id: string }>(
+      `INSERT INTO kyc_location_assessments
+        (evidence_id, user_id, application_id, assessment_result,
+         assessed_scope_type, employer_tenant_id, matched_zone_ref,
+         matched_zone_version, rule_version, actor_user_ref)
+       VALUES (
+         $1, $2, NULL, 'MATCH', 'PLATFORM', NULL,
+         'ZONE-RUNTIME-001', 1, 'KYC_LOCATION_RULE_V1', 'SYSTEM'
+       )
+       RETURNING id`,
+      [evidence.rows[0]!.id, user.rows[0]!.id],
+    );
+
+    await expectAppendOnlyMutationRejected(
+      `UPDATE kyc_location_evidence
+          SET consent_version = 'KYC_LOCATION_V2'
+        WHERE id = '${evidence.rows[0]!.id}'`,
+      "kyc location evidence update must fail",
+    );
+    await expectAppendOnlyMutationRejected(
+      `DELETE FROM kyc_location_evidence
+        WHERE id = '${evidence.rows[0]!.id}'`,
+      "kyc location evidence delete must fail",
+    );
+    await expectAppendOnlyMutationRejected(
+      `UPDATE kyc_location_assessments
+          SET assessment_result = 'OUT_OF_ZONE'
+        WHERE id = '${assessment.rows[0]!.id}'`,
+      "kyc location assessment update must fail",
+    );
+    await expectAppendOnlyMutationRejected(
+      `DELETE FROM kyc_location_assessments
+        WHERE id = '${assessment.rows[0]!.id}'`,
+      "kyc location assessment delete must fail",
+    );
+    await expect(
+      client.query(
+        `UPDATE service_area_zone_versions
+            SET display_name = 'Mutated active zone'
+          WHERE zone_ref = 'ZONE-RUNTIME-001' AND version = 1`,
+      ),
+    ).rejects.toThrow(/only DRAFT service area zone versions may change/i);
+
+    await client.query(
+      `INSERT INTO service_area_zone_versions
+        (zone_ref, version, display_name, scope_type, employer_tenant_id,
+         polygon_geojson, polygon_bbox, status, effective_from, effective_until,
+         change_reason, created_by_user_ref)
+       VALUES (
+         'ZONE-RUNTIME-001', 2, 'Runtime draft zone', 'PLATFORM', NULL,
+         $1::jsonb, $2::jsonb, 'DRAFT', '2026-10-01T00:00:00.000Z', NULL,
+         'Draft follow-up', 'ops-maker'
+       )`,
+      [
+        JSON.stringify({
+          type: "Polygon",
+          coordinates: [
+            [
+              [105.0, 11.7],
+              [105.04, 11.7],
+              [105.04, 11.74],
+              [105.0, 11.74],
+              [105.0, 11.7],
+            ],
+          ],
+        }),
+        JSON.stringify({
+          minLongitude: 105.0,
+          maxLongitude: 105.04,
+          minLatitude: 11.7,
+          maxLatitude: 11.74,
+        }),
+      ],
+    );
+    await client.query(
+      `UPDATE service_area_zone_versions
+          SET display_name = 'Runtime draft zone updated',
+              updated_at = now()
+        WHERE zone_ref = 'ZONE-RUNTIME-001' AND version = 2`,
+    );
+  });
+
   it("stores cross-domain outbox and inbox envelopes with nonce replay protection", async () => {
     await client.query(
       `INSERT INTO domain_event_outbox
@@ -408,6 +542,86 @@ integration("broker runtime migration gate", () => {
     );
     expect(outbox.rows[0]?.count).toBe("1");
     expect(inbox.rows[0]?.processing_status).toBe("RECEIVED");
+  });
+
+  it("stores one-time wallet jumps and wallet availability projections for wallet operations", async () => {
+    const user = await client.query<{ id: string }>(
+      `INSERT INTO users (telegram_user_ref, preferred_language)
+       VALUES ('broker-runtime-wallet-user', 'en')
+       RETURNING id`,
+    );
+    const application = await client.query<{ id: string }>(
+      `INSERT INTO applications
+        (application_no, user_id, requested_amount_minor, currency, tenor_days,
+         status, workflow_version)
+       VALUES (
+         'APP-BROKER-RUNTIME-WALLET-001', $1, 25000, 'USD', 30,
+         'DISBURSED', 'SALARY_LOAN_V2'
+       )
+       RETURNING id`,
+      [user.rows[0]!.id],
+    );
+    const applicationId = application.rows[0]!.id;
+
+    await client.query(
+      `INSERT INTO application_repayment_preferences
+        (application_id, workflow_version, selected_repayment_method,
+         available_repayment_methods, collection_mode, collection_payee_ref)
+       VALUES (
+         $1, 'SALARY_LOAN_V2', 'SMILE_WALLET_AUTHORIZATION',
+         ARRAY['SMILE_WALLET_AUTHORIZATION']::text[],
+         'PRINCIPAL_AND_INTEREST', 'runtime-smile-wallet-payee'
+       )`,
+      [applicationId],
+    );
+    await client.query(
+      `INSERT INTO lender_wallet_projection_snapshots
+         (application_id, external_wallet_ref, wallet_status,
+          available_balance_minor, currency)
+       VALUES (
+         $1, 'wallet-runtime-001', 'WALLET_AVAILABLE', 25000, 'USD'
+       )`,
+      [applicationId],
+    );
+    await client.query(
+      `INSERT INTO wallet_operation_jumps
+         (application_id, jump_ref, operation_type, jump_token_hash,
+          target_host, expires_at, created_by_user_ref)
+       VALUES (
+           $1, 'woj_runtimewalletjump000000000001', 'WITHDRAWAL',
+         'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+         'wallet.smile.test', now() + interval '10 minutes', 'runtime-wallet-user'
+       )`,
+      [applicationId],
+    );
+    await expect(
+      client.query(
+        `INSERT INTO wallet_operation_jumps
+           (application_id, jump_ref, operation_type, jump_token_hash,
+            target_host, expires_at, created_by_user_ref)
+         VALUES (
+           $1, 'woj_runtimewalletjump000000000002', 'WITHDRAWAL',
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           'wallet.smile.test', now() + interval '10 minutes', 'runtime-wallet-user'
+         )`,
+        [applicationId],
+      ),
+    ).rejects.toThrow(
+      /duplicate key|wallet_operation_jumps_jump_token_hash_key/i,
+    );
+    const projection = await client.query<{
+      wallet_status: string;
+      available_balance_minor: string;
+    }>(
+      `SELECT wallet_status, available_balance_minor::text
+         FROM lender_wallet_projection_snapshots
+        WHERE application_id = $1`,
+      [applicationId],
+    );
+    expect(projection.rows[0]).toEqual({
+      wallet_status: "WALLET_AVAILABLE",
+      available_balance_minor: "25000",
+    });
   });
 
   it("stores lender collection work items and exception queues for Day 3 repayment UAT", async () => {

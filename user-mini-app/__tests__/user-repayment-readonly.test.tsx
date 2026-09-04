@@ -319,11 +319,15 @@ describe("user-mini-app P0 step 2: Repayment readonly boundary", () => {
     /确认还款/,
   ] as const;
 
-  it("Repayment tab never renders a pay-now / pay-with-channel button (P0 read-only)", async () => {
+  it("Repayment tab only exposes the controlled SMILE wallet jump, never a direct pay-with-channel button", async () => {
     await renderToRepayment("en", "has-repayment");
+    expect(
+      screen.getByRole("button", { name: "Open SMILE wallet" }),
+    ).toBeVisible();
     const buttons = screen.getAllByRole("button");
     for (const btn of buttons) {
       const label = (btn.textContent ?? "").trim();
+      if (/open smile wallet/i.test(label)) continue;
       for (const re of PAY_BUTTON_PATTERNS) {
         expect(label).not.toMatch(re);
       }

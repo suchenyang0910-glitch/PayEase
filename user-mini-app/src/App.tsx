@@ -21,6 +21,10 @@ import { usdInputToMinor } from "./usd-amount.ts";
 import { applicantProfileValidationError } from "./applicant-profile.ts";
 import { applicantSubmissionErrorMessage } from "./applicant-submission-error.ts";
 import { notificationDeepLink } from "./applicant-notification.ts";
+import {
+  requestTelegramSingleLocation,
+  type SingleKycLocationSnapshot,
+} from "./telegram-location.ts";
 import { requestTelegramPhoneContact } from "./telegram-phone-contact.ts";
 import { resolveTelegramInitData } from "./telegram-webapp-init-data.ts";
 import {
@@ -69,6 +73,12 @@ type ApplicantTimelineEntry = {
   actorRole?: string;
   reasonCode?: string;
   referenceNo?: string;
+};
+
+type KycLocationStatus = {
+  assessmentResult:
+    "MATCH" | "OUT_OF_ZONE" | "OUT_OF_COUNTRY" | "LOW_ACCURACY" | "UNAVAILABLE";
+  submittedAt: string;
 };
 
 type UserSummary = {
@@ -141,8 +151,6 @@ type UserSummary = {
     employerVerificationAuthorized?: boolean;
     serviceAgreementAuthorized?: boolean;
     postDisbursementBrokerageAuthorized?: boolean;
-    payrollDeductionAuthorized?: boolean;
-    directDebitAuthorized?: boolean;
   };
   recordDetail?: {
     createdAt: string;
@@ -166,11 +174,11 @@ type UserSummary = {
     wealthProofDeclared: boolean;
     submittedAt: string;
   };
+  kycLocation?: null | KycLocationStatus;
   timeline?: ApplicantTimelineEntry[];
 };
 
-type RepaymentMethod =
-  "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
+type RepaymentMethod = "SMILE_WALLET_AUTHORIZATION";
 
 type ApplicationListEntry = ApplicationHistoryEntry;
 
@@ -178,8 +186,6 @@ type EmployerTenantDirectory = {
   tenants: Array<{
     id: string;
     displayName: string;
-    availableRepaymentMethods: RepaymentMethod[];
-    defaultRepaymentMethod: RepaymentMethod;
   }>;
 };
 
@@ -207,6 +213,7 @@ type VerifiedProfileView = {
     status: string;
     dueDate: string | null;
   };
+  kycLocation?: null | KycLocationStatus;
 };
 
 function factoryFormCopy(language: LanguageCode) {
@@ -278,6 +285,77 @@ function phoneVerificationCopy(language: LanguageCode) {
     sent: "Telegram received the request. Return here and refresh the verification status.",
     cancelled: "You cancelled Telegram phone verification.",
     unsupported: "Open this page in Telegram to verify your phone number.",
+  };
+}
+
+function kycLocationCopy(language: LanguageCode) {
+  if (language === "zh-CN") {
+    return {
+      title: "当前位置核验",
+      description:
+        "定位仅用于本次身份与服务区域核验，不会持续追踪。若无法获取定位，工作人员可能联系你补充资料。",
+      authorize: "授权当前位置",
+      confirm: "确认提交定位核验",
+      recapture: "重新获取定位",
+      refresh: "刷新核验状态",
+      idle: "尚未提交定位核验",
+      pending: "已获取当前位置，请确认后再提交核验",
+      success: "已提交服务区域核验",
+      review: "资料将进入人工复核",
+      lowAccuracy: "定位精度不足，请在信号更好的位置重试",
+      unavailable: "当前暂无法获取定位，可继续提交资料",
+      cancelled: "本次未提交定位核验",
+      unsupported: "请在 Telegram 内完成当前位置授权",
+      capturedAt: "定位获取时间",
+      accuracy: "定位精度",
+      meters: "米",
+    };
+  }
+  if (language === "km") {
+    return {
+      title: "ការផ្ទៀងផ្ទាត់ទីតាំងបច្ចុប្បន្ន",
+      description:
+        "ទីតាំងត្រូវបានប្រើសម្រាប់ការផ្ទៀងផ្ទាត់អត្តសញ្ញាណ និងតំបន់សេវាកម្មតែម្តងប៉ុណ្ណោះ ហើយមិនតាមដានជាបន្តទេ។ ប្រសិនបើមិនអាចយកទីតាំងបាន បុគ្គលិកអាចទាក់ទងអ្នកសម្រាប់ឯកសារបន្ថែម។",
+      authorize: "អនុញ្ញាតទីតាំងបច្ចុប្បន្ន",
+      confirm: "បញ្ជាក់ដាក់ស្នើការផ្ទៀងផ្ទាត់ទីតាំង",
+      recapture: "យកទីតាំងម្តងទៀត",
+      refresh: "ផ្ទុកស្ថានភាពឡើងវិញ",
+      idle: "មិនទាន់ដាក់ការផ្ទៀងផ្ទាត់ទីតាំងទេ",
+      pending: "បានយកទីតាំងរួចហើយ សូមបញ្ជាក់មុនដាក់ស្នើ",
+      success: "ការផ្ទៀងផ្ទាត់តំបន់សេវាកម្មត្រូវបានដាក់ស្នើរួច",
+      review: "ទិន្នន័យនេះនឹងចូលទៅការពិនិត្យដោយមនុស្ស",
+      lowAccuracy:
+        "ភាពត្រឹមត្រូវនៃទីតាំងមិនគ្រប់គ្រាន់ទេ សូមសាកល្បងម្ដងទៀតនៅកន្លែងដែលមានសញ្ញាល្អជាងនេះ",
+      unavailable:
+        "បច្ចុប្បន្នមិនអាចយកទីតាំងបានទេ ប៉ុន្តែអ្នកអាចបន្តដាក់ព័ត៌មានបាន",
+      cancelled: "មិនបានដាក់ការផ្ទៀងផ្ទាត់ទីតាំងលើកនេះទេ",
+      unsupported: "សូមបើក PayEase ក្នុង Telegram ដើម្បីអនុញ្ញាតទីតាំង",
+      capturedAt: "ពេលយកទីតាំង",
+      accuracy: "ភាពត្រឹមត្រូវ",
+      meters: "ម៉ែត្រ",
+    };
+  }
+  return {
+    title: "Current location check",
+    description:
+      "Location is used only for this identity and service-area check. We do not track you continuously. If it cannot be collected, our team may contact you for supporting details.",
+    authorize: "Authorize current location",
+    confirm: "Confirm and submit location check",
+    recapture: "Capture location again",
+    refresh: "Refresh location status",
+    idle: "No location check submitted yet",
+    pending: "Location captured. Please confirm before submitting the check.",
+    success: "Service-area check submitted",
+    review: "This application will continue to manual review",
+    lowAccuracy:
+      "Location accuracy is too low. Please try again where the signal is stronger.",
+    unavailable:
+      "Location is temporarily unavailable. You may still continue your submission.",
+    cancelled: "Location check was not submitted this time.",
+    unsupported: "Open PayEase inside Telegram to authorize location.",
+    capturedAt: "Captured at",
+    accuracy: "Accuracy",
+    meters: "m",
   };
 }
 
@@ -1046,7 +1124,7 @@ export function App(): JSX.Element {
   const [amountInput, setAmountInput] = useState("50");
   const [term, setTerm] = useState(30);
   const [selectedRepaymentMethod, setSelectedRepaymentMethod] =
-    useState<RepaymentMethod>("USER_MANUAL_PAYMENT");
+    useState<RepaymentMethod>("SMILE_WALLET_AUTHORIZATION");
   const [name, setName] = useState("");
   const [residentialAddress, setResidentialAddress] = useState("");
   const [phone, setPhone] = useState("");
@@ -1077,9 +1155,6 @@ export function App(): JSX.Element {
     postDisbursementBrokerageAuthorized,
     setPostDisbursementBrokerageAuthorized,
   ] = useState(false);
-  const [payrollDeductionAuthorized, setPayrollDeductionAuthorized] =
-    useState(false);
-  const [directDebitAuthorized, setDirectDebitAuthorized] = useState(false);
   const [repaymentProofFile, setRepaymentProofFile] = useState<File | null>(
     null,
   );
@@ -1094,6 +1169,13 @@ export function App(): JSX.Element {
   >();
   const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
   const [applicantSession, setApplicantSession] = useState(false);
+  const [kycLocation, setKycLocation] = useState<KycLocationStatus | null>(
+    null,
+  );
+  const [pendingKycLocation, setPendingKycLocation] =
+    useState<SingleKycLocationSnapshot | null>(null);
+  const [kycLocationNotice, setKycLocationNotice] = useState("");
+  const [kycLocationSubmitting, setKycLocationSubmitting] = useState(false);
   const [phoneVerification, setPhoneVerification] = useState<
     TelegramPhoneVerification | undefined
   >();
@@ -1101,6 +1183,7 @@ export function App(): JSX.Element {
   const [recoveryEntryPoints, setRecoveryEntryPoints] = useState<string[]>([]);
   const [withdrawalConfirmationRequested, setWithdrawalConfirmationRequested] =
     useState(false);
+  const [walletOperationNotice, setWalletOperationNotice] = useState("");
   const [serviceCaseType, setServiceCaseType] = useState<
     "SERVICE_QUERY" | "COMPLAINT"
   >("SERVICE_QUERY");
@@ -1118,71 +1201,10 @@ export function App(): JSX.Element {
   const t = labels[language];
   const factoryCopy = factoryFormCopy(language);
   const phoneCopy = phoneVerificationCopy(language);
+  const kycCopy = kycLocationCopy(language);
   const applicationCopy = applicationSectionCopy(language);
   const stepCopy = applicationStepCopy(language);
   const stepNavCopy = stepNavigationCopy(language);
-  const selectedEmployerTenant = employerTenants.find(
-    (tenant) => tenant.id === employerTenantId,
-  );
-  const availableRepaymentMethods =
-    selectedEmployerTenant?.availableRepaymentMethods ??
-    (["USER_MANUAL_PAYMENT"] as RepaymentMethod[]);
-  const defaultRepaymentMethod =
-    selectedEmployerTenant?.defaultRepaymentMethod ?? "USER_MANUAL_PAYMENT";
-  const repaymentMethodOptionCatalog: Array<{
-    value: RepaymentMethod;
-    label: string;
-    description: string;
-  }> = [
-    {
-      value: "EMPLOYER_PAYROLL_DEDUCTION",
-      label:
-        language === "en"
-          ? "Employer payroll"
-          : language === "km"
-            ? "កាត់ពីប្រាក់ខែ"
-            : "工资代扣",
-      description:
-        language === "en"
-          ? "The employer reports authorized principal-and-interest collection on the payroll date."
-          : language === "km"
-            ? "ក្រុមហ៊ុនរាយការណ៍ការកាត់ប្រាក់ដើមនិងការប្រាក់ដែលបានអនុញ្ញាតនៅថ្ងៃបើកប្រាក់។"
-            : "企业在已授权工资日回填本息回收结果。",
-    },
-    {
-      value: "USER_DIRECT_DEBIT",
-      label:
-        language === "en"
-          ? "Direct debit"
-          : language === "km"
-            ? "កាត់ដោយស្វ័យប្រវត្តិ"
-            : "自动扣款",
-      description:
-        language === "en"
-          ? "The licensed lender collects principal and interest through direct debit after your separate authorization."
-          : language === "km"
-            ? "ស្ថាប័នមានអាជ្ញាប័ណ្ណប្រមូលប្រាក់ដើមនិងការប្រាក់តាម direct debit បន្ទាប់ពីការអនុញ្ញាតដាច់ដោយឡែក។"
-            : "持牌机构在你单独授权后通过 direct debit 回收本息。",
-    },
-    {
-      value: "USER_MANUAL_PAYMENT",
-      label:
-        language === "en"
-          ? "Manual payment"
-          : language === "km"
-            ? "បង់ដោយខ្លួនឯង"
-            : "手动还款",
-      description:
-        language === "en"
-          ? "You follow the licensed lender's manual collection instructions when a bill is due."
-          : language === "km"
-            ? "អ្នកអនុវត្តតាមការណែនាំសងប្រាក់ដោយដៃរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណនៅពេលវិក្កយបត្រត្រូវបង់។"
-            : "账单到期时按持牌机构指引手动完成回收。",
-    },
-  ];
-  const repaymentMethodOptions = repaymentMethodOptionCatalog.filter((option) =>
-    availableRepaymentMethods.includes(option.value),
-  );
   const amountInputError =
     t.amountInvalid ?? "Enter an amount from USD 10.00 to 500.00.";
   const phoneInputError = t.phoneInvalid ?? "Enter a valid mobile number.";
@@ -1199,6 +1221,15 @@ export function App(): JSX.Element {
   const repaymentProofStatus: RepaymentProofStatus =
     repaymentProof?.status ?? "NOT_SUBMITTED";
   const repaymentProofReference = repaymentProof?.proofNo ?? "";
+  const usesControlledWalletRepayment = Boolean(
+    summary && summary.repayment.periodCount > 0,
+  );
+  const showLegacyRepaymentProofFlow = Boolean(
+    summary?.recordDetail?.canUploadPaymentProof &&
+    !usesControlledWalletRepayment &&
+    (repaymentProofStatus === "NOT_SUBMITTED" ||
+      repaymentProofStatus === "NEEDS_MORE"),
+  );
   const reassessmentRequest = summary?.reassessmentRequest ?? null;
   const reassessmentSubmitted = Boolean(reassessmentRequest);
 
@@ -1207,30 +1238,8 @@ export function App(): JSX.Element {
   }, [language]);
 
   useEffect(() => {
-    if (!employerTenantId) {
-      setSelectedRepaymentMethod("USER_MANUAL_PAYMENT");
-      setPayrollDeductionAuthorized(false);
-      setDirectDebitAuthorized(false);
-      return;
-    }
-    if (!availableRepaymentMethods.includes(selectedRepaymentMethod)) {
-      setSelectedRepaymentMethod(defaultRepaymentMethod);
-    }
-  }, [
-    availableRepaymentMethods,
-    defaultRepaymentMethod,
-    employerTenantId,
-    selectedRepaymentMethod,
-  ]);
-
-  useEffect(() => {
-    if (selectedRepaymentMethod !== "EMPLOYER_PAYROLL_DEDUCTION") {
-      setPayrollDeductionAuthorized(false);
-    }
-    if (selectedRepaymentMethod !== "USER_DIRECT_DEBIT") {
-      setDirectDebitAuthorized(false);
-    }
-  }, [selectedRepaymentMethod]);
+    setSelectedRepaymentMethod("SMILE_WALLET_AUTHORIZATION");
+  }, [employerTenantId]);
 
   useEffect(() => {
     currentPageRef.current = currentPage;
@@ -1330,14 +1339,12 @@ export function App(): JSX.Element {
         employerVerificationAuthorized,
         serviceAgreementAuthorized,
         postDisbursementBrokerageAuthorized,
-        payrollDeductionAuthorized,
-        directDebitAuthorized,
       } as ApplicationDraftValues,
       currentFormStep: formStep,
       restoreValues: (draft) => {
         setAmountInput(draft.amountInput);
         setTerm(draft.term);
-        setSelectedRepaymentMethod(draft.selectedRepaymentMethod);
+        setSelectedRepaymentMethod("SMILE_WALLET_AUTHORIZATION");
         setName(draft.name);
         setResidentialAddress(draft.residentialAddress);
         setPhone(draft.phone);
@@ -1360,8 +1367,6 @@ export function App(): JSX.Element {
         setPostDisbursementBrokerageAuthorized(
           draft.postDisbursementBrokerageAuthorized,
         );
-        setPayrollDeductionAuthorized(draft.payrollDeductionAuthorized);
-        setDirectDebitAuthorized(draft.directDebitAuthorized);
       },
       recoverApplicantSession,
       setStage,
@@ -1539,6 +1544,8 @@ export function App(): JSX.Element {
     setPhoneVerification(undefined);
     setPhoneVerificationNotice("");
     setVerifiedProfile(undefined);
+    setKycLocation(null);
+    setKycLocationNotice("");
     setProfilePhotoFailed(false);
     setFormStep("profile");
   }
@@ -1567,8 +1574,38 @@ export function App(): JSX.Element {
       return undefined;
     }
     setVerifiedProfile(payload);
+    setKycLocation(payload.kycLocation ?? null);
+    setPendingKycLocation(null);
     setProfilePhotoFailed(false);
     return payload;
+  }
+
+  async function loadKycLocationStatus(): Promise<void> {
+    if (!applicantSession) return;
+    try {
+      const response = await applicantRequest(
+        "/api/v1/local/public/kyc-location-evidence/status",
+      );
+      if (
+        !response ||
+        typeof response !== "object" ||
+        !("status" in response)
+      ) {
+        return;
+      }
+      if (response.status === 401) {
+        await recoverApplicantSession();
+        return;
+      }
+      const payload = (await response.json().catch(() => undefined)) as
+        { kycLocation?: KycLocationStatus | null } | undefined;
+      if (response.ok && payload && "kycLocation" in payload) {
+        setKycLocation(payload.kycLocation ?? null);
+        setPendingKycLocation(null);
+      }
+    } catch {
+      /* ignore optional status prefetch failures */
+    }
   }
 
   async function loadPhoneVerification(): Promise<void> {
@@ -1636,6 +1673,68 @@ export function App(): JSX.Element {
     };
   }, [applicantSession, stage]);
 
+  async function requestKycLocationEvidence(): Promise<void> {
+    setKycLocationSubmitting(true);
+    setKycLocationNotice("");
+    try {
+      const location = await requestTelegramSingleLocation(window);
+      if (location.kind !== "success") {
+        setKycLocationNotice(
+          location.kind === "unsupported"
+            ? kycCopy.unsupported
+            : kycCopy.cancelled,
+        );
+        return;
+      }
+      setPendingKycLocation(location.snapshot);
+      setKycLocationNotice(kycCopy.pending);
+    } finally {
+      setKycLocationSubmitting(false);
+    }
+  }
+
+  async function submitKycLocationEvidence(): Promise<void> {
+    if (!pendingKycLocation) return;
+    setKycLocationSubmitting(true);
+    setKycLocationNotice("");
+    try {
+      const response = await applicantRequest(
+        "/api/v1/local/public/kyc-location-evidence",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...pendingKycLocation,
+            consentVersion: "KYC_LOCATION_V1",
+          }),
+        },
+      );
+      if (response.status === 401 || response.status === 403) {
+        await recoverApplicantSession();
+        return;
+      }
+      const payload = (await response.json().catch(() => undefined)) as
+        { kycLocation?: KycLocationStatus; code?: string } | undefined;
+      if (!response.ok || !payload?.kycLocation) {
+        setKycLocationNotice(kycCopy.unavailable);
+        return;
+      }
+      setKycLocation(payload.kycLocation);
+      setPendingKycLocation(null);
+      setKycLocationNotice(
+        payload.kycLocation.assessmentResult === "MATCH"
+          ? kycCopy.success
+          : payload.kycLocation.assessmentResult === "LOW_ACCURACY"
+            ? kycCopy.lowAccuracy
+            : payload.kycLocation.assessmentResult === "UNAVAILABLE"
+              ? kycCopy.unavailable
+              : kycCopy.review,
+      );
+    } finally {
+      setKycLocationSubmitting(false);
+    }
+  }
+
   async function submit() {
     const amountMinor = requestedAmountMinor;
     if (!amountMinor) {
@@ -1702,32 +1801,6 @@ export function App(): JSX.Element {
       return;
     }
     if (
-      selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" &&
-      !payrollDeductionAuthorized
-    ) {
-      setError(
-        language === "en"
-          ? "Employer payroll deduction requires its own authorization."
-          : language === "km"
-            ? "ការកាត់ពីប្រាក់ខែត្រូវការការអនុញ្ញាតដាច់ដោយឡែក។"
-            : "工资代扣需要单独授权。",
-      );
-      return;
-    }
-    if (
-      selectedRepaymentMethod === "USER_DIRECT_DEBIT" &&
-      !directDebitAuthorized
-    ) {
-      setError(
-        language === "en"
-          ? "Direct debit requires its own authorization."
-          : language === "km"
-            ? "Direct debit ត្រូវការការអនុញ្ញាតដាច់ដោយឡែក។"
-            : "自动扣款需要单独授权。",
-      );
-      return;
-    }
-    if (
       applicantSession &&
       (!hasValidEmployerTenantSelection() ||
         !/^[A-Za-z0-9][A-Za-z0-9 -]{4,63}$/.test(identityDocumentNumber.trim()))
@@ -1752,13 +1825,11 @@ export function App(): JSX.Element {
             currency: "USD",
           },
           tenorDays: term,
-          selectedRepaymentMethod,
+          selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
           authorizationSnapshot: {
             employerVerificationAuthorized,
             serviceAgreementAuthorized,
             postDisbursementBrokerageAuthorized,
-            payrollDeductionAuthorized,
-            directDebitAuthorized,
           },
           ...(employerTenantId
             ? {
@@ -1880,8 +1951,11 @@ export function App(): JSX.Element {
       }
       const payload = (await response.json()) as UserSummary;
       if (!response.ok) throw new Error("STATUS_FAILED");
-      if (payload.workflow?.selectedRepaymentMethod) {
-        setSelectedRepaymentMethod(payload.workflow.selectedRepaymentMethod);
+      if (payload.workflow) {
+        setSelectedRepaymentMethod(
+          payload.workflow.selectedRepaymentMethod ??
+            "SMILE_WALLET_AUTHORIZATION",
+        );
         setEmployerVerificationAuthorized(
           payload.workflow.employerVerificationAuthorized ?? false,
         );
@@ -1890,12 +1964,6 @@ export function App(): JSX.Element {
         );
         setPostDisbursementBrokerageAuthorized(
           payload.workflow.postDisbursementBrokerageAuthorized ?? false,
-        );
-        setPayrollDeductionAuthorized(
-          payload.workflow.payrollDeductionAuthorized ?? false,
-        );
-        setDirectDebitAuthorized(
-          payload.workflow.directDebitAuthorized ?? false,
         );
       }
       setApprovedAmountMinor(
@@ -1911,6 +1979,7 @@ export function App(): JSX.Element {
       );
       setApplicationNo(targetApplicationNo);
       setSummary(payload);
+      setKycLocation(payload.kycLocation ?? null);
       setWithdrawalConfirmationRequested(false);
       setStage("offer");
       if (currentPage === "home") setCurrentPage("orders");
@@ -2070,6 +2139,59 @@ export function App(): JSX.Element {
           : language === "km"
             ? "មិនអាចកត់ត្រាការបញ្ជាក់របស់អ្នកបានទេ។ សូមព្យាយាមម្ដងទៀត។"
             : "暂时无法记录你的确认，请稍后重试。",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function startWalletOperationJump(
+    operationType: "WITHDRAWAL" | "REPAYMENT",
+  ) {
+    if (!applicationNo) return;
+    setLoading(true);
+    setError("");
+    setWalletOperationNotice("");
+    try {
+      const response = await applicantRequest(
+        `/api/v1/local/public/applications/${encodeURIComponent(applicationNo)}/wallet-operation-jumps`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ operationType }),
+        },
+      );
+      if (response.status === 401 || response.status === 403) {
+        await recoverApplicantSession();
+        return;
+      }
+      const payload = (await response.json().catch(() => undefined)) as
+        | {
+            walletOperationUrl?: string;
+            walletOperationJumpRef?: string;
+            expiresAt?: string;
+            code?: string;
+          }
+        | undefined;
+      if (!response.ok || typeof payload?.walletOperationUrl !== "string") {
+        throw new Error(payload?.code ?? "WALLET_OPERATION_JUMP_FAILED");
+      }
+      setWalletOperationNotice(
+        language === "en"
+          ? `Opening the SMILE wallet page for secure ${operationType === "REPAYMENT" ? "repayment" : "withdrawal"} authorization.`
+          : language === "zh-CN"
+            ? `正在打开 SMILE 受控钱包页以完成${operationType === "REPAYMENT" ? "还款" : "提现"}授权。`
+            : `កំពុងបើកទំព័រ SMILE wallet ដើម្បីបន្តការអនុញ្ញាត${operationType === "REPAYMENT" ? "សងប្រាក់" : "ដកប្រាក់"}។`,
+      );
+      window.open(payload.walletOperationUrl, "_self", "noopener,noreferrer");
+    } catch {
+      setError(
+        language === "en"
+          ? "We could not open the SMILE wallet page. Please try again."
+          : language === "zh-CN"
+            ? "暂时无法打开 SMILE 钱包页，请稍后重试。"
+            : "មិនអាចបើកទំព័រ SMILE wallet បានទេ សូមព្យាយាមម្តងទៀត។",
       );
     } finally {
       setLoading(false);
@@ -2427,14 +2549,16 @@ export function App(): JSX.Element {
     {
       label:
         language === "en"
-          ? "Repayment method"
+          ? "Repayment path"
           : language === "km"
-            ? "វិធីសងប្រាក់"
-            : "回收方式",
+            ? "ផ្លូវសងប្រាក់"
+            : "还款路径",
       value:
-        repaymentMethodOptions.find(
-          (item) => item.value === selectedRepaymentMethod,
-        )?.label ?? "—",
+        language === "en"
+          ? "SMILE wallet authorization"
+          : language === "km"
+            ? "ការអនុញ្ញាតតាម SMILE wallet"
+            : "SMILE 钱包授权",
     },
     { label: t.name ?? "", value: name.trim() || "—" },
     { label: t.phone ?? "", value: phone.trim() || "—" },
@@ -2484,20 +2608,6 @@ export function App(): JSX.Element {
               : language === "km"
                 ? "កម្រៃជើងសារបន្ទាប់ពីបើកប្រាក់"
                 : "放款后服务费应收"
-            : null,
-          payrollDeductionAuthorized
-            ? language === "en"
-              ? "Payroll deduction"
-              : language === "km"
-                ? "កាត់ពីប្រាក់ខែ"
-                : "工资代扣"
-            : null,
-          directDebitAuthorized
-            ? language === "en"
-              ? "Direct debit"
-              : language === "km"
-                ? "កាត់ដោយស្វ័យប្រវត្តិ"
-                : "自动扣款"
             : null,
         ]
           .filter(Boolean)
@@ -2678,10 +2788,10 @@ export function App(): JSX.Element {
                 : "មានប្រាក់កម្ចីកំពុងដំណើរការរួចហើយ សូមគ្រប់គ្រងវិក្កយបត្រមុន",
           description:
             language === "en"
-              ? "Upload payment proof and wait for manual verification before settlement."
+              ? "Open the SMILE wallet page from PayEase and complete bank authorization there."
               : language === "zh-CN"
-                ? "请先查看还款说明、上传凭证，并等待人工核验。"
-                : "សូមមើលសេចក្តីណែនាំសងប្រាក់ បញ្ចូនបង្កាន់ដៃ ហើយរង់ចាំការផ្ទៀងផ្ទាត់ដោយដៃ។",
+                ? "请先从 PayEase 打开 SMILE 钱包页，并在其中完成银行授权。"
+                : "សូមបើកទំព័រ SMILE wallet ពី PayEase ហើយបំពេញការអនុញ្ញាតធនាគារនៅទីនោះ។",
           disabled: false,
           cta:
             language === "en"
@@ -2824,11 +2934,98 @@ export function App(): JSX.Element {
         setCurrentPage("orders");
     }
   }
+
+  function kycLocationStatusSummary(
+    status: KycLocationStatus | null | undefined,
+  ): string {
+    if (!status) return kycCopy.idle;
+    switch (status.assessmentResult) {
+      case "MATCH":
+        return kycCopy.success;
+      case "LOW_ACCURACY":
+        return kycCopy.lowAccuracy;
+      case "UNAVAILABLE":
+        return kycCopy.unavailable;
+      case "OUT_OF_ZONE":
+      case "OUT_OF_COUNTRY":
+      default:
+        return kycCopy.review;
+    }
+  }
+
   return (
     <main className="shell" lang={language}>
       {(() => {
         const pageBody = (
           <>
+            {stage === "details" && formStep === "confirm" && (
+              <section className="application-card">
+                <h3>{kycCopy.title}</h3>
+                <p className="response-note">{kycCopy.description}</p>
+                <div className="reviewing">
+                  <span className="pulse" />
+                  {pendingKycLocation
+                    ? kycCopy.pending
+                    : kycLocationStatusSummary(kycLocation)}
+                </div>
+                {pendingKycLocation ? (
+                  <div className="response-note" style={{ marginTop: 12 }}>
+                    <div>
+                      {kycCopy.capturedAt}:{" "}
+                      {displayDate(pendingKycLocation.capturedAt)}
+                    </div>
+                    <div>
+                      {kycCopy.accuracy}:{" "}
+                      {Math.round(pendingKycLocation.horizontalAccuracyMeters)}
+                      {kycCopy.meters}
+                    </div>
+                  </div>
+                ) : null}
+                {kycLocation ? (
+                  <p className="response-note">
+                    {displayDate(kycLocation.submittedAt)}
+                    {" · "}
+                    {kycLocationStatusSummary(kycLocation)}
+                  </p>
+                ) : null}
+                <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+                  <button
+                    className="primary"
+                    disabled={!applicantSession || kycLocationSubmitting}
+                    onClick={() =>
+                      void (pendingKycLocation
+                        ? submitKycLocationEvidence()
+                        : requestKycLocationEvidence())
+                    }
+                  >
+                    {kycLocationSubmitting
+                      ? "…"
+                      : pendingKycLocation
+                        ? kycCopy.confirm
+                        : kycCopy.authorize}
+                  </button>
+                  {pendingKycLocation ? (
+                    <button
+                      className="secondary"
+                      disabled={!applicantSession || kycLocationSubmitting}
+                      onClick={() => void requestKycLocationEvidence()}
+                    >
+                      {kycCopy.recapture}
+                    </button>
+                  ) : null}
+                  <button
+                    className="secondary"
+                    disabled={!applicantSession || kycLocationSubmitting}
+                    onClick={() => void loadKycLocationStatus()}
+                  >
+                    {kycCopy.refresh}
+                  </button>
+                </div>
+                {kycLocationNotice ? (
+                  <p className="response-note">{kycLocationNotice}</p>
+                ) : null}
+              </section>
+            )}
             {(stage === "welcome" || stage === "details") && (
               <ApplicationFlow
                 stage={stage}
@@ -2843,8 +3040,6 @@ export function App(): JSX.Element {
                 terms={terms}
                 amountInput={amountInput}
                 term={term}
-                repaymentMethodOptions={repaymentMethodOptions}
-                selectedRepaymentMethod={selectedRepaymentMethod}
                 requestedAmountDisplay={
                   requestedAmountMinor
                     ? formatUsdMinor(requestedAmountMinor)
@@ -2879,8 +3074,6 @@ export function App(): JSX.Element {
                 postDisbursementBrokerageAuthorized={
                   postDisbursementBrokerageAuthorized
                 }
-                payrollDeductionAuthorized={payrollDeductionAuthorized}
-                directDebitAuthorized={directDebitAuthorized}
                 summaryItems={summaryItems}
                 loading={loading}
                 renderError={renderApplicantError}
@@ -2933,7 +3126,6 @@ export function App(): JSX.Element {
                 onLivenessPreparedChange={setLivenessPrepared}
                 onWealthProofAttachedChange={setWealthProofAttached}
                 onConsentChange={setConsent}
-                onSelectedRepaymentMethodChange={setSelectedRepaymentMethod}
                 onEmployerVerificationAuthorizedChange={
                   setEmployerVerificationAuthorized
                 }
@@ -2943,10 +3135,6 @@ export function App(): JSX.Element {
                 onPostDisbursementBrokerageAuthorizedChange={
                   setPostDisbursementBrokerageAuthorized
                 }
-                onPayrollDeductionAuthorizedChange={
-                  setPayrollDeductionAuthorized
-                }
-                onDirectDebitAuthorizedChange={setDirectDebitAuthorized}
               />
             )}
 
@@ -3543,22 +3731,43 @@ export function App(): JSX.Element {
                         )}
                         <section
                           className="next-payment"
-                          aria-label="Manual payment safety"
+                          aria-label="SMILE wallet authorization"
                         >
                           <strong>
                             {language === "en"
-                              ? "Manual payment safety"
+                              ? "Continue in SMILE wallet"
                               : language === "km"
-                                ? "សុវត្ថិភាពការទូទាត់ដោយដៃ"
-                                : "人工还款安全提示"}
+                                ? "បន្តនៅក្នុង SMILE wallet"
+                                : "前往 SMILE 钱包页"}
                           </strong>
                           <small>
                             {language === "en"
-                              ? "Confirm payment instructions with the licensed lender's operations team before paying. Do not transfer funds to account details sent through unverified messages."
+                              ? "PayEase will only create a one-time jump. Your repayment amount, bank authorization, and payment password are handled inside the licensed lender's SMILE wallet page."
                               : language === "km"
-                                ? "សូមបញ្ជាក់ការណែនាំទូទាត់ជាមួយក្រុមប្រតិបត្តិរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណមុនពេលបង់ប្រាក់។ កុំផ្ទេរប្រាក់ទៅគណនីដែលផ្ញើតាមសារមិនបានផ្ទៀងផ្ទាត់។"
-                                : "付款前请先确认还款指引；请勿向未经核验的消息中提供的账户转账。"}
+                                ? "PayEase បង្កើតតែការលោតម្តងតែមួយប៉ុណ្ណោះ។ ចំនួនទឹកប្រាក់សង ការអនុញ្ញាតធនាគារ និងពាក្យសម្ងាត់ទូទាត់របស់អ្នក នឹងត្រូវដំណើរការនៅក្នុងទំព័រ SMILE wallet របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ។"
+                                : "PayEase 只负责创建一次性跳转；还款金额、银行授权和支付密码都只在持牌机构的 SMILE 钱包页内处理。"}
                           </small>
+                          {summary.repayment.unpaidPeriods > 0 ? (
+                            <button
+                              type="button"
+                              className="primary"
+                              disabled={loading}
+                              onClick={() =>
+                                void startWalletOperationJump("REPAYMENT")
+                              }
+                            >
+                              {language === "en"
+                                ? "Open SMILE wallet"
+                                : language === "km"
+                                  ? "បើក SMILE wallet"
+                                  : "打开 SMILE 钱包页"}
+                            </button>
+                          ) : null}
+                          {walletOperationNotice ? (
+                            <p className="response-note">
+                              {walletOperationNotice}
+                            </p>
+                          ) : null}
                         </section>
                         <div className="installments">
                           {summary.repayment.installments.map((item) => (
@@ -4497,22 +4706,43 @@ export function App(): JSX.Element {
                               )}
                               <section
                                 className="next-payment"
-                                aria-label="Manual payment safety"
+                                aria-label="SMILE wallet authorization"
                               >
                                 <strong>
                                   {language === "en"
-                                    ? "Manual payment safety"
+                                    ? "Continue in SMILE wallet"
                                     : language === "km"
-                                      ? "សុវត្ថិភាពការទូទាត់ដោយដៃ"
-                                      : "人工还款安全提示"}
+                                      ? "បន្តនៅក្នុង SMILE wallet"
+                                      : "前往 SMILE 钱包页"}
                                 </strong>
                                 <small>
                                   {language === "en"
-                                    ? "Confirm payment instructions with the licensed lender's operations team before paying. Do not transfer funds to account details sent through unverified messages."
+                                    ? "PayEase will only create a one-time jump. Your repayment amount, bank authorization, and payment password are handled inside the licensed lender's SMILE wallet page."
                                     : language === "km"
-                                      ? "សូមបញ្ជាក់ការណែនាំទូទាត់ជាមួយក្រុមប្រតិបត្តិរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណមុនពេលបង់ប្រាក់។ កុំផ្ទេរប្រាក់ទៅគណនីដែលផ្ញើតាមសារមិនបានផ្ទៀងផ្ទាត់។"
-                                      : "付款前请先确认还款指引；请勿向未经核验的消息中提供的账户转账。"}
+                                      ? "PayEase បង្កើតតែការលោតម្តងតែមួយប៉ុណ្ណោះ។ ចំនួនទឹកប្រាក់សង ការអនុញ្ញាតធនាគារ និងពាក្យសម្ងាត់ទូទាត់របស់អ្នក នឹងត្រូវដំណើរការនៅក្នុងទំព័រ SMILE wallet របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ។"
+                                      : "PayEase 只负责创建一次性跳转；还款金额、银行授权和支付密码都只在持牌机构的 SMILE 钱包页内处理。"}
                                 </small>
+                                {summary.repayment.unpaidPeriods > 0 ? (
+                                  <button
+                                    type="button"
+                                    className="primary"
+                                    disabled={loading}
+                                    onClick={() =>
+                                      void startWalletOperationJump("REPAYMENT")
+                                    }
+                                  >
+                                    {language === "en"
+                                      ? "Open SMILE wallet"
+                                      : language === "km"
+                                        ? "បើក SMILE wallet"
+                                        : "打开 SMILE 钱包页"}
+                                  </button>
+                                ) : null}
+                                {walletOperationNotice ? (
+                                  <p className="response-note">
+                                    {walletOperationNotice}
+                                  </p>
+                                ) : null}
                               </section>
                               <div className="installments">
                                 {summary.repayment.installments.map((item) => (
@@ -4785,35 +5015,41 @@ export function App(): JSX.Element {
                         aria-label="Active bill"
                       >
                         <strong>
-                          {repaymentProofStatus === "UNDER_REVIEW"
+                          {usesControlledWalletRepayment
                             ? language === "en"
-                              ? "Payment proof pending manual verification"
+                              ? "SMILE wallet authorization required"
                               : language === "zh-CN"
-                                ? "付款凭证待人工核验"
-                                : "បង្កាន់ដៃរង់ចាំការផ្ទៀងផ្ទាត់ដោយដៃ"
-                            : repaymentProofStatus === "NEEDS_MORE"
+                                ? "需要前往 SMILE 钱包页授权"
+                                : "ត្រូវបន្តការអនុញ្ញាតតាម SMILE wallet"
+                            : repaymentProofStatus === "UNDER_REVIEW"
                               ? language === "en"
-                                ? "Payment proof needs more information"
+                                ? "Payment proof pending manual verification"
                                 : language === "zh-CN"
-                                  ? "付款凭证需要补充"
-                                  : "បង្កាន់ដៃត្រូវការព័ត៌មានបន្ថែម"
-                              : repaymentProofStatus === "RECONCILED"
+                                  ? "付款凭证待人工核验"
+                                  : "បង្កាន់ដៃរង់ចាំការផ្ទៀងផ្ទាត់ដោយដៃ"
+                              : repaymentProofStatus === "NEEDS_MORE"
                                 ? language === "en"
-                                  ? "Bill reconciled"
+                                  ? "Payment proof needs more information"
                                   : language === "zh-CN"
-                                    ? "账单已核销"
-                                    : "វិក្កយបត្រត្រូវបានកត់ត្រារួច"
-                                : summary.repayment.overduePeriods > 0
+                                    ? "付款凭证需要补充"
+                                    : "បង្កាន់ដៃត្រូវការព័ត៌មានបន្ថែម"
+                                : repaymentProofStatus === "RECONCILED"
                                   ? language === "en"
-                                    ? "Bill overdue"
+                                    ? "Bill reconciled"
                                     : language === "zh-CN"
-                                      ? "账单已逾期"
-                                      : "វិក្កយបត្រហួសកាលកំណត់"
-                                  : language === "en"
-                                    ? "Active bill"
-                                    : language === "zh-CN"
-                                      ? "待处理账单"
-                                      : "វិក្កយបត្រកំពុងដំណើរការ"}
+                                      ? "账单已核销"
+                                      : "វិក្កយបត្រត្រូវបានកត់ត្រារួច"
+                                  : summary.repayment.overduePeriods > 0
+                                    ? language === "en"
+                                      ? "Bill overdue"
+                                      : language === "zh-CN"
+                                        ? "账单已逾期"
+                                        : "វិក្កយបត្រហួសកាលកំណត់"
+                                    : language === "en"
+                                      ? "Active bill"
+                                      : language === "zh-CN"
+                                        ? "待处理账单"
+                                        : "វិក្កយបត្រកំពុងដំណើរការ"}
                         </strong>
                         <span>
                           {summary.repayment.nextInstallment
@@ -4825,17 +5061,23 @@ export function App(): JSX.Element {
                                 : "មិនមានវគ្គបន្ទាប់"}
                         </span>
                         <small>
-                          {repaymentProofStatus === "UNDER_REVIEW"
+                          {usesControlledWalletRepayment
                             ? language === "en"
-                              ? "Payment proof submitted. This does not mean the bill is settled."
+                              ? "Use PayEase to open the licensed lender's SMILE wallet page, then complete bank authorization there. The bill updates only after the signed callback returns."
                               : language === "zh-CN"
-                                ? "付款凭证已提交，不代表已完成结清。"
-                                : "បង្កាន់ដៃបានដាក់ស្នើ ប៉ុន្តែមិនមានន័យថាបានបិទបញ្ចប់រួចទេ។"
-                            : language === "en"
-                              ? "Check the repayment steps and upload proof after you complete the offline transfer."
-                              : language === "zh-CN"
-                                ? "请先查看收款说明，完成线下付款后再上传凭证。"
-                                : "សូមមើលការណែនាំសងប្រាក់សិន ហើយបន្ទាប់ពីផ្ទេរប្រាក់ក្រៅប្រព័ន្ធ សូមបញ្ចូនបង្កាន់ដៃ។"}
+                                ? "请通过 PayEase 打开持牌机构的 SMILE 钱包页，并在其中完成银行授权；账单仅在验签回调返回后更新。"
+                                : "សូមប្រើ PayEase ដើម្បីបើកទំព័រ SMILE wallet របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ ហើយបំពេញការអនុញ្ញាតធនាគារនៅទីនោះ។ វិក្កយបត្រនឹងអាប់ដេតតែនៅពេលការហៅត្រឡប់ដែលបានផ្ទៀងផ្ទាត់ត្រឡប់មកវិញ។"
+                            : repaymentProofStatus === "UNDER_REVIEW"
+                              ? language === "en"
+                                ? "Payment proof submitted. This does not mean the bill is settled."
+                                : language === "zh-CN"
+                                  ? "付款凭证已提交，不代表已完成结清。"
+                                  : "បង្កាន់ដៃបានដាក់ស្នើ ប៉ុន្តែមិនមានន័យថាបានបិទបញ្ចប់រួចទេ។"
+                              : language === "en"
+                                ? "Check the repayment steps and upload proof after you complete the offline transfer."
+                                : language === "zh-CN"
+                                  ? "请先查看收款说明，完成线下付款后再上传凭证。"
+                                  : "សូមមើលការណែនាំសងប្រាក់សិន ហើយបន្ទាប់ពីផ្ទេរប្រាក់ក្រៅប្រព័ន្ធ សូមបញ្ចូនបង្កាន់ដៃ។"}
                         </small>
                       </section>
                       <section
@@ -4844,25 +5086,25 @@ export function App(): JSX.Element {
                       >
                         {[
                           language === "en"
-                            ? "1. Review collection instructions"
+                            ? "1. Review the current bill and next installment"
                             : language === "zh-CN"
-                              ? "1. 查看收款说明"
-                              : "1. មើលការណែនាំទទួលប្រាក់",
+                              ? "1. 查看当前账单与下一期"
+                              : "1. មើលវិក្កយបត្របច្ចុប្បន្ន និងវគ្គបន្ទាប់",
                           language === "en"
-                            ? "2. Complete the offline payment"
+                            ? "2. Open the SMILE wallet page from PayEase"
                             : language === "zh-CN"
-                              ? "2. 完成线下付款"
-                              : "2. បង់ប្រាក់ក្រៅប្រព័ន្ធ",
+                              ? "2. 从 PayEase 打开 SMILE 钱包页"
+                              : "2. បើកទំព័រ SMILE wallet ពី PayEase",
                           language === "en"
-                            ? "3. Upload payment proof"
+                            ? "3. Complete bank authorization inside SMILE"
                             : language === "zh-CN"
-                              ? "3. 上传付款凭证"
-                              : "3. បញ្ចូនបង្កាន់ដៃ",
+                              ? "3. 在 SMILE 内完成银行授权"
+                              : "3. បំពេញការអនុញ្ញាតធនាគារនៅក្នុង SMILE",
                           language === "en"
-                            ? "4. Wait for manual verification"
+                            ? "4. Wait for the licensed lender's signed callback"
                             : language === "zh-CN"
-                              ? "4. 等待人工核验"
-                              : "4. រង់ចាំការផ្ទៀងផ្ទាត់ដោយដៃ",
+                              ? "4. 等待持牌机构验签回调"
+                              : "4. រង់ចាំការហៅត្រឡប់ដែលបានផ្ទៀងផ្ទាត់របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ",
                         ].map((step) => (
                           <div key={step} className="repayment-step-item">
                             {step}
@@ -4967,44 +5209,63 @@ export function App(): JSX.Element {
                       )}
                       <section
                         className="next-payment"
-                        aria-label="Manual payment safety"
+                        aria-label="SMILE wallet authorization"
                       >
                         <strong>
                           {language === "en"
-                            ? "Manual payment safety"
+                            ? "Continue in SMILE wallet"
                             : language === "km"
-                              ? "សុវត្ថិភាពការទូទាត់ដោយដៃ"
-                              : "人工还款安全提示"}
+                              ? "បន្តនៅក្នុង SMILE wallet"
+                              : "前往 SMILE 钱包页"}
                         </strong>
                         <small>
                           {language === "en"
-                            ? "Confirm payment instructions with the licensed lender's operations team before paying. Do not transfer funds to account details sent through unverified messages."
+                            ? "PayEase will only create a one-time jump. Your repayment amount, bank authorization, and payment password are handled inside the licensed lender's SMILE wallet page."
                             : language === "km"
-                              ? "សូមបញ្ជាក់ការណែនាំទូទាត់ជាមួយក្រុមប្រតិបត្តិរបស់ស្ថាប័នមានអាជ្ញាប័ណ្ណមុនពេលបង់ប្រាក់។ កុំផ្ទេរប្រាក់ទៅគណនីដែលផ្ញើតាមសារមិនបានផ្ទៀងផ្ទាត់។"
-                              : "付款前请先确认还款指引；请勿向未经核验的消息中提供的账户转账。"}
+                              ? "PayEase បង្កើតតែការលោតម្តងតែមួយប៉ុណ្ណោះ។ ចំនួនទឹកប្រាក់សង ការអនុញ្ញាតធនាគារ និងពាក្យសម្ងាត់ទូទាត់របស់អ្នក នឹងត្រូវដំណើរការនៅក្នុងទំព័រ SMILE wallet របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ។"
+                              : "PayEase 只负责创建一次性跳转；还款金额、银行授权和支付密码都只在持牌机构的 SMILE 钱包页内处理。"}
                         </small>
+                        {summary.repayment.unpaidPeriods > 0 ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={loading}
+                            onClick={() =>
+                              void startWalletOperationJump("REPAYMENT")
+                            }
+                          >
+                            {language === "en"
+                              ? "Open SMILE wallet"
+                              : language === "km"
+                                ? "បើក SMILE wallet"
+                                : "打开 SMILE 钱包页"}
+                          </button>
+                        ) : null}
+                        {walletOperationNotice ? (
+                          <p className="response-note">
+                            {walletOperationNotice}
+                          </p>
+                        ) : null}
                       </section>
-                      <section
-                        className="proof-uploader"
-                        aria-label="Payment proof upload"
-                      >
-                        <strong>
-                          {language === "en"
-                            ? "Payment proof"
-                            : language === "zh-CN"
-                              ? "付款凭证"
-                              : "បង្កាន់ដៃបង់ប្រាក់"}
-                        </strong>
-                        <small>
-                          {language === "en"
-                            ? "Only upload approved images or PDF files, and hide unnecessary sensitive information first."
-                            : language === "zh-CN"
-                              ? "仅上传白名单图片或 PDF，并请先遮盖不必要的敏感信息。"
-                              : "សូមបញ្ចូលតែរូបភាព ឬ PDF ដែលបានអនុញ្ញាត និងលាក់ព័ត៌មានរសើបដែលមិនចាំបាច់ជាមុន។"}
-                        </small>
-                        {summary?.recordDetail?.canUploadPaymentProof &&
-                        (repaymentProofStatus === "NOT_SUBMITTED" ||
-                          repaymentProofStatus === "NEEDS_MORE") ? (
+                      {showLegacyRepaymentProofFlow ? (
+                        <section
+                          className="proof-uploader"
+                          aria-label="Payment proof upload"
+                        >
+                          <strong>
+                            {language === "en"
+                              ? "Legacy payment proof"
+                              : language === "zh-CN"
+                                ? "历史付款凭证"
+                                : "បង្កាន់ដៃបង់ប្រាក់ចាស់"}
+                          </strong>
+                          <small>
+                            {language === "en"
+                              ? "Only use this compatibility upload for historical cases that are still waiting for manual reconciliation."
+                              : language === "zh-CN"
+                                ? "该上传入口仅用于仍在人工核销中的历史订单兼容处理。"
+                                : "ប្រើការបញ្ចូលនេះសម្រាប់តែសំណុំរឿងចាស់ដែលនៅរង់ចាំការកត់ត្រាដោយដៃប៉ុណ្ណោះ។"}
+                          </small>
                           <>
                             <input
                               type="file"
@@ -5034,8 +5295,13 @@ export function App(): JSX.Element {
                                     : "បញ្ចូលបង្កាន់ដៃ"}
                             </button>
                           </>
-                        ) : null}
-                        {repaymentProofReference ? (
+                        </section>
+                      ) : null}
+                      {repaymentProofReference ? (
+                        <section
+                          className="proof-uploader"
+                          aria-label="Legacy proof status"
+                        >
                           <p className="response-note">
                             {language === "en"
                               ? `Submitted reference: ${repaymentProofReference}. Payment proof submitted. This does not mean the bill is settled.`
@@ -5043,17 +5309,17 @@ export function App(): JSX.Element {
                                 ? `已提交参考编号：${repaymentProofReference}。付款凭证已提交，不代表已完成结清。`
                                 : `លេខយោងដែលបានដាក់ស្នើ៖ ${repaymentProofReference}។ បង្កាន់ដៃបានដាក់ស្នើ ប៉ុន្តែមិនមានន័យថាបានបិទបញ្ចប់រួចទេ។`}
                           </p>
-                        ) : null}
-                        {repaymentProof?.fileName ? (
-                          <p className="response-note">
-                            {language === "en"
-                              ? `Latest file: ${repaymentProof.fileName} · ${displayDate(repaymentProof.submittedAt)}`
-                              : language === "zh-CN"
-                                ? `最近上传：${repaymentProof.fileName} · ${displayDate(repaymentProof.submittedAt)}`
-                                : `ឯកសារចុងក្រោយ៖ ${repaymentProof.fileName} · ${displayDate(repaymentProof.submittedAt)}`}
-                          </p>
-                        ) : null}
-                      </section>
+                          {repaymentProof?.fileName ? (
+                            <p className="response-note">
+                              {language === "en"
+                                ? `Latest file: ${repaymentProof.fileName} · ${displayDate(repaymentProof.submittedAt)}`
+                                : language === "zh-CN"
+                                  ? `最近上传：${repaymentProof.fileName} · ${displayDate(repaymentProof.submittedAt)}`
+                                  : `ឯកសារចុងក្រោយ៖ ${repaymentProof.fileName} · ${displayDate(repaymentProof.submittedAt)}`}
+                            </p>
+                          ) : null}
+                        </section>
+                      ) : null}
                       <div className="installments">
                         {summary.repayment.installments.map((item) => (
                           <div key={item.installmentNo}>
@@ -5262,6 +5528,15 @@ export function App(): JSX.Element {
                 : language === "zh-CN"
                   ? "暂无待处理账单"
                   : "មិនមានវិក្កយបត្រកំពុងដំណើរការ";
+            const kycLocationLabel =
+              language === "en"
+                ? "Location check"
+                : language === "zh-CN"
+                  ? "定位核验"
+                  : "ការផ្ទៀងផ្ទាត់ទីតាំង";
+            const kycLocationSummary = kycLocation
+              ? `${kycLocationStatusSummary(kycLocation)} · ${displayDate(kycLocation.submittedAt)}`
+              : kycCopy.idle;
             return (
               <HomePage
                 language={language}
@@ -5292,6 +5567,8 @@ export function App(): JSX.Element {
                   currentFactory={currentFactory}
                   applicationSummary={applicationSummary}
                   billSummary={billSummary}
+                  kycLocationLabel={kycLocationLabel}
+                  kycLocationSummary={kycLocationSummary}
                   languageLabel={languageLabel}
                   serviceCaseType={serviceCaseType}
                   onServiceCaseTypeChange={setServiceCaseType}

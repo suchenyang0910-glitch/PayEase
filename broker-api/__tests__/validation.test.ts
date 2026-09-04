@@ -6,7 +6,11 @@ import {
   disbursementDualControlSchema,
   employerCollectionVerificationSchema,
   applicantSupplementResponseSchema,
+  kycLocationEvidenceCreateSchema,
   lenderFinalReviewSchema,
+  serviceAreaZoneCreateSchema,
+  serviceAreaZoneDraftPatchSchema,
+  walletOperationJumpCreateSchema,
 } from "../src/validation.js";
 
 const baseCreateApplicationPayload = {
@@ -14,13 +18,11 @@ const baseCreateApplicationPayload = {
   preferredLanguage: "km" as const,
   requestedAmount: { amountMinor: "10000", currency: "USD" as const },
   tenorDays: 30 as const,
-  selectedRepaymentMethod: "USER_MANUAL_PAYMENT" as const,
+  selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION" as const,
   authorizationSnapshot: {
     employerVerificationAuthorized: true as const,
     serviceAgreementAuthorized: true as const,
     postDisbursementBrokerageAuthorized: true as const,
-    payrollDeductionAuthorized: false,
-    directDebitAuthorized: false,
   },
 };
 
@@ -30,7 +32,7 @@ describe("controlled-pilot application validation", () => {
       createApplicationSchema.parse(baseCreateApplicationPayload),
     ).toMatchObject({
       tenorDays: 30,
-      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
     });
   });
 
@@ -71,7 +73,7 @@ describe("controlled-pilot application validation", () => {
     ).toBe(false);
   });
 
-  it("requires method-specific authorization snapshots", () => {
+  it("locks new applications to SMILE wallet authorization", () => {
     expect(
       createApplicationSchema.safeParse({
         ...baseCreateApplicationPayload,
@@ -81,13 +83,12 @@ describe("controlled-pilot application validation", () => {
     expect(
       createApplicationSchema.safeParse({
         ...baseCreateApplicationPayload,
-        selectedRepaymentMethod: "USER_DIRECT_DEBIT",
         authorizationSnapshot: {
           ...baseCreateApplicationPayload.authorizationSnapshot,
           directDebitAuthorized: true,
         },
       }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("requires distinct maker and checker roles for disbursement control", () => {
@@ -211,6 +212,107 @@ describe("controlled-pilot application validation", () => {
         collectionSequence: 3,
         actualCollectedAmountMinor: "1",
         evidenceReference: "PAYROLL-EVIDENCE-002",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects unknown sensitive fields on wallet operation jump creation", () => {
+    expect(
+      walletOperationJumpCreateSchema.safeParse({
+        operationType: "WITHDRAWAL",
+        requestedAmountMinor: "20000",
+      }).success,
+    ).toBe(false);
+    expect(
+      walletOperationJumpCreateSchema.safeParse({
+        operationType: "REPAYMENT",
+        otp: "123456",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("validates service area zone polygons and tenant scope rules", () => {
+    const valid = {
+      zoneRef: "ZONE-PPH-001",
+      displayName: "Phnom Penh service area",
+      scopeType: "PLATFORM" as const,
+      polygonGeoJson: {
+        type: "Polygon" as const,
+        coordinates: [
+          [
+            [104.9, 11.56],
+            [104.93, 11.56],
+            [104.93, 11.59],
+            [104.9, 11.56],
+          ],
+        ],
+      },
+      effectiveFrom: "2026-09-01T00:00:00.000Z",
+      effectiveUntil: "2026-12-01T00:00:00.000Z",
+      changeReason: "Initial rollout",
+    };
+    expect(serviceAreaZoneCreateSchema.safeParse(valid).success).toBe(true);
+    expect(
+      serviceAreaZoneCreateSchema.safeParse({
+        ...valid,
+        scopeType: "EMPLOYER_TENANT",
+      }).success,
+    ).toBe(false);
+    expect(
+      serviceAreaZoneDraftPatchSchema.safeParse({
+        displayName: valid.displayName,
+        scopeType: "EMPLOYER_TENANT",
+        employerTenantId: "4c16e7c6-6a31-4d22-9f47-4b5f9f6db201",
+        polygonGeoJson: valid.polygonGeoJson,
+        effectiveFrom: valid.effectiveFrom,
+        effectiveUntil: valid.effectiveUntil,
+        changeReason: valid.changeReason,
+      }).success,
+    ).toBe(true);
+    expect(
+      serviceAreaZoneCreateSchema.safeParse({
+        ...valid,
+        polygonGeoJson: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [104.9, 11.56],
+              [104.93, 11.59],
+              [104.9, 11.56],
+            ],
+          ],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts only strict KYC location evidence payloads", () => {
+    expect(
+      kycLocationEvidenceCreateSchema.safeParse({
+        latitude: 11.5564,
+        longitude: 104.9282,
+        horizontalAccuracyMeters: 80,
+        capturedAt: "2026-09-01T10:00:00.000Z",
+        consentVersion: "KYC_LOCATION_V1",
+      }).success,
+    ).toBe(true);
+    expect(
+      kycLocationEvidenceCreateSchema.safeParse({
+        latitude: 11.5564,
+        longitude: 104.9282,
+        horizontalAccuracyMeters: 80,
+        capturedAt: "2026-09-01T10:00:00.000Z",
+        consentVersion: "KYC_LOCATION_V1",
+        zoneRef: "ZONE-PPH-001",
+      }).success,
+    ).toBe(false);
+    expect(
+      kycLocationEvidenceCreateSchema.safeParse({
+        latitude: 91,
+        longitude: 104.9282,
+        horizontalAccuracyMeters: 80,
+        capturedAt: "2026-09-01T10:00:00.000Z",
+        consentVersion: "bad",
       }).success,
     ).toBe(false);
   });

@@ -1,0 +1,30 @@
+{
+  "name": "@payease/lender-wallet-service",
+  "version": "0.1.0-v1",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Independent lender-domain wallet service for SMILE-controlled wallet entry and ticket exchange.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run __tests__",
+    "test:integration": "node scripts/require-integration-database.mjs && vitest run __tests__/wallet-runtime.integration.test.ts __tests__/wallet-http.integration.test.ts",
+    "lint": "echo 'lender-wallet-service lint placeholder'"
+  },
+  "dependencies": {
+    "@payease/shared-security": "workspace:*",
+    "fastify": "^5.3.0",
+    "pg": "^8.14.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.11",
+    "tsx": "^4.19.3",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
+  }
+}

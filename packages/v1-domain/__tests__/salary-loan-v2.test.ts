@@ -131,34 +131,22 @@ describe("salary loan v2 Day 1 rules", () => {
     ).toThrow(/unique nodeRef/i);
   });
 
-  it("requires authorization before enabling payroll deduction or direct debit", () => {
-    expect(() =>
+  it("accepts only SMILE wallet authorization for new repayment method snapshots", () => {
+    expect(
       createRepaymentMethodSnapshot({
-        repaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+        repaymentMethod: "SMILE_WALLET_AUTHORIZATION",
         employerPayrollRule: DEFAULT_EMPLOYER_PAYROLL_RULE_V2,
         collectionPayeeRef: "LENDER-COLLECTION-ACCOUNT",
         frozenAt: "2026-08-21T09:00:00.000Z",
       }),
-    ).toThrow(/userAuthorizationRef/);
-
-    expect(() =>
-      createRepaymentMethodSnapshot({
-        repaymentMethod: "USER_DIRECT_DEBIT",
-        employerPayrollRule: {
-          ...DEFAULT_EMPLOYER_PAYROLL_RULE_V2,
-          allowedRepaymentMethods: ["USER_DIRECT_DEBIT", "USER_MANUAL_PAYMENT"],
-          defaultRepaymentMethod: "USER_MANUAL_PAYMENT",
-        },
-        collectionPayeeRef: "LENDER-COLLECTION-ACCOUNT",
-        frozenAt: "2026-08-21T09:00:00.000Z",
-        userAuthorizationRef: "AUTH-001",
-      }),
-    ).toThrow(/not enabled/);
+    ).toMatchObject({
+      repaymentMethod: "SMILE_WALLET_AUTHORIZATION",
+    });
   });
 
   it("freezes one-node repayment plan with T-3/T-1/T reminders and a 3-day buffer", () => {
     const method = createRepaymentMethodSnapshot({
-      repaymentMethod: "USER_MANUAL_PAYMENT",
+      repaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       employerPayrollRule: DEFAULT_EMPLOYER_PAYROLL_RULE_V2,
       collectionPayeeRef: "LENDER-COLLECTION-ACCOUNT",
       frozenAt: "2026-08-21T09:00:00.000Z",
@@ -195,9 +183,8 @@ describe("salary loan v2 Day 1 rules", () => {
 
   it("splits odd cents into the second installment on a two-node plan", () => {
     const method = createRepaymentMethodSnapshot({
-      repaymentMethod: "EMPLOYER_PAYROLL_DEDUCTION",
+      repaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       employerPayrollRule: DEFAULT_EMPLOYER_PAYROLL_RULE_V2,
-      userAuthorizationRef: "PAYROLL-AUTH-001",
       collectionPayeeRef: "LENDER-COLLECTION-ACCOUNT",
       frozenAt: "2026-08-21T09:00:00.000Z",
     });
@@ -266,7 +253,7 @@ describe("salary loan v2 Day 1 rules", () => {
 
   it("rejects repayment plans that try to use more payroll nodes than the employer provides", () => {
     const method = createRepaymentMethodSnapshot({
-      repaymentMethod: "USER_MANUAL_PAYMENT",
+      repaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       employerPayrollRule: {
         ...DEFAULT_EMPLOYER_PAYROLL_RULE_V2,
         payrollNodes: [

@@ -8,8 +8,7 @@ type ApplicationDraftStage = "welcome" | "details";
 export type ApplicationDraftValues = Readonly<{
   amountInput: string;
   term: number;
-  selectedRepaymentMethod:
-    "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
+  selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION";
   name: string;
   residentialAddress: string;
   phone: string;
@@ -30,8 +29,6 @@ export type ApplicationDraftValues = Readonly<{
   employerVerificationAuthorized: boolean;
   serviceAgreementAuthorized: boolean;
   postDisbursementBrokerageAuthorized: boolean;
-  payrollDeductionAuthorized: boolean;
-  directDebitAuthorized: boolean;
 }>;
 
 type StoredApplicationDraft = Readonly<{
@@ -43,6 +40,29 @@ type StoredApplicationDraft = Readonly<{
   ApplicationDraftValues;
 
 type ServerApplicationDraft = Omit<StoredApplicationDraft, "ownerKey">;
+
+/**
+ * A Telegram WebView may keep localStorage after a person closes the Mini App
+ * or hands the device to someone else. Keep only navigation and low-sensitivity
+ * preference state locally; personal, identity, contact and bank data belong in
+ * the encrypted, session-bound server draft.
+ */
+type LocalApplicationDraft = Readonly<{
+  version: 1;
+  ownerKey: string;
+  stage: ApplicationDraftStage;
+  formStep: ApplicationFormStep;
+  amountInput: string;
+  term: number;
+  selectedRepaymentMethod: ApplicationDraftValues["selectedRepaymentMethod"];
+  employerTenantId: string;
+  livenessPrepared: boolean;
+  wealthProofAttached: boolean;
+  consent: boolean;
+  employerVerificationAuthorized: boolean;
+  serviceAgreementAuthorized: boolean;
+  postDisbursementBrokerageAuthorized: boolean;
+}>;
 
 type TelegramWebApp = Readonly<{
   initDataUnsafe?: { user?: { id?: number } };
@@ -94,7 +114,7 @@ function readStoredApplicationDraft(): StoredApplicationDraft | undefined {
   try {
     const raw = window.localStorage.getItem(APPLICATION_DRAFT_STORAGE_KEY);
     if (!raw) return undefined;
-    const parsed = JSON.parse(raw) as Partial<StoredApplicationDraft>;
+    const parsed = JSON.parse(raw) as Partial<LocalApplicationDraft>;
     if (
       parsed.version !== 1 ||
       parsed.ownerKey !== applicationDraftOwnerKey() ||
@@ -114,52 +134,26 @@ function readStoredApplicationDraft(): StoredApplicationDraft | undefined {
         typeof parsed.amountInput === "string" ? parsed.amountInput : "50",
       term: parsed.term === 15 ? 15 : 30,
       selectedRepaymentMethod:
-        parsed.selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" ||
-        parsed.selectedRepaymentMethod === "USER_DIRECT_DEBIT"
+        parsed.selectedRepaymentMethod === "SMILE_WALLET_AUTHORIZATION"
           ? parsed.selectedRepaymentMethod
-          : "USER_MANUAL_PAYMENT",
-      name: typeof parsed.name === "string" ? parsed.name : "",
-      residentialAddress:
-        typeof parsed.residentialAddress === "string"
-          ? parsed.residentialAddress
-          : "",
-      phone: typeof parsed.phone === "string" ? parsed.phone : "",
-      employer: typeof parsed.employer === "string" ? parsed.employer : "",
-      emergencyContactOneName:
-        typeof parsed.emergencyContactOneName === "string"
-          ? parsed.emergencyContactOneName
-          : "",
-      emergencyContactOnePhone:
-        typeof parsed.emergencyContactOnePhone === "string"
-          ? parsed.emergencyContactOnePhone
-          : "",
-      emergencyContactTwoName:
-        typeof parsed.emergencyContactTwoName === "string"
-          ? parsed.emergencyContactTwoName
-          : "",
-      emergencyContactTwoPhone:
-        typeof parsed.emergencyContactTwoPhone === "string"
-          ? parsed.emergencyContactTwoPhone
-          : "",
+          : "SMILE_WALLET_AUTHORIZATION",
+      name: "",
+      residentialAddress: "",
+      phone: "",
+      employer: "",
+      emergencyContactOneName: "",
+      emergencyContactOnePhone: "",
+      emergencyContactTwoName: "",
+      emergencyContactTwoPhone: "",
       employerTenantId:
         typeof parsed.employerTenantId === "string"
           ? parsed.employerTenantId
           : "",
-      bankName: typeof parsed.bankName === "string" ? parsed.bankName : "",
-      bankAccountNumber:
-        typeof parsed.bankAccountNumber === "string"
-          ? parsed.bankAccountNumber
-          : "",
-      bankAccountHolder:
-        typeof parsed.bankAccountHolder === "string"
-          ? parsed.bankAccountHolder
-          : "",
-      identityDocumentType:
-        parsed.identityDocumentType === "PASSPORT" ? "PASSPORT" : "NATIONAL_ID",
-      identityDocumentNumber:
-        typeof parsed.identityDocumentNumber === "string"
-          ? parsed.identityDocumentNumber
-          : "",
+      bankName: "",
+      bankAccountNumber: "",
+      bankAccountHolder: "",
+      identityDocumentType: "NATIONAL_ID",
+      identityDocumentNumber: "",
       livenessPrepared: parsed.livenessPrepared === true,
       wealthProofAttached: parsed.wealthProofAttached === true,
       consent: parsed.consent === true,
@@ -168,12 +162,30 @@ function readStoredApplicationDraft(): StoredApplicationDraft | undefined {
       serviceAgreementAuthorized: parsed.serviceAgreementAuthorized === true,
       postDisbursementBrokerageAuthorized:
         parsed.postDisbursementBrokerageAuthorized === true,
-      payrollDeductionAuthorized: parsed.payrollDeductionAuthorized === true,
-      directDebitAuthorized: parsed.directDebitAuthorized === true,
     };
   } catch {
     return undefined;
   }
+}
+
+function localDraftFrom(draft: StoredApplicationDraft): LocalApplicationDraft {
+  return {
+    version: draft.version,
+    ownerKey: draft.ownerKey,
+    stage: draft.stage,
+    formStep: draft.formStep,
+    amountInput: draft.amountInput,
+    term: draft.term,
+    selectedRepaymentMethod: draft.selectedRepaymentMethod,
+    employerTenantId: draft.employerTenantId,
+    livenessPrepared: draft.livenessPrepared,
+    wealthProofAttached: draft.wealthProofAttached,
+    consent: draft.consent,
+    employerVerificationAuthorized: draft.employerVerificationAuthorized,
+    serviceAgreementAuthorized: draft.serviceAgreementAuthorized,
+    postDisbursementBrokerageAuthorized:
+      draft.postDisbursementBrokerageAuthorized,
+  };
 }
 
 export function useApplicationDraft({
@@ -228,8 +240,6 @@ export function useApplicationDraft({
       serviceAgreementAuthorized: draft.serviceAgreementAuthorized,
       postDisbursementBrokerageAuthorized:
         draft.postDisbursementBrokerageAuthorized,
-      payrollDeductionAuthorized: draft.payrollDeductionAuthorized,
-      directDebitAuthorized: draft.directDebitAuthorized,
     });
     setStage(draft.stage);
     setFormStep(draft.formStep);
@@ -290,7 +300,7 @@ export function useApplicationDraft({
     try {
       window.localStorage.setItem(
         APPLICATION_DRAFT_STORAGE_KEY,
-        JSON.stringify(draft),
+        JSON.stringify(localDraftFrom(draft)),
       );
     } catch {
       /* ignore storage access failures in embedded webviews */
@@ -353,7 +363,7 @@ export function useApplicationDraft({
           try {
             window.localStorage.setItem(
               APPLICATION_DRAFT_STORAGE_KEY,
-              JSON.stringify(localDraft),
+              JSON.stringify(localDraftFrom(localDraft)),
             );
           } catch {
             /* local storage sync is optional */

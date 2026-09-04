@@ -68,6 +68,7 @@ describe("Finance-verify-portal S0.5 Network-Zero + WEB-08 patches active (not d
   it("http://127.0.0.1:4173 (vite preview) allowed through (no false positives in build-demo-portals)", () => {
     let threw = false;
     try {
+      // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request -- local-only test fixture for the Vite preview asset path.
       void fetch("http://127.0.0.1:4173/assets/index.js");
     } catch {
       threw = true;

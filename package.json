@@ -9,7 +9,7 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "build": "pnpm --filter @payease/shared-money run build && pnpm --filter @payease/v1-domain run build && pnpm --filter @payease/broker-api run build && pnpm --filter @payease/broker-platform run build && pnpm --filter @payease/lender-core run build && pnpm --filter @payease/user-mini-app run build && pnpm --filter @payease/hr-verify-portal run build && pnpm --filter @payease/finance-verify-portal run build",
+    "build": "pnpm --filter @payease/shared-money run build && pnpm --filter @payease/shared-security run build && pnpm --filter @payease/v1-domain run build && pnpm --filter @payease/broker-api run build && pnpm --filter @payease/broker-platform run build && pnpm --filter @payease/lender-core run build && pnpm --filter @payease/lender-wallet-service run build && pnpm --filter @payease/user-mini-app run build && pnpm --filter @payease/hr-verify-portal run build && pnpm --filter @payease/finance-verify-portal run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "lint": "pnpm format:check && pnpm typecheck",

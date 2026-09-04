@@ -5,6 +5,7 @@ packages:
   - "broker-api"
   - "broker-platform"
   - "lender-core"
+  - "lender-wallet-service"
   - "employer-portal"
   - "hr-verify-portal"
   - "finance-verify-portal"

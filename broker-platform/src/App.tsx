@@ -1193,78 +1193,72 @@ export function App(): JSX.Element {
   const kycCopy = kycReviewCopy(identity.preferredLanguage);
   const zoneStatusLabel = (status: ZoneStatus) => {
     if (identity.preferredLanguage === "zh-CN") {
-      return (
-        {
-          DRAFT: "草稿",
-          PENDING_REVIEW: "待复核",
-          ACTIVE: "已启用",
-          RETIRED: "已退役",
-        } satisfies Record<ZoneStatus, string>
-      )[status];
+      const labels: Record<ZoneStatus, string> = {
+        DRAFT: "草稿",
+        PENDING_REVIEW: "待复核",
+        ACTIVE: "已启用",
+        RETIRED: "已退役",
+      };
+      return labels[status];
     }
     if (identity.preferredLanguage === "km") {
-      return (
-        {
-          DRAFT: "ព្រាង",
-          PENDING_REVIEW: "រង់ចាំពិនិត្យ",
-          ACTIVE: "កំពុងប្រើ",
-          RETIRED: "បានបិទប្រើ",
-        } satisfies Record<ZoneStatus, string>
-      )[status];
+      const labels: Record<ZoneStatus, string> = {
+        DRAFT: "ព្រាង",
+        PENDING_REVIEW: "រង់ចាំពិនិត្យ",
+        ACTIVE: "កំពុងប្រើ",
+        RETIRED: "បានបិទប្រើ",
+      };
+      return labels[status];
     }
-    return (
-      {
-        DRAFT: "Draft",
-        PENDING_REVIEW: "Pending review",
-        ACTIVE: "Active",
-        RETIRED: "Retired",
-      } satisfies Record<ZoneStatus, string>
-    )[status];
+    const labels: Record<ZoneStatus, string> = {
+      DRAFT: "Draft",
+      PENDING_REVIEW: "Pending review",
+      ACTIVE: "Active",
+      RETIRED: "Retired",
+    };
+    return labels[status];
   };
   const kycAssessmentLabel = (
     result: KycEvidenceListItem["assessmentResult"],
   ) => {
     if (!result) return "—";
     if (identity.preferredLanguage === "zh-CN") {
-      return (
-        {
-          MATCH: "命中区域",
-          OUT_OF_ZONE: "区域外",
-          OUT_OF_COUNTRY: "国家外",
-          LOW_ACCURACY: "精度不足",
-          UNAVAILABLE: "不可用",
-        } satisfies Record<
-          NonNullable<KycEvidenceListItem["assessmentResult"]>,
-          string
-        >
-      )[result];
-    }
-    if (identity.preferredLanguage === "km") {
-      return (
-        {
-          MATCH: "ត្រូវនឹងតំបន់",
-          OUT_OF_ZONE: "នៅក្រៅតំបន់",
-          OUT_OF_COUNTRY: "នៅក្រៅប្រទេស",
-          LOW_ACCURACY: "ភាពត្រឹមត្រូវមិនគ្រប់គ្រាន់",
-          UNAVAILABLE: "មិនអាចប្រើបាន",
-        } satisfies Record<
-          NonNullable<KycEvidenceListItem["assessmentResult"]>,
-          string
-        >
-      )[result];
-    }
-    return (
-      {
-        MATCH: "Matched",
-        OUT_OF_ZONE: "Out of zone",
-        OUT_OF_COUNTRY: "Out of country",
-        LOW_ACCURACY: "Low accuracy",
-        UNAVAILABLE: "Unavailable",
-      } satisfies Record<
+      const labels: Record<
         NonNullable<KycEvidenceListItem["assessmentResult"]>,
         string
-      >
-    )[result];
+      > = {
+        MATCH: "命中区域",
+        OUT_OF_ZONE: "区域外",
+        OUT_OF_COUNTRY: "国家外",
+        LOW_ACCURACY: "精度不足",
+        UNAVAILABLE: "不可用",
+      };
+      return labels[result];
+    }
+    if (identity.preferredLanguage === "km") {
+      const labels: Record<
+        NonNullable<KycEvidenceListItem["assessmentResult"]>,
+        string
+      > = {
+        MATCH: "ត្រូវនឹងតំបន់",
+        OUT_OF_ZONE: "នៅក្រៅតំបន់",
+        OUT_OF_COUNTRY: "នៅក្រៅប្រទេស",
+        LOW_ACCURACY: "ភាពត្រឹមត្រូវមិនគ្រប់គ្រាន់",
+        UNAVAILABLE: "មិនអាចប្រើបាន",
+      };
+      return labels[result];
+    }
+    const labels: Record<
+      NonNullable<KycEvidenceListItem["assessmentResult"]>,
+      string
+    > = {
+      MATCH: "Matched",
+      OUT_OF_ZONE: "Out of zone",
+      OUT_OF_COUNTRY: "Out of country",
+      LOW_ACCURACY: "Low accuracy",
+      UNAVAILABLE: "Unavailable",
+    };
+    return labels[result];
   };
   return (
     <main style={shell}>

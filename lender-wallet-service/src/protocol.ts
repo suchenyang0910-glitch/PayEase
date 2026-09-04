@@ -264,7 +264,7 @@ export {
 
 export type { WalletBrokerExchangeRequest as BrokerJumpExchangeRequest };
 
-export type BrokerJumpExchangeResponse = import("zod").infer<
+export type BrokerJumpExchangeResponse = z.infer<
   typeof brokerJumpExchangeResponseSchema
 >;
 export type WalletChannelCallbackHeaders = z.infer<

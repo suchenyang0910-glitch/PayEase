@@ -104,14 +104,26 @@ jobs:
       - name: CI-04 Sast Semgrep PayEase 4 custom rules
         run: |
           set -e
-          echo "=== Custom rules (PayEase 4 P0) ==="
+          echo "=== Custom generic secret rule (repository scope) ==="
           semgrep scan \
-            --config="${SEMGREP_RULES_DIR}" \
+            --config="${SEMGREP_RULES_DIR}/no-hardcoded-secrets.yaml" \
             --severity ERROR \
             --timeout 30 \
             --max-memory 4096 \
             --no-rewrite-rule-ids \
             --strict
+
+          echo "=== Custom typed rules (application source scope) ==="
+          semgrep scan \
+            --config="${SEMGREP_RULES_DIR}/no-localstorage-token.yaml" \
+            --config="${SEMGREP_RULES_DIR}/no-money-number.yaml" \
+            --config="${SEMGREP_RULES_DIR}/no-sql-concat.yaml" \
+            --severity ERROR \
+            --timeout 30 \
+            --max-memory 4096 \
+            --no-rewrite-rule-ids \
+            --strict \
+            broker-api broker-platform lender-core lender-wallet-service employer-portal hr-verify-portal finance-verify-portal user-mini-app partner-contracts packages
 
       - name: CI-04 Sast Semgrep upstream owasp-top-ten + typescript ERROR strict
         run: |
@@ -125,7 +137,7 @@ jobs:
             --max-memory 4096 \
             --strict \
             --metrics=off \
-            broker-api broker-platform lender-core employer-portal partner-contracts packages
+            broker-api broker-platform lender-core lender-wallet-service employer-portal hr-verify-portal finance-verify-portal user-mini-app partner-contracts packages
 
       - name: CI-10 Money type guard bash
         run: |

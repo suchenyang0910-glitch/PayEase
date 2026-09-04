@@ -74,13 +74,6 @@ type SummaryItem = Readonly<{
   value: string;
 }>;
 
-type RepaymentMethodOption = Readonly<{
-  value:
-    "EMPLOYER_PAYROLL_DEDUCTION" | "USER_DIRECT_DEBIT" | "USER_MANUAL_PAYMENT";
-  label: string;
-  description: string;
-}>;
-
 type ApplicationFlowProps = Readonly<{
   stage: "welcome" | "details";
   language: "km" | "en" | "zh-CN";
@@ -94,8 +87,6 @@ type ApplicationFlowProps = Readonly<{
   terms: readonly number[];
   amountInput: string;
   term: number;
-  repaymentMethodOptions: readonly RepaymentMethodOption[];
-  selectedRepaymentMethod: RepaymentMethodOption["value"];
   requestedAmountDisplay: string;
   showPreviewBadge: boolean;
   formStep: ApplicationFormStep;
@@ -124,8 +115,6 @@ type ApplicationFlowProps = Readonly<{
   employerVerificationAuthorized: boolean;
   serviceAgreementAuthorized: boolean;
   postDisbursementBrokerageAuthorized: boolean;
-  payrollDeductionAuthorized: boolean;
-  directDebitAuthorized: boolean;
   summaryItems: readonly SummaryItem[];
   loading: boolean;
   renderError: () => JSX.Element | null;
@@ -155,14 +144,9 @@ type ApplicationFlowProps = Readonly<{
   onLivenessPreparedChange: (value: boolean) => void;
   onWealthProofAttachedChange: (value: boolean) => void;
   onConsentChange: (value: boolean) => void;
-  onSelectedRepaymentMethodChange: (
-    value: RepaymentMethodOption["value"],
-  ) => void;
   onEmployerVerificationAuthorizedChange: (value: boolean) => void;
   onServiceAgreementAuthorizedChange: (value: boolean) => void;
   onPostDisbursementBrokerageAuthorizedChange: (value: boolean) => void;
-  onPayrollDeductionAuthorizedChange: (value: boolean) => void;
-  onDirectDebitAuthorizedChange: (value: boolean) => void;
 }>;
 
 export function ApplicationFlow({
@@ -178,8 +162,6 @@ export function ApplicationFlow({
   terms,
   amountInput,
   term,
-  repaymentMethodOptions,
-  selectedRepaymentMethod,
   requestedAmountDisplay,
   showPreviewBadge,
   formStep,
@@ -208,8 +190,6 @@ export function ApplicationFlow({
   employerVerificationAuthorized,
   serviceAgreementAuthorized,
   postDisbursementBrokerageAuthorized,
-  payrollDeductionAuthorized,
-  directDebitAuthorized,
   summaryItems,
   loading,
   renderError,
@@ -239,12 +219,9 @@ export function ApplicationFlow({
   onLivenessPreparedChange,
   onWealthProofAttachedChange,
   onConsentChange,
-  onSelectedRepaymentMethodChange,
   onEmployerVerificationAuthorizedChange,
   onServiceAgreementAuthorizedChange,
   onPostDisbursementBrokerageAuthorizedChange,
-  onPayrollDeductionAuthorizedChange,
-  onDirectDebitAuthorizedChange,
 }: ApplicationFlowProps): JSX.Element {
   return (
     <section className="application-card">
@@ -584,35 +561,17 @@ export function ApplicationFlow({
                 <section className="application-stage-group">
                   <h3>
                     {language === "en"
-                      ? "Repayment method"
+                      ? "Repayment authorization"
                       : language === "km"
-                        ? "វិធីសងប្រាក់"
-                        : "回收方式"}
+                        ? "ការអនុញ្ញាតសងប្រាក់"
+                        : "还款授权"}
                   </h3>
-                  <div className="term-choices">
-                    {repaymentMethodOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={
-                          selectedRepaymentMethod === option.value
-                            ? "selected"
-                            : ""
-                        }
-                        onClick={() =>
-                          onSelectedRepaymentMethodChange(option.value)
-                        }
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
                   <p className="response-note">
-                    {
-                      repaymentMethodOptions.find(
-                        (option) => option.value === selectedRepaymentMethod,
-                      )?.description
-                    }
+                    {language === "en"
+                      ? "After disbursement, repayment will continue through the licensed lender's SMILE wallet page. PayEase does not collect your payment password, bank authorization, or OTP."
+                      : language === "km"
+                        ? "បន្ទាប់ពីបើកប្រាក់ ការសងប្រាក់នឹងបន្តតាមទំព័រ SMILE wallet របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ។ PayEase មិនប្រមូលពាក្យសម្ងាត់ទូទាត់ ការអនុញ្ញាតធនាគារ ឬ OTP របស់អ្នកទេ។"
+                        : "放款后，还款将通过持牌机构的 SMILE 钱包页完成；PayEase 不接触你的支付密码、银行授权或 OTP。"}
                   </p>
                 </section>
               </>
@@ -715,42 +674,6 @@ export function ApplicationFlow({
                         : "我理解 KhmerX 融资居间服务费仅在放款后形成应收。"}
                   </span>
                 </label>
-                {selectedRepaymentMethod === "EMPLOYER_PAYROLL_DEDUCTION" ? (
-                  <label className="consent">
-                    <input
-                      type="checkbox"
-                      checked={payrollDeductionAuthorized}
-                      onChange={(event) =>
-                        onPayrollDeductionAuthorizedChange(event.target.checked)
-                      }
-                    />
-                    <span>
-                      {language === "en"
-                        ? "I separately authorize employer payroll deduction to report principal-and-interest collection."
-                        : language === "km"
-                          ? "ខ្ញុំយល់ព្រមដោយឡែកឱ្យក្រុមហ៊ុនរាយការណ៍ការកាត់ប្រាក់ដើមនិងការប្រាក់។"
-                          : "我单独授权企业回填本息回收结果。"}
-                    </span>
-                  </label>
-                ) : null}
-                {selectedRepaymentMethod === "USER_DIRECT_DEBIT" ? (
-                  <label className="consent">
-                    <input
-                      type="checkbox"
-                      checked={directDebitAuthorized}
-                      onChange={(event) =>
-                        onDirectDebitAuthorizedChange(event.target.checked)
-                      }
-                    />
-                    <span>
-                      {language === "en"
-                        ? "I separately authorize direct debit for lender principal-and-interest collection."
-                        : language === "km"
-                          ? "ខ្ញុំយល់ព្រមដោយឡែកសម្រាប់ direct debit ក្នុងការប្រមូលប្រាក់ដើមនិងការប្រាក់របស់ស្ថាប័នមានអាជ្ញាប័ណ្ណ។"
-                          : "我单独授权 direct debit 用于持牌机构本息回收。"}
-                    </span>
-                  </label>
-                ) : null}
                 <section className="application-stage-group">
                   <h3>{applicationCopy.submitConfirm}</h3>
                   <p className="response-note">

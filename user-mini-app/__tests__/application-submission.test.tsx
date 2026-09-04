@@ -574,15 +574,13 @@ describe("applicant submission", () => {
         (init as RequestInit | undefined)?.method === "POST",
     ) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toMatchObject({
-      selectedRepaymentMethod: "USER_MANUAL_PAYMENT",
+      selectedRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
       employerTenantId: TEST_EMPLOYER_TENANT_ID,
       identityDocument: { type: "NATIONAL_ID", number: "KH-ID-10001" },
       authorizationSnapshot: {
         employerVerificationAuthorized: true,
         serviceAgreementAuthorized: true,
         postDisbursementBrokerageAuthorized: true,
-        payrollDeductionAuthorized: false,
-        directDebitAuthorized: false,
       },
     });
   });
@@ -879,7 +877,7 @@ describe("applicant submission", () => {
     expect(screen.getByDisplayValue("Phnom Penh")).toBeInTheDocument();
   });
 
-  it("restores a saved draft step and values after re-entering the mini app", () => {
+  it("restores only the saved draft step after re-entering the mini app without local personal data", () => {
     const draftJson = JSON.stringify({
       version: 1,
       ownerKey: "local",
@@ -929,8 +927,8 @@ describe("applicant submission", () => {
     openOrdersFromHome();
 
     expect(pickLabel("Emergency contact 1")).toBeVisible();
-    expect(pickLabel("Emergency contact 1")).toHaveValue("Saved Contact");
-    expect(pickLabel("Emergency contact 1 phone")).toHaveValue("+85511111111");
+    expect(pickLabel("Emergency contact 1")).toHaveValue("");
+    expect(pickLabel("Emergency contact 1 phone")).toHaveValue("");
     expect(screen.queryByDisplayValue("200")).toBeNull();
   });
 
@@ -1912,9 +1910,12 @@ describe("applicant submission", () => {
     );
     expect(screen.getByText("Next payment")).toBeVisible();
     expect(screen.getAllByText(/#2.*2026-10-15/)).toHaveLength(2);
-    expect(pickLabel("Manual payment safety")).toHaveTextContent(
-      "Confirm payment instructions with the licensed lender's operations team",
-    );
+    expect(
+      screen.getByLabelText("SMILE wallet authorization"),
+    ).toHaveTextContent("PayEase will only create a one-time jump");
+    expect(
+      screen.getByRole("button", { name: "Open SMILE wallet" }),
+    ).toBeVisible();
     expect(screen.getByText("Paid")).toBeVisible();
     expect(screen.getByText("Pending")).toBeVisible();
     expect(screen.queryByText("Estimated monthly payment")).toBeNull();

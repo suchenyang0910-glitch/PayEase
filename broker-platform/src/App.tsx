@@ -17,6 +17,7 @@ import {
   type BrokerSupplementResponseDetail,
   type BrokerSupplementResponseEntry,
 } from "./broker-supplement-response";
+import { ServiceAreaMapEditor } from "./ServiceAreaMapEditor.tsx";
 
 type Language = "zh-CN" | "en" | "km";
 type Domain = "OPS" | "BROKER" | "LENDER" | "EMPLOYER";
@@ -52,6 +53,98 @@ type EmployerTenantMember = Readonly<{
   loginName: string;
   roleCodes: string[];
 }>;
+type PolygonGeoJson = Readonly<{
+  type: "Polygon";
+  coordinates: number[][][];
+}>;
+type ZoneScopeType = "PLATFORM" | "EMPLOYER_TENANT";
+type ZoneStatus = "DRAFT" | "PENDING_REVIEW" | "ACTIVE" | "RETIRED";
+type ServiceAreaZone = Readonly<{
+  zoneRef: string;
+  version: number;
+  displayName: string;
+  scopeType: ZoneScopeType;
+  employerTenantId: string | null;
+  polygonGeoJson: PolygonGeoJson;
+  polygonBbox?: {
+    minLongitude: number;
+    maxLongitude: number;
+    minLatitude: number;
+    maxLatitude: number;
+  } | null;
+  status: ZoneStatus;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  changeReason: string;
+  createdBy: string;
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  activatedBy?: string | null;
+  activatedAt?: string | null;
+  retiredBy?: string | null;
+  retiredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}>;
+type ServiceAreaFormState = Readonly<{
+  zoneRef: string;
+  displayName: string;
+  scopeType: ZoneScopeType;
+  employerTenantId: string;
+  polygonGeoJson: PolygonGeoJson | null;
+  effectiveFrom: string;
+  effectiveUntil: string;
+  changeReason: string;
+}>;
+type KycEvidenceListItem = Readonly<{
+  evidenceRef: string;
+  source: string;
+  consentVersion: string;
+  submittedAt: string;
+  applicationNo: string | null;
+  assessmentResult:
+    | "MATCH"
+    | "OUT_OF_ZONE"
+    | "OUT_OF_COUNTRY"
+    | "LOW_ACCURACY"
+    | "UNAVAILABLE"
+    | null;
+  assessedScopeType: ZoneScopeType | null;
+  employerTenantId: string | null;
+  matchedZoneRef: string | null;
+  matchedZoneVersion: number | null;
+  assessedAt: string | null;
+}>;
+type KycEvidenceDetail = Readonly<{
+  evidence: KycEvidenceListItem & { ruleVersion: string | null };
+  audit: Array<{
+    eventType: string;
+    actorUserRef: string;
+    occurredAt: string;
+    payload: Record<string, unknown>;
+  }>;
+}>;
+
+function createEmptyServiceAreaForm(): ServiceAreaFormState {
+  return {
+    zoneRef: "",
+    displayName: "",
+    scopeType: "PLATFORM",
+    employerTenantId: "",
+    polygonGeoJson: null,
+    effectiveFrom: "",
+    effectiveUntil: "",
+    changeReason: "",
+  };
+}
+
+function serviceAreaZoneKey(
+  zone: Pick<ServiceAreaZone, "zoneRef" | "version">,
+): string {
+  return `${zone.zoneRef}@${zone.version}`;
+}
 
 function factoryTenantCopy(language: Language): Readonly<{
   title: string;
@@ -101,6 +194,253 @@ function factoryTenantCopy(language: Language): Readonly<{
     disableConfirm:
       "Disable this factory? All employer-side verification for it will be frozen immediately.",
   };
+}
+
+function serviceAreaCopy(language: Language): Readonly<{
+  title: string;
+  description: string;
+  refresh: string;
+  create: string;
+  updateDraft: string;
+  resetForm: string;
+  zoneRef: string;
+  version: string;
+  displayName: string;
+  scopeType: string;
+  employerTenant: string;
+  platformScope: string;
+  employerScope: string;
+  polygon: string;
+  effectiveFrom: string;
+  effectiveUntil: string;
+  changeReason: string;
+  selectedVersion: string;
+  zoneVersions: string;
+  submitReview: string;
+  review: string;
+  activate: string;
+  retire: string;
+  reviewNote: string;
+  retireReason: string;
+  noZones: string;
+  draftOnly: string;
+}> {
+  if (language === "zh-CN") {
+    return {
+      title: "允许借款区域版本流转",
+      description:
+        "运营后台维护 Polygon 区域版本。仅 DRAFT 可编辑，复核与启用必须双人分离。",
+      refresh: "刷新区域版本",
+      create: "创建草稿版本",
+      updateDraft: "保存草稿修改",
+      resetForm: "清空表单",
+      zoneRef: "区域引用",
+      version: "版本",
+      displayName: "区域名称",
+      scopeType: "生效范围",
+      employerTenant: "工厂租户",
+      platformScope: "全平台",
+      employerScope: "指定工厂",
+      polygon: "地图圈选区域",
+      effectiveFrom: "生效开始",
+      effectiveUntil: "生效结束",
+      changeReason: "变更原因",
+      selectedVersion: "当前选中版本",
+      zoneVersions: "区域版本列表",
+      submitReview: "提交复核",
+      review: "登记复核",
+      activate: "启用版本",
+      retire: "退役版本",
+      reviewNote: "复核说明",
+      retireReason: "退役原因",
+      noZones: "暂无区域版本。",
+      draftOnly: "仅草稿版本允许修改。",
+    };
+  }
+  if (language === "km") {
+    return {
+      title: "វដ្តកំណែតំបន់អនុញ្ញាត",
+      description:
+        "គ្រប់គ្រងកំណែ Polygon តាមប្រព័ន្ធខាងក្រោយ។ អាចកែបានតែ DRAFT ហើយអ្នកពិនិត្យ និងអ្នកបើកប្រើត្រូវបំបែកពីអ្នកបង្កើត។",
+      refresh: "ផ្ទុកកំណែតំបន់ឡើងវិញ",
+      create: "បង្កើតកំណែព្រាង",
+      updateDraft: "រក្សាទុកការកែព្រាង",
+      resetForm: "សម្អាតទម្រង់",
+      zoneRef: "លេខយោងតំបន់",
+      version: "កំណែ",
+      displayName: "ឈ្មោះតំបន់",
+      scopeType: "វិសាលភាព",
+      employerTenant: "អ្នកជួលរោងចក្រ",
+      platformScope: "ទូទាំងប្រព័ន្ធ",
+      employerScope: "រោងចក្រជាក់លាក់",
+      polygon: "ផែនទីតំបន់ដែលគូស",
+      effectiveFrom: "ចាប់ផ្តើមមានប្រសិទ្ធភាព",
+      effectiveUntil: "បញ្ចប់មានប្រសិទ្ធភាព",
+      changeReason: "មូលហេតុកែប្រែ",
+      selectedVersion: "កំណែដែលបានជ្រើស",
+      zoneVersions: "បញ្ជីកំណែតំបន់",
+      submitReview: "ផ្ញើសម្រាប់ពិនិត្យ",
+      review: "កត់ត្រាការពិនិត្យ",
+      activate: "បើកប្រើកំណែ",
+      retire: "បិទប្រើកំណែ",
+      reviewNote: "កំណត់សម្គាល់ពិនិត្យ",
+      retireReason: "ហេតុផលបិទប្រើ",
+      noZones: "មិនទាន់មានកំណែតំបន់ទេ។",
+      draftOnly: "អាចកែបានតែកំណែ DRAFT ប៉ុណ្ណោះ។",
+    };
+  }
+  return {
+    title: "Service area version workflow",
+    description:
+      "Manage versioned Polygon service areas. Only DRAFT versions are editable, and review and activation stay dual-controlled.",
+    refresh: "Refresh service areas",
+    create: "Create draft version",
+    updateDraft: "Save draft changes",
+    resetForm: "Reset form",
+    zoneRef: "Zone reference",
+    version: "Version",
+    displayName: "Zone name",
+    scopeType: "Scope",
+    employerTenant: "Factory tenant",
+    platformScope: "Platform-wide",
+    employerScope: "Factory-specific",
+    polygon: "Map-drawn service area",
+    effectiveFrom: "Effective from",
+    effectiveUntil: "Effective until",
+    changeReason: "Change reason",
+    selectedVersion: "Selected version",
+    zoneVersions: "Zone versions",
+    submitReview: "Submit for review",
+    review: "Record review",
+    activate: "Activate version",
+    retire: "Retire version",
+    reviewNote: "Review note",
+    retireReason: "Retire reason",
+    noZones: "No service area versions found.",
+    draftOnly: "Only DRAFT versions can be edited.",
+  };
+}
+
+function kycReviewCopy(language: Language): Readonly<{
+  title: string;
+  description: string;
+  refresh: string;
+  listTitle: string;
+  detailTitle: string;
+  noItems: string;
+  evidenceRef: string;
+  applicationNo: string;
+  assessmentResult: string;
+  scopeType: string;
+  matchedZone: string;
+  submittedAt: string;
+  assessedAt: string;
+  source: string;
+  consentVersion: string;
+  ruleVersion: string;
+  auditTrail: string;
+  coordinatesHidden: string;
+}> {
+  if (language === "zh-CN") {
+    return {
+      title: "KYC 定位受控复核",
+      description:
+        "仅展示受控定位证据与审计信息；不展示原始坐标、精度明文或任何可反推位置的字段。",
+      refresh: "刷新定位证据",
+      listTitle: "证据列表",
+      detailTitle: "证据详情与审计",
+      noItems: "暂无定位证据。",
+      evidenceRef: "证据引用",
+      applicationNo: "申请编号",
+      assessmentResult: "判定结果",
+      scopeType: "判定范围",
+      matchedZone: "命中区域",
+      submittedAt: "提交时间",
+      assessedAt: "判定时间",
+      source: "采集来源",
+      consentVersion: "授权版本",
+      ruleVersion: "规则版本",
+      auditTrail: "审计轨迹",
+      coordinatesHidden: "精确坐标已隔离，不在前台展示。",
+    };
+  }
+  if (language === "km") {
+    return {
+      title: "ការពិនិត្យ KYC ទីតាំងដែលបានគ្រប់គ្រង",
+      description:
+        "បង្ហាញតែភស្តុតាងទីតាំង និងកំណត់ហេតុសវនកម្មដែលបានគ្រប់គ្រងប៉ុណ្ណោះ មិនបង្ហាញកូអរដោនេដើម ឬវាលដែលអាចបញ្ច្រាសទីតាំងបានទេ។",
+      refresh: "ផ្ទុកភស្តុតាងទីតាំងឡើងវិញ",
+      listTitle: "បញ្ជីភស្តុតាង",
+      detailTitle: "ព័ត៌មានលម្អិត និងសវនកម្ម",
+      noItems: "មិនទាន់មានភស្តុតាងទីតាំងទេ។",
+      evidenceRef: "លេខយោងភស្តុតាង",
+      applicationNo: "លេខពាក្យស្នើ",
+      assessmentResult: "លទ្ធផលវាយតម្លៃ",
+      scopeType: "វិសាលភាពវាយតម្លៃ",
+      matchedZone: "តំបន់ដែលត្រូវគ្នា",
+      submittedAt: "ពេលដាក់ស្នើ",
+      assessedAt: "ពេលវាយតម្លៃ",
+      source: "ប្រភព",
+      consentVersion: "កំណែការយល់ព្រម",
+      ruleVersion: "កំណែក្បួន",
+      auditTrail: "សវនកម្ម",
+      coordinatesHidden:
+        "កូអរដោនេច្បាស់លាស់ត្រូវបានបំបែក និងមិនបង្ហាញនៅផ្នែកមុខឡើយ។",
+    };
+  }
+  return {
+    title: "Controlled KYC location review",
+    description:
+      "This view exposes only controlled location evidence and audit history. Raw coordinates, accuracy plaintext and reverse-location fields stay hidden.",
+    refresh: "Refresh location evidence",
+    listTitle: "Evidence list",
+    detailTitle: "Evidence detail and audit",
+    noItems: "No location evidence found.",
+    evidenceRef: "Evidence reference",
+    applicationNo: "Application number",
+    assessmentResult: "Assessment result",
+    scopeType: "Assessment scope",
+    matchedZone: "Matched zone",
+    submittedAt: "Submitted at",
+    assessedAt: "Assessed at",
+    source: "Source",
+    consentVersion: "Consent version",
+    ruleVersion: "Rule version",
+    auditTrail: "Audit trail",
+    coordinatesHidden:
+      "Precise coordinates are isolated and never shown in the console.",
+  };
+}
+
+function isServiceAreaZonesResponse(
+  payload: unknown,
+): payload is { zones: ServiceAreaZone[] } {
+  return (
+    Boolean(payload) &&
+    typeof payload === "object" &&
+    Array.isArray((payload as { zones?: unknown }).zones)
+  );
+}
+
+function isKycEvidenceListResponse(
+  payload: unknown,
+): payload is { items: KycEvidenceListItem[] } {
+  return (
+    Boolean(payload) &&
+    typeof payload === "object" &&
+    Array.isArray((payload as { items?: unknown }).items)
+  );
+}
+
+function isKycEvidenceDetailResponse(
+  payload: unknown,
+): payload is KycEvidenceDetail {
+  return (
+    Boolean(payload) &&
+    typeof payload === "object" &&
+    Boolean((payload as { evidence?: unknown }).evidence) &&
+    Array.isArray((payload as { audit?: unknown }).audit)
+  );
 }
 
 function isServiceCaseQueueResponse(
@@ -335,6 +675,23 @@ export function App(): JSX.Element {
   const [tenantMembers, setTenantMembers] = useState<EmployerTenantMember[]>(
     [],
   );
+  const [serviceAreaZones, setServiceAreaZones] = useState<ServiceAreaZone[]>(
+    [],
+  );
+  const [serviceAreaLoading, setServiceAreaLoading] = useState(false);
+  const [selectedServiceAreaKey, setSelectedServiceAreaKey] = useState("");
+  const [serviceAreaForm, setServiceAreaForm] = useState<ServiceAreaFormState>(
+    createEmptyServiceAreaForm(),
+  );
+  const [serviceAreaReviewNote, setServiceAreaReviewNote] = useState("");
+  const [serviceAreaRetireReason, setServiceAreaRetireReason] = useState("");
+  const [kycEvidenceItems, setKycEvidenceItems] = useState<
+    KycEvidenceListItem[]
+  >([]);
+  const [kycEvidenceLoading, setKycEvidenceLoading] = useState(false);
+  const [selectedKycEvidenceRef, setSelectedKycEvidenceRef] = useState("");
+  const [selectedKycEvidence, setSelectedKycEvidence] =
+    useState<KycEvidenceDetail>();
   useEffect(() => {
     request("/v1/local/auth/me")
       .then(async (response) => {
@@ -410,6 +767,128 @@ export function App(): JSX.Element {
       if (Array.isArray(payload.tenants)) setEmployerTenants(payload.tenants);
     }
   };
+  const refreshServiceAreaZones = async () => {
+    setServiceAreaLoading(true);
+    try {
+      const response = await request("/v1/local/admin/service-area-zones");
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const payload = await response.json().catch(() => undefined);
+      if (!response.ok || !isServiceAreaZonesResponse(payload)) {
+        setNotice(
+          `${copy.blocked} (${response.status}): ${JSON.stringify(payload ?? {})}`,
+        );
+        return;
+      }
+      setServiceAreaZones(payload.zones);
+    } finally {
+      setServiceAreaLoading(false);
+    }
+  };
+  const refreshKycEvidence = async () => {
+    setKycEvidenceLoading(true);
+    try {
+      const response = await request("/v1/local/admin/kyc-location-evidence");
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const payload = await response.json().catch(() => undefined);
+      if (!response.ok || !isKycEvidenceListResponse(payload)) {
+        setNotice(
+          `${copy.blocked} (${response.status}): ${JSON.stringify(payload ?? {})}`,
+        );
+        return;
+      }
+      setKycEvidenceItems(payload.items);
+    } finally {
+      setKycEvidenceLoading(false);
+    }
+  };
+  const loadKycEvidenceDetail = async (evidenceRef: string) => {
+    setKycEvidenceLoading(true);
+    setSelectedKycEvidence(undefined);
+    setSelectedKycEvidenceRef(evidenceRef);
+    try {
+      const response = await request(
+        `/v1/local/admin/kyc-location-evidence/${encodeURIComponent(evidenceRef)}`,
+      );
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      const payload = await response.json().catch(() => undefined);
+      if (!response.ok || !isKycEvidenceDetailResponse(payload)) {
+        setNotice(
+          `${copy.blocked} (${response.status}): ${JSON.stringify(payload ?? {})}`,
+        );
+        return;
+      }
+      setSelectedKycEvidence(payload);
+    } finally {
+      setKycEvidenceLoading(false);
+    }
+  };
+  const resetServiceAreaForm = () => {
+    setSelectedServiceAreaKey("");
+    setServiceAreaForm(createEmptyServiceAreaForm());
+    setServiceAreaReviewNote("");
+    setServiceAreaRetireReason("");
+  };
+  const selectServiceAreaZone = (zone: ServiceAreaZone) => {
+    setSelectedServiceAreaKey(serviceAreaZoneKey(zone));
+    setServiceAreaForm({
+      zoneRef: zone.zoneRef,
+      displayName: zone.displayName,
+      scopeType: zone.scopeType,
+      employerTenantId: zone.employerTenantId ?? "",
+      polygonGeoJson: zone.polygonGeoJson,
+      effectiveFrom: zone.effectiveFrom.slice(0, 16),
+      effectiveUntil: zone.effectiveUntil?.slice(0, 16) ?? "",
+      changeReason: zone.changeReason,
+    });
+    setServiceAreaReviewNote("");
+    setServiceAreaRetireReason("");
+  };
+  const idempotentAdminWrite = async (
+    path: string,
+    method: "POST" | "PATCH",
+    body: object,
+    afterSuccess?: () => Promise<void>,
+  ) => {
+    setAdminInProgress(true);
+    setNotice("");
+    try {
+      const response = await request(path, {
+        method,
+        body: JSON.stringify(body),
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
+      if (!response.ok) {
+        setNotice(
+          `${copy.blocked} (${response.status}): ${JSON.stringify(payload)}`,
+        );
+        return;
+      }
+      setNotice(`${copy.recorded}: ${JSON.stringify(payload)}`);
+      await afterSuccess?.();
+    } catch {
+      setNotice(`${copy.blocked}: ${copy.adminRequestFailed}`);
+    } finally {
+      setAdminInProgress(false);
+    }
+  };
+  const selectedServiceAreaZone =
+    serviceAreaZones.find(
+      (zone) => serviceAreaZoneKey(zone) === selectedServiceAreaKey,
+    ) ?? undefined;
   const adminRequest = async (
     path: string,
     method: "POST" | "PATCH" | "PUT" | "DELETE",
@@ -709,6 +1188,84 @@ export function App(): JSX.Element {
     return <Login onLogin={setIdentity} initialError={signInError} />;
   const isBroker = identity.roles.includes("BROKER_OFFICER");
   const isAdmin = identity.roles.includes("OPS_ADMIN");
+  const canReadKycEvidence = isBroker || isAdmin;
+  const serviceCopy = serviceAreaCopy(identity.preferredLanguage);
+  const kycCopy = kycReviewCopy(identity.preferredLanguage);
+  const zoneStatusLabel = (status: ZoneStatus) => {
+    if (identity.preferredLanguage === "zh-CN") {
+      return (
+        {
+          DRAFT: "草稿",
+          PENDING_REVIEW: "待复核",
+          ACTIVE: "已启用",
+          RETIRED: "已退役",
+        } satisfies Record<ZoneStatus, string>
+      )[status];
+    }
+    if (identity.preferredLanguage === "km") {
+      return (
+        {
+          DRAFT: "ព្រាង",
+          PENDING_REVIEW: "រង់ចាំពិនិត្យ",
+          ACTIVE: "កំពុងប្រើ",
+          RETIRED: "បានបិទប្រើ",
+        } satisfies Record<ZoneStatus, string>
+      )[status];
+    }
+    return (
+      {
+        DRAFT: "Draft",
+        PENDING_REVIEW: "Pending review",
+        ACTIVE: "Active",
+        RETIRED: "Retired",
+      } satisfies Record<ZoneStatus, string>
+    )[status];
+  };
+  const kycAssessmentLabel = (
+    result: KycEvidenceListItem["assessmentResult"],
+  ) => {
+    if (!result) return "—";
+    if (identity.preferredLanguage === "zh-CN") {
+      return (
+        {
+          MATCH: "命中区域",
+          OUT_OF_ZONE: "区域外",
+          OUT_OF_COUNTRY: "国家外",
+          LOW_ACCURACY: "精度不足",
+          UNAVAILABLE: "不可用",
+        } satisfies Record<
+          NonNullable<KycEvidenceListItem["assessmentResult"]>,
+          string
+        >
+      )[result];
+    }
+    if (identity.preferredLanguage === "km") {
+      return (
+        {
+          MATCH: "ត្រូវនឹងតំបន់",
+          OUT_OF_ZONE: "នៅក្រៅតំបន់",
+          OUT_OF_COUNTRY: "នៅក្រៅប្រទេស",
+          LOW_ACCURACY: "ភាពត្រឹមត្រូវមិនគ្រប់គ្រាន់",
+          UNAVAILABLE: "មិនអាចប្រើបាន",
+        } satisfies Record<
+          NonNullable<KycEvidenceListItem["assessmentResult"]>,
+          string
+        >
+      )[result];
+    }
+    return (
+      {
+        MATCH: "Matched",
+        OUT_OF_ZONE: "Out of zone",
+        OUT_OF_COUNTRY: "Out of country",
+        LOW_ACCURACY: "Low accuracy",
+        UNAVAILABLE: "Unavailable",
+      } satisfies Record<
+        NonNullable<KycEvidenceListItem["assessmentResult"]>,
+        string
+      >
+    )[result];
+  };
   return (
     <main style={shell}>
       <header
@@ -1544,6 +2101,532 @@ export function App(): JSX.Element {
               </div>
             ))}
           </section>
+        </section>
+      ) : null}
+      {isAdmin ? (
+        <section style={card}>
+          <h2>{serviceCopy.title}</h2>
+          <p>{serviceCopy.description}</p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <button
+              disabled={serviceAreaLoading}
+              onClick={() => void refreshServiceAreaZones()}
+            >
+              {serviceAreaLoading ? "…" : serviceCopy.refresh}
+            </button>
+            <button type="button" onClick={resetServiceAreaForm}>
+              {serviceCopy.resetForm}
+            </button>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(320px, 420px) minmax(0, 1fr)",
+              gap: 20,
+              marginTop: 18,
+            }}
+          >
+            <form
+              style={form}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!serviceAreaForm.polygonGeoJson) {
+                  setNotice(
+                    identity.preferredLanguage === "zh-CN"
+                      ? "请先在地图上圈选允许借款区域。"
+                      : identity.preferredLanguage === "km"
+                        ? "សូមគូសតំបន់អនុញ្ញាតនៅលើផែនទីជាមុនសិន។"
+                        : "Draw the service area on the map before saving.",
+                  );
+                  return;
+                }
+                const payload = {
+                  zoneRef: serviceAreaForm.zoneRef.trim().toUpperCase(),
+                  displayName: serviceAreaForm.displayName.trim(),
+                  scopeType: serviceAreaForm.scopeType,
+                  ...(serviceAreaForm.scopeType === "EMPLOYER_TENANT" &&
+                  serviceAreaForm.employerTenantId
+                    ? { employerTenantId: serviceAreaForm.employerTenantId }
+                    : {}),
+                  polygonGeoJson: serviceAreaForm.polygonGeoJson,
+                  effectiveFrom: new Date(
+                    serviceAreaForm.effectiveFrom,
+                  ).toISOString(),
+                  ...(serviceAreaForm.effectiveUntil
+                    ? {
+                        effectiveUntil: new Date(
+                          serviceAreaForm.effectiveUntil,
+                        ).toISOString(),
+                      }
+                    : {}),
+                  changeReason: serviceAreaForm.changeReason.trim(),
+                };
+                if (selectedServiceAreaZone) {
+                  void idempotentAdminWrite(
+                    `/v1/local/admin/service-area-zones/${encodeURIComponent(selectedServiceAreaZone.zoneRef)}/drafts/${selectedServiceAreaZone.version}`,
+                    "PATCH",
+                    payload,
+                    refreshServiceAreaZones,
+                  );
+                  return;
+                }
+                void idempotentAdminWrite(
+                  "/v1/local/admin/service-area-zones",
+                  "POST",
+                  payload,
+                  async () => {
+                    await refreshServiceAreaZones();
+                    resetServiceAreaForm();
+                  },
+                );
+              }}
+            >
+              <h3>
+                {selectedServiceAreaZone
+                  ? `${serviceCopy.selectedVersion}: ${selectedServiceAreaZone.zoneRef} v${selectedServiceAreaZone.version}`
+                  : serviceCopy.create}
+              </h3>
+              <label>
+                {serviceCopy.zoneRef}
+                <input
+                  value={serviceAreaForm.zoneRef}
+                  disabled={Boolean(selectedServiceAreaZone)}
+                  onChange={(event) =>
+                    setServiceAreaForm((current) => ({
+                      ...current,
+                      zoneRef: event.target.value.toUpperCase(),
+                    }))
+                  }
+                  placeholder="ZONE-PPH-001"
+                  required
+                />
+              </label>
+              <label>
+                {serviceCopy.displayName}
+                <input
+                  value={serviceAreaForm.displayName}
+                  onChange={(event) =>
+                    setServiceAreaForm((current) => ({
+                      ...current,
+                      displayName: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </label>
+              <label>
+                {serviceCopy.scopeType}
+                <select
+                  value={serviceAreaForm.scopeType}
+                  onChange={(event) =>
+                    setServiceAreaForm((current) => ({
+                      ...current,
+                      scopeType: event.target.value as ZoneScopeType,
+                      employerTenantId:
+                        event.target.value === "EMPLOYER_TENANT"
+                          ? current.employerTenantId
+                          : "",
+                    }))
+                  }
+                >
+                  <option value="PLATFORM">{serviceCopy.platformScope}</option>
+                  <option value="EMPLOYER_TENANT">
+                    {serviceCopy.employerScope}
+                  </option>
+                </select>
+              </label>
+              {serviceAreaForm.scopeType === "EMPLOYER_TENANT" ? (
+                <label>
+                  {serviceCopy.employerTenant}
+                  <select
+                    value={serviceAreaForm.employerTenantId}
+                    onChange={(event) =>
+                      setServiceAreaForm((current) => ({
+                        ...current,
+                        employerTenantId: event.target.value,
+                      }))
+                    }
+                    required
+                  >
+                    <option value="">—</option>
+                    {employerTenants
+                      .filter((tenant) => tenant.isActive)
+                      .map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.displayName} ({tenant.externalRef})
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
+              <ServiceAreaMapEditor
+                label={serviceCopy.polygon}
+                value={serviceAreaForm.polygonGeoJson}
+                editable={
+                  !selectedServiceAreaZone ||
+                  selectedServiceAreaZone.status === "DRAFT"
+                }
+                zones={serviceAreaZones.map((zone) => ({
+                  key: serviceAreaZoneKey(zone),
+                  zoneRef: zone.zoneRef,
+                  version: zone.version,
+                  displayName: zone.displayName,
+                  status: zone.status,
+                  polygonGeoJson: zone.polygonGeoJson,
+                }))}
+                onChange={(polygonGeoJson) =>
+                  setServiceAreaForm((current) => ({
+                    ...current,
+                    polygonGeoJson,
+                  }))
+                }
+              />
+              <label>
+                {serviceCopy.effectiveFrom}
+                <input
+                  type="datetime-local"
+                  value={serviceAreaForm.effectiveFrom}
+                  onChange={(event) =>
+                    setServiceAreaForm((current) => ({
+                      ...current,
+                      effectiveFrom: event.target.value,
+                    }))
+                  }
+                  required
+                />
+              </label>
+              <label>
+                {serviceCopy.effectiveUntil}
+                <input
+                  type="datetime-local"
+                  value={serviceAreaForm.effectiveUntil}
+                  onChange={(event) =>
+                    setServiceAreaForm((current) => ({
+                      ...current,
+                      effectiveUntil: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                {serviceCopy.changeReason}
+                <textarea
+                  value={serviceAreaForm.changeReason}
+                  onChange={(event) =>
+                    setServiceAreaForm((current) => ({
+                      ...current,
+                      changeReason: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  required
+                />
+              </label>
+              <button
+                disabled={
+                  adminInProgress ||
+                  selectedServiceAreaZone?.status === "PENDING_REVIEW" ||
+                  selectedServiceAreaZone?.status === "ACTIVE" ||
+                  selectedServiceAreaZone?.status === "RETIRED"
+                }
+              >
+                {adminInProgress
+                  ? "…"
+                  : selectedServiceAreaZone
+                    ? serviceCopy.updateDraft
+                    : serviceCopy.create}
+              </button>
+            </form>
+            <section style={{ ...card, marginTop: 0 }}>
+              <h3>{serviceCopy.zoneVersions}</h3>
+              {serviceAreaZones.length === 0 ? (
+                <p>{serviceCopy.noZones}</p>
+              ) : (
+                serviceAreaZones.map((zone) => (
+                  <div
+                    key={serviceAreaZoneKey(zone)}
+                    style={{
+                      borderTop: "1px solid #e2e8f0",
+                      padding: "12px 0",
+                      background:
+                        selectedServiceAreaKey === serviceAreaZoneKey(zone)
+                          ? "#f8fafc"
+                          : "transparent",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        <strong>
+                          {zone.zoneRef} v{zone.version}
+                        </strong>
+                        <div>
+                          {zone.displayName} · {zoneStatusLabel(zone.status)} ·{" "}
+                          {zone.scopeType === "PLATFORM"
+                            ? serviceCopy.platformScope
+                            : serviceCopy.employerScope}
+                        </div>
+                        <div style={{ fontSize: 13, color: "#475569" }}>
+                          {zone.effectiveFrom}
+                          {zone.effectiveUntil
+                            ? ` → ${zone.effectiveUntil}`
+                            : ""}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => selectServiceAreaZone(zone)}
+                      >
+                        {serviceCopy.version}
+                      </button>
+                    </div>
+                    {selectedServiceAreaKey === serviceAreaZoneKey(zone) ? (
+                      <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                        <p>
+                          {serviceCopy.changeReason}: {zone.changeReason}
+                        </p>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          {serviceCopy.reviewNote}
+                          <textarea
+                            value={serviceAreaReviewNote}
+                            onChange={(event) =>
+                              setServiceAreaReviewNote(event.target.value)
+                            }
+                            rows={2}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          {serviceCopy.retireReason}
+                          <textarea
+                            value={serviceAreaRetireReason}
+                            onChange={(event) =>
+                              setServiceAreaRetireReason(event.target.value)
+                            }
+                            rows={2}
+                          />
+                        </label>
+                        <div
+                          style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+                        >
+                          <button
+                            type="button"
+                            disabled={
+                              adminInProgress || zone.status !== "DRAFT"
+                            }
+                            onClick={() =>
+                              void idempotentAdminWrite(
+                                `/v1/local/admin/service-area-zones/${encodeURIComponent(zone.zoneRef)}/drafts/${zone.version}/submit-review`,
+                                "POST",
+                                {},
+                                refreshServiceAreaZones,
+                              )
+                            }
+                          >
+                            {serviceCopy.submitReview}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              adminInProgress ||
+                              zone.status !== "PENDING_REVIEW"
+                            }
+                            onClick={() =>
+                              void idempotentAdminWrite(
+                                `/v1/local/admin/service-area-zones/${encodeURIComponent(zone.zoneRef)}/versions/${zone.version}/review`,
+                                "POST",
+                                serviceAreaReviewNote.trim()
+                                  ? { reviewNote: serviceAreaReviewNote.trim() }
+                                  : {},
+                                refreshServiceAreaZones,
+                              )
+                            }
+                          >
+                            {serviceCopy.review}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              adminInProgress ||
+                              zone.status !== "PENDING_REVIEW"
+                            }
+                            onClick={() =>
+                              void idempotentAdminWrite(
+                                `/v1/local/admin/service-area-zones/${encodeURIComponent(zone.zoneRef)}/versions/${zone.version}/activate`,
+                                "POST",
+                                {},
+                                refreshServiceAreaZones,
+                              )
+                            }
+                          >
+                            {serviceCopy.activate}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              adminInProgress ||
+                              zone.status !== "ACTIVE" ||
+                              !serviceAreaRetireReason.trim()
+                            }
+                            onClick={() =>
+                              void idempotentAdminWrite(
+                                `/v1/local/admin/service-area-zones/${encodeURIComponent(zone.zoneRef)}/versions/${zone.version}/retire`,
+                                "POST",
+                                {
+                                  retireReason: serviceAreaRetireReason.trim(),
+                                },
+                                refreshServiceAreaZones,
+                              )
+                            }
+                          >
+                            {serviceCopy.retire}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </section>
+          </div>
+        </section>
+      ) : null}
+      {canReadKycEvidence ? (
+        <section style={card}>
+          <h2>{kycCopy.title}</h2>
+          <p>{kycCopy.description}</p>
+          <button
+            disabled={kycEvidenceLoading}
+            onClick={() => void refreshKycEvidence()}
+          >
+            {kycEvidenceLoading ? "…" : kycCopy.refresh}
+          </button>
+          <p style={{ color: "#475569" }}>{kycCopy.coordinatesHidden}</p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(320px, 420px) minmax(0, 1fr)",
+              gap: 20,
+              marginTop: 18,
+            }}
+          >
+            <section style={{ ...card, marginTop: 0 }}>
+              <h3>{kycCopy.listTitle}</h3>
+              {kycEvidenceItems.length === 0 ? (
+                <p>{kycCopy.noItems}</p>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {kycEvidenceItems.map((item) => (
+                    <button
+                      key={item.evidenceRef}
+                      type="button"
+                      style={{
+                        textAlign: "left",
+                        padding: 12,
+                        borderRadius: 8,
+                        border:
+                          selectedKycEvidenceRef === item.evidenceRef
+                            ? "2px solid #0f172a"
+                            : "1px solid #cbd5e1",
+                        background: "#fff",
+                      }}
+                      onClick={() =>
+                        void loadKycEvidenceDetail(item.evidenceRef)
+                      }
+                    >
+                      <strong>{item.evidenceRef}</strong>
+                      <div>
+                        {kycCopy.applicationNo}: {item.applicationNo ?? "—"}
+                      </div>
+                      <div>
+                        {kycCopy.assessmentResult}:{" "}
+                        {kycAssessmentLabel(item.assessmentResult)}
+                      </div>
+                      <div>
+                        {kycCopy.submittedAt}: {item.submittedAt}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+            <section style={{ ...card, marginTop: 0 }}>
+              <h3>{kycCopy.detailTitle}</h3>
+              {selectedKycEvidence ? (
+                <>
+                  <dl
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "max-content 1fr",
+                      gap: 8,
+                    }}
+                  >
+                    <dt>{kycCopy.evidenceRef}</dt>
+                    <dd>{selectedKycEvidence.evidence.evidenceRef}</dd>
+                    <dt>{kycCopy.applicationNo}</dt>
+                    <dd>{selectedKycEvidence.evidence.applicationNo ?? "—"}</dd>
+                    <dt>{kycCopy.assessmentResult}</dt>
+                    <dd>
+                      {kycAssessmentLabel(
+                        selectedKycEvidence.evidence.assessmentResult,
+                      )}
+                    </dd>
+                    <dt>{kycCopy.scopeType}</dt>
+                    <dd>
+                      {selectedKycEvidence.evidence.assessedScopeType ?? "—"}
+                    </dd>
+                    <dt>{kycCopy.matchedZone}</dt>
+                    <dd>
+                      {selectedKycEvidence.evidence.matchedZoneRef
+                        ? `${selectedKycEvidence.evidence.matchedZoneRef} v${selectedKycEvidence.evidence.matchedZoneVersion ?? "?"}`
+                        : "—"}
+                    </dd>
+                    <dt>{kycCopy.source}</dt>
+                    <dd>{selectedKycEvidence.evidence.source}</dd>
+                    <dt>{kycCopy.consentVersion}</dt>
+                    <dd>{selectedKycEvidence.evidence.consentVersion}</dd>
+                    <dt>{kycCopy.ruleVersion}</dt>
+                    <dd>{selectedKycEvidence.evidence.ruleVersion ?? "—"}</dd>
+                    <dt>{kycCopy.submittedAt}</dt>
+                    <dd>{selectedKycEvidence.evidence.submittedAt}</dd>
+                    <dt>{kycCopy.assessedAt}</dt>
+                    <dd>{selectedKycEvidence.evidence.assessedAt ?? "—"}</dd>
+                  </dl>
+                  <h4 style={{ marginTop: 16 }}>{kycCopy.auditTrail}</h4>
+                  {selectedKycEvidence.audit.length === 0 ? (
+                    <p>{copy.notRecorded}</p>
+                  ) : (
+                    selectedKycEvidence.audit.map((entry, index) => (
+                      <div
+                        key={`${entry.eventType}-${entry.occurredAt}-${index}`}
+                        style={{
+                          borderTop: "1px solid #e2e8f0",
+                          padding: "10px 0",
+                        }}
+                      >
+                        <strong>{entry.eventType}</strong>
+                        <div>
+                          {entry.actorUserRef} · {entry.occurredAt}
+                        </div>
+                        <pre
+                          style={{ whiteSpace: "pre-wrap", margin: "8px 0 0" }}
+                        >
+                          {JSON.stringify(entry.payload, null, 2)}
+                        </pre>
+                      </div>
+                    ))
+                  )}
+                </>
+              ) : (
+                <p>{kycCopy.coordinatesHidden}</p>
+              )}
+            </section>
+          </div>
         </section>
       ) : null}
       {!isBroker && !isAdmin ? (

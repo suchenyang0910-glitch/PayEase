@@ -114,6 +114,15 @@ export type ApplicantLoanSummary = Readonly<{
     wealthProofDeclared: boolean;
     submittedAt: string;
   }>;
+  kycLocation?: null | Readonly<{
+    assessmentResult:
+      | "MATCH"
+      | "OUT_OF_ZONE"
+      | "OUT_OF_COUNTRY"
+      | "LOW_ACCURACY"
+      | "UNAVAILABLE";
+    submittedAt: string;
+  }>;
   timeline?: ReadonlyArray<
     Readonly<{
       occurredAt: string;
@@ -146,6 +155,7 @@ export function formatApplicantLoanSummary(
     | "recordDetail"
     | "repaymentProof"
     | "reassessmentRequest"
+    | "kycLocation"
     | "timeline"
   > = {},
 ): ApplicantLoanSummary {

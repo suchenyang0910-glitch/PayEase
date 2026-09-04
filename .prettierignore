@@ -1,0 +1,8 @@
+# Local document rendering and QA intermediates are not source artifacts.
+tmp/
+
+# Local test logs are never source artifacts.
+_tmp_*.txt
+
+# Generated investor presentation renderings are reviewed separately.
+investor_ppt_build/

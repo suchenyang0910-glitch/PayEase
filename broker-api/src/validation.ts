@@ -517,3 +517,126 @@ export const employerTenantCreateSchema = z.object({
   externalRef: z.string().regex(/^[A-Z0-9_-]{3,64}$/),
   displayName: z.string().trim().min(1).max(160),
 });
+
+const polygonPointSchema = z.tuple([z.number(), z.number()]);
+const polygonGeoJsonSchema = z
+  .object({
+    type: z.literal("Polygon"),
+    coordinates: z.array(z.array(polygonPointSchema)).length(1),
+  })
+  .superRefine((value, context) => {
+    const ring = value.coordinates[0] ?? [];
+    if (ring.length < 4) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["coordinates"],
+        message: "Polygon ring must contain at least four points.",
+      });
+      return;
+    }
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (!first || !last || first[0] !== last[0] || first[1] !== last[1]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["coordinates"],
+        message: "Polygon ring must be explicitly closed.",
+      });
+      return;
+    }
+    const distinct = new Set(
+      ring
+        .slice(0, -1)
+        .map(([longitude, latitude]) => `${longitude},${latitude}`),
+    );
+    if (distinct.size < 3) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["coordinates"],
+        message: "Polygon must contain at least three distinct points.",
+      });
+    }
+  });
+
+const serviceAreaZoneBaseObjectSchema = z
+  .object({
+    zoneRef: z
+      .string()
+      .trim()
+      .regex(/^ZONE-[A-Z0-9-]{3,64}$/),
+    displayName: z.string().trim().min(1).max(160),
+    scopeType: z.enum(["PLATFORM", "EMPLOYER_TENANT"]),
+    employerTenantId: z.string().uuid().optional(),
+    polygonGeoJson: polygonGeoJsonSchema,
+    effectiveFrom: z.string().datetime(),
+    effectiveUntil: z.string().datetime().optional().nullable(),
+    changeReason: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+function refineServiceAreaZoneInput(
+  value: {
+    scopeType: "PLATFORM" | "EMPLOYER_TENANT";
+    employerTenantId?: string;
+    effectiveFrom: string;
+    effectiveUntil?: string | null;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (value.scopeType === "EMPLOYER_TENANT" && !value.employerTenantId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["employerTenantId"],
+      message: "Employer scope requires employerTenantId.",
+    });
+  }
+  if (value.scopeType === "PLATFORM" && value.employerTenantId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["employerTenantId"],
+      message: "Platform scope must not include employerTenantId.",
+    });
+  }
+  if (
+    value.effectiveUntil &&
+    new Date(value.effectiveUntil).getTime() <=
+      new Date(value.effectiveFrom).getTime()
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["effectiveUntil"],
+      message: "effectiveUntil must be later than effectiveFrom.",
+    });
+  }
+}
+
+export const serviceAreaZoneCreateSchema =
+  serviceAreaZoneBaseObjectSchema.superRefine(refineServiceAreaZoneInput);
+export const serviceAreaZoneDraftPatchSchema = serviceAreaZoneBaseObjectSchema
+  .omit({
+    zoneRef: true,
+  })
+  .superRefine(refineServiceAreaZoneInput);
+export const serviceAreaZoneReviewSchema = z
+  .object({
+    reviewNote: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict();
+export const serviceAreaZoneRetireSchema = z
+  .object({
+    retireReason: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export const kycLocationEvidenceCreateSchema = z
+  .object({
+    latitude: z.number().gte(-90).lte(90),
+    longitude: z.number().gte(-180).lte(180),
+    horizontalAccuracyMeters: z.number().positive().max(50000),
+    capturedAt: z.string().datetime(),
+    consentVersion: z
+      .string()
+      .trim()
+      .regex(/^[A-Z0-9_]{3,64}$/),
+  })
+  .strict();

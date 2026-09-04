@@ -20,9 +20,7 @@ export type ContractType = (typeof CONTRACT_TYPES)[number];
 export const ROUNDING_MODES = ["HALF_EVEN", "HALF_UP", "DOWN"] as const;
 export type RoundingMode = (typeof ROUNDING_MODES)[number];
 
-export const REPAYMENT_METHODS = [
-  "SMILE_WALLET_AUTHORIZATION",
-] as const;
+export const REPAYMENT_METHODS = ["SMILE_WALLET_AUTHORIZATION"] as const;
 export type RepaymentMethod = (typeof REPAYMENT_METHODS)[number];
 
 export const REVENUE_SHARE_TYPES = [
@@ -667,9 +665,7 @@ export const DEFAULT_EMPLOYER_PAYROLL_RULE_V2: EmployerPayrollRuleVersion = {
     { nodeRef: "PAYDAY-1", scheduleType: "FIXED_DAY", dayOfMonth: 15 },
     { nodeRef: "PAYDAY-2", scheduleType: "LAST_DAY_OF_MONTH" },
   ],
-  allowedRepaymentMethods: [
-    "SMILE_WALLET_AUTHORIZATION",
-  ],
+  allowedRepaymentMethods: ["SMILE_WALLET_AUTHORIZATION"],
   defaultRepaymentMethod: "SMILE_WALLET_AUTHORIZATION",
   effectiveFrom: "2026-08-21T00:00:00.000Z",
 };

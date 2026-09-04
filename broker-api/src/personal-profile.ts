@@ -151,6 +151,7 @@ export function decryptPersonalValue(ciphertext: Buffer): string {
     algorithm,
     encryptionKey(version),
     Buffer.from(ivValue, "base64url"),
+    { authTagLength: 16 },
   );
   decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
   const plaintext = Buffer.concat([

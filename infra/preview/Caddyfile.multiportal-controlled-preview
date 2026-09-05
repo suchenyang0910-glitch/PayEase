@@ -16,16 +16,24 @@
 }
 
 payease-hr-demo.khmerx.org {
-	root * /var/www/payease-v1/hr/current
-	try_files {path} /index.html
-	file_server
+	route {
+		@hidden path /.env /.env.* /.git /.git/* /.htaccess /.htpasswd /.DS_Store /.npmrc
+		respond @hidden 404
+		root * /var/www/payease-v1/hr/current
+		try_files {path} /index.html
+		file_server
+	}
 	import payease_controlled_demo_headers
 }
 
 payease-finance-demo.khmerx.org {
-	root * /var/www/payease-v1/finance/current
-	try_files {path} /index.html
-	file_server
+	route {
+		@hidden path /.env /.env.* /.git /.git/* /.htaccess /.htpasswd /.DS_Store /.npmrc
+		respond @hidden 404
+		root * /var/www/payease-v1/finance/current
+		try_files {path} /index.html
+		file_server
+	}
 	import payease_controlled_demo_headers
 }
 

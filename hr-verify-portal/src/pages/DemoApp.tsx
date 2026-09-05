@@ -44,6 +44,8 @@ export type HrDemoCopyRow = Readonly<{
   reviewDemo: string;
   employmentOutcome: string;
   matchPending: string;
+  matchConfirmed: string;
+  notMatched: string;
 }>;
 
 export const HR_DEMO_COPY: Record<DemoLanguage, HrDemoCopyRow> = {
@@ -63,6 +65,8 @@ export const HR_DEMO_COPY: Record<DemoLanguage, HrDemoCopyRow> = {
     reviewDemo: "查看演示",
     employmentOutcome: "就业结论",
     matchPending: "匹配待处理",
+    matchConfirmed: "已核验匹配",
+    notMatched: "未匹配",
   },
   en: {
     title: "PayEase HR verification demo",
@@ -81,6 +85,8 @@ export const HR_DEMO_COPY: Record<DemoLanguage, HrDemoCopyRow> = {
     reviewDemo: "Review demo",
     employmentOutcome: "Employment outcome",
     matchPending: "MATCH PENDING",
+    matchConfirmed: "MATCH CONFIRMED",
+    notMatched: "NOT MATCHED",
   },
   km: {
     title: "ការបង្ហាញការផ្ទៀងផ្ទាត់ HR របស់ PayEase",
@@ -99,6 +105,8 @@ export const HR_DEMO_COPY: Record<DemoLanguage, HrDemoCopyRow> = {
     reviewDemo: "ពិនិត្យការបង្ហាញ",
     employmentOutcome: "លទ្ធផលការងារ",
     matchPending: "កំពុងរង់ចាំផ្គូផ្គង",
+    matchConfirmed: "បានបញ្ជាក់ថាត្រូវគ្នា",
+    notMatched: "មិនត្រូវគ្នា",
   },
 };
 
@@ -108,7 +116,11 @@ type HrDemoLanguageContextValue = Readonly<{
   language: DemoLanguage;
   copy: HrDemoCopyRow;
   setLanguage: (next: DemoLanguage) => void;
+  outcome: HrDemoOutcome;
+  recordOutcome: (next: Exclude<HrDemoOutcome, "PENDING">) => void;
 }>;
+
+type HrDemoOutcome = "PENDING" | "MATCHED" | "NOT_MATCHED";
 
 const HrDemoLanguageContext = createContext<HrDemoLanguageContextValue | null>(
   null,
@@ -148,6 +160,7 @@ function HrDemoLanguageProvider({
   const [language, setLanguageState] = useState<DemoLanguage>(() =>
     readInitialLanguage(),
   );
+  const [outcome, setOutcome] = useState<HrDemoOutcome>("PENDING");
   const setLanguage = useCallback((next: DemoLanguage) => {
     setLanguageState(next);
     try {
@@ -157,8 +170,14 @@ function HrDemoLanguageProvider({
     }
   }, []);
   const value = useMemo<HrDemoLanguageContextValue>(
-    () => ({ language, copy: HR_DEMO_COPY[language], setLanguage }),
-    [language, setLanguage],
+    () => ({
+      language,
+      copy: HR_DEMO_COPY[language],
+      setLanguage,
+      outcome,
+      recordOutcome: setOutcome,
+    }),
+    [language, outcome, setLanguage],
   );
   return (
     <HrDemoLanguageContext.Provider value={value}>
@@ -237,7 +256,7 @@ function Login(): JSX.Element {
 
 function List(): JSX.Element {
   const navigate = useNavigate();
-  const { copy } = useHrDemoLanguage();
+  const { copy, outcome } = useHrDemoLanguage();
   return (
     <>
       <h1>{copy.list}</h1>
@@ -255,7 +274,7 @@ function List(): JSX.Element {
           <tr>
             <td>DEMO-EMP-001</td>
             <td>2026-08-15</td>
-            <td>PENDING</td>
+            <td>{outcomeLabel(outcome, copy)}</td>
             <td>
               <button onClick={() => void navigate("/employment/DEMO-EMP-001")}>
                 {copy.reviewDemo}
@@ -271,7 +290,11 @@ function List(): JSX.Element {
 function Detail(): JSX.Element {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { copy } = useHrDemoLanguage();
+  const { copy, outcome, recordOutcome } = useHrDemoLanguage();
+  const record = (next: Exclude<HrDemoOutcome, "PENDING">) => {
+    recordOutcome(next);
+    navigate("/employment/list");
+  };
   return (
     <>
       <h1>{copy.detail}</h1>
@@ -280,14 +303,10 @@ function Detail(): JSX.Element {
         <dt>{copy.verificationReference}</dt>
         <dd>{id}</dd>
         <dt>{copy.employmentOutcome}</dt>
-        <dd>{copy.matchPending}</dd>
+        <dd>{outcomeLabel(outcome, copy)}</dd>
       </dl>
-      <button onClick={() => void navigate("/employment/list")}>
-        {copy.verify}
-      </button>{" "}
-      <button onClick={() => void navigate("/employment/list")}>
-        {copy.reject}
-      </button>
+      <button onClick={() => record("MATCHED")}>{copy.verify}</button>{" "}
+      <button onClick={() => record("NOT_MATCHED")}>{copy.reject}</button>
       <p>
         <button onClick={() => void navigate("/employment/list")}>
           {copy.back}
@@ -295,6 +314,12 @@ function Detail(): JSX.Element {
       </p>
     </>
   );
+}
+
+function outcomeLabel(outcome: HrDemoOutcome, copy: HrDemoCopyRow): string {
+  if (outcome === "MATCHED") return copy.matchConfirmed;
+  if (outcome === "NOT_MATCHED") return copy.notMatched;
+  return copy.matchPending;
 }
 
 export function App(): JSX.Element {

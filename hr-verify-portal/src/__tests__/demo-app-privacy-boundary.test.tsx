@@ -182,6 +182,23 @@ describe("HR DemoApp detail privacy: only reference + outcome", () => {
   });
 });
 
+describe("HR DemoApp controlled in-session outcome", () => {
+  afterEach(() => cleanup());
+
+  it("shows the local matched result after an operator action without a network request", async () => {
+    renderDemo("/employment/DEMO-EMP-001");
+    await selectLanguage("en");
+    fireEvent.click(
+      screen.getByRole("button", { name: HR_DEMO_COPY.en.verify }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText(HR_DEMO_COPY.en.matchConfirmed),
+      ).toBeInTheDocument(),
+    );
+  });
+});
+
 describe("HR DemoApp source + bundle forbidden tokens (scope aligned to build-demo-portals.cmd Step 4)", () => {
   it("DemoApp entry only: no network/bank/HRIS tokens and no bundle markers in source", () => {
     const fs = require("node:fs") as typeof import("node:fs");

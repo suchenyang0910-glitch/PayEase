@@ -1,0 +1,28 @@
+# Public API edge for the controlled preview.
+# Browser clients use their same-origin /api proxy.  Keep only health probes
+# and Telegram's externally initiated webhook on this hostname; admin,
+# applicant, and lender-internal routes must not be reachable through it.
+
+payease-api.khmerx.org {
+	@health path /health /health/live /health/ready
+	handle @health {
+		reverse_proxy 127.0.0.1:3100
+	}
+
+	@telegram_webhook {
+		method POST
+		path_regexp ^/v1/local/internal/telegram-bot-updates/[0-9]{5,20}$
+	}
+	handle @telegram_webhook {
+		reverse_proxy 127.0.0.1:3100
+	}
+
+	respond "Not found\n" 404
+	header {
+		-Server
+		Cache-Control "no-store"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+}

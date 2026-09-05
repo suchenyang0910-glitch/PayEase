@@ -348,12 +348,6 @@ export function HomePage({
       en: "This service is delivered by a licensed financial institution. Amount, fees and contract terms are independently reviewed and presented before confirmation. Borrow wisely and repay on time to protect your credit standing.",
       km: "សេវាកម្មនេះផ្តល់ដោយស្ថាប័នហិរញ្ញវត្ថុមានអាជ្ញាប័ណ្ណ។ ចំនួន ថ្លៃ និងល័ក្ខខ័ណ្ឌកិច្ចសន្យា ត្រូវបានពិនិត្យដោយឯករាជ្យ និងបង្ហាញមុនការបញ្ជាក់។ សូមខ្ចីឲ្យសមស្រប និងសងទាន់ពេល ដើម្បីការពារកេរដំណែលរបស់អ្នក។",
     }),
-    licensedNotice: pick<string>(language, {
-      "zh-CN":
-        "额度、费用与合同条款以最终审核结果为准，并将在确认前展示。请理性借贷，按时还款。",
-      en: "Amount, fees and contract terms are independently reviewed by a licensed financial institution and shown before confirmation. Borrow responsibly.",
-      km: "ចំនួន ថ្លៃ និងល័ក្ខខ័ណ្ឌកិច្ចសន្យា ត្រូវបានពិនិត្យដោយស្ថាប័នហិរញ្ញវត្ថុមានអាជ្ញាប័ណ្ណ ហើយបង្ហាញមុនការបញ្ជាក់។ សូមខ្ចីឲ្យសមស្រប និងសងទាន់ពេល។",
-    }),
   };
   const accessibility = {
     primaryNavigation: pick<string>(language, {
@@ -682,10 +676,6 @@ export function HomePage({
               {ui.helpSafety}
             </button>
           </section>
-
-          <div className="kx-licensed" role="note">
-            {ui.licensedNotice}
-          </div>
 
           <footer className="kx-compliance" role="contentinfo">
             {ui.compliance}

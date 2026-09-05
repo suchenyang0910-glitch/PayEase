@@ -64,6 +64,8 @@ const COPY: Record<Language, Record<string, string>> = {
     fail: "标记失败",
     viewAudit: "查看审计",
     loginFailed: "登录失败，请检查账号、密码或权限。",
+    loginUnavailable:
+      "暂时无法完成登录。请确认已通过浏览器预览访问验证后重试。",
     actionFailed: "操作未完成。请检查权限、当前状态和证据引用。",
     expired: "会话已失效，请重新登录。",
     noAccess: "没有执行此操作的权限。",
@@ -89,6 +91,8 @@ const COPY: Record<Language, Record<string, string>> = {
     fail: "Mark failed",
     viewAudit: "View audit",
     loginFailed: "Sign-in failed. Check account, password, or role.",
+    loginUnavailable:
+      "Sign-in is temporarily unavailable. Complete the browser preview access check, then retry.",
     actionFailed:
       "The action was not completed. Check role, state, and evidence reference.",
     expired: "Your session has expired. Please sign in again.",
@@ -116,6 +120,8 @@ const COPY: Record<Language, Record<string, string>> = {
     fail: "សម្គាល់ថាបរាជ័យ",
     viewAudit: "មើលសវនកម្ម",
     loginFailed: "មិនអាចចូលប្រើបានទេ។ សូមពិនិត្យគណនី ពាក្យសម្ងាត់ ឬសិទ្ធិ។",
+    loginUnavailable:
+      "មិនអាចចូលប្រើបានជាបណ្តោះអាសន្នទេ។ សូមបំពេញការផ្ទៀងផ្ទាត់ចូលប្រើតាមកម្មវិធីរុករក ហើយព្យាយាមម្ដងទៀត។",
     actionFailed: "មិនអាចបញ្ចប់ប្រតិបត្តិការបានទេ។",
     expired: "សម័យរបស់អ្នកបានផុតកំណត់។ សូមចូលប្រើម្តងទៀត។",
     noAccess: "អ្នកមិនមានសិទ្ធិសម្រាប់ប្រតិបត្តិការនេះទេ។",
@@ -217,6 +223,7 @@ export function App(): JSX.Element {
   const [language, setLanguage] = useState<Language>("en");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [accounts, setAccounts] = useState<OperatorAccount[]>([]);
@@ -276,16 +283,23 @@ export function App(): JSX.Element {
   const signIn = async (event: FormEvent) => {
     event.preventDefault();
     setNotice("");
-    const response = await api("/v1/lender-operator/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ loginName, password }),
-    });
-    if (!response.ok) return setNotice(text("loginFailed"));
-    const me = await api("/v1/lender-operator/auth/me");
-    if (!me.ok) return setNotice(text("loginFailed"));
-    const next = (await me.json()) as Identity;
-    setIdentity(next);
-    setLanguage(next.preferredLanguage);
+    setSigningIn(true);
+    try {
+      const response = await api("/v1/lender-operator/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ loginName, password }),
+      });
+      if (!response.ok) return setNotice(text("loginFailed"));
+      const me = await api("/v1/lender-operator/auth/me");
+      if (!me.ok) return setNotice(text("loginFailed"));
+      const next = (await me.json()) as Identity;
+      setIdentity(next);
+      setLanguage(next.preferredLanguage);
+    } catch {
+      setNotice(text("loginUnavailable"));
+    } finally {
+      setSigningIn(false);
+    }
   };
   const action = async (
     operation: Operation,
@@ -365,6 +379,10 @@ export function App(): JSX.Element {
         <section className="lender-card login-card">
           <h1>{c.title}</h1>
           <p>{c.subtitle}</p>
+          <p>
+            This form uses the lender operator account. Browser preview access
+            is a separate protection step.
+          </p>
           <form onSubmit={(event) => void signIn(event)}>
             <label>
               {c.account}
@@ -398,7 +416,9 @@ export function App(): JSX.Element {
                 <option value="km">ខ្មែរ</option>
               </select>
             </label>
-            <button type="submit">{c.signIn}</button>
+            <button type="submit" disabled={signingIn}>
+              {signingIn ? "…" : c.signIn}
+            </button>
           </form>
           {notice ? <p role="alert">{notice}</p> : null}
         </section>

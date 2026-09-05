@@ -51,6 +51,17 @@ const app = Fastify({ logger: true });
 const sessions = new WalletSessionStore();
 
 const isTestMode = process.env.NODE_ENV === "test";
+const deploymentMode =
+  process.env.PAYEASE_LENDER_DEPLOYMENT_MODE?.trim() ?? "integrated";
+const isControlledPreviewMode = deploymentMode === "controlled-preview";
+if (
+  !isTestMode &&
+  !["integrated", "controlled-preview"].includes(deploymentMode)
+) {
+  throw new Error(
+    "PAYEASE_LENDER_DEPLOYMENT_MODE must be integrated or controlled-preview.",
+  );
+}
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (!databaseUrl && !isTestMode) {
   throw new Error("DATABASE_URL is required.");
@@ -1338,6 +1349,15 @@ async function dispatchWalletOperationResultEvent(
 
 app.get("/health/live", async () => ({ ok: true, service: "lender-wallet" }));
 
+app.get("/health/ready", async (_request, reply) => {
+  try {
+    await assertPool().query("SELECT 1");
+    return { ok: true, service: "lender-wallet" };
+  } catch {
+    return reply.code(503).send({ ok: false, service: "lender-wallet" });
+  }
+});
+
 app.post(
   "/v1/lender-operator/auth/login",
   async (request: FastifyRequest, reply: FastifyReply) => {
@@ -2609,15 +2629,30 @@ const close = async (): Promise<void> => {
 };
 
 if (!isTestMode) {
-  // Optional integration: absent means disabled; a partial configuration is fatal.
-  resolveAbaPayWayConfig();
-  env("PAYEASE_LENDER_WALLET_SHARED_SECRET");
-  env("PAYEASE_LENDER_EVENT_SHARED_SECRET");
-  env("PAYEASE_LENDER_WALLET_INTERNAL_TOKEN");
-  walletPublicOrigin();
-  brokerExchangeUrl();
-  brokerDomainEventInboxUrl();
-  loadMtlsConfig();
+  // A controlled preview is deliberately standalone: it exposes only the
+  // lender-operator console behind the edge allowlist.  It must not be used
+  // to imply that Broker-to-lender mTLS, user wallet entry, or a payment
+  // channel is connected.  The normal integrated mode fails closed if any
+  // part of that cross-domain configuration is absent.
+  if (isControlledPreviewMode) {
+    if (!controlledManualOperationsEnabled()) {
+      throw new Error(
+        "PAYEASE_LENDER_CONTROLLED_MANUAL_OPERATIONS must be true in controlled-preview mode.",
+      );
+    }
+    lenderOperatorPublicOrigin();
+  } else {
+    // Optional ABA/PayWay integration: absent means disabled; a partial
+    // configuration is fatal even in the full integrated lender deployment.
+    resolveAbaPayWayConfig();
+    env("PAYEASE_LENDER_WALLET_SHARED_SECRET");
+    env("PAYEASE_LENDER_EVENT_SHARED_SECRET");
+    env("PAYEASE_LENDER_WALLET_INTERNAL_TOKEN");
+    walletPublicOrigin();
+    brokerExchangeUrl();
+    brokerDomainEventInboxUrl();
+    loadMtlsConfig();
+  }
   await runDatabaseMigrations(assertPool());
   const port = Number(process.env.PORT ?? 3200);
   const host = process.env.HOST ?? "127.0.0.1";

@@ -1,0 +1,57 @@
+# Temporary lender-console validation only.  This is intentionally a separate
+# Compose project and PostgreSQL volume from the Broker preview.  It does not
+# create a Broker/lender network bridge and does not enable any payment channel.
+name: payease-lender-controlled-preview
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: payease_lender_preview
+      POSTGRES_USER: payease_lender_preview
+      POSTGRES_PASSWORD: ${PAYEASE_LENDER_PREVIEW_POSTGRES_PASSWORD:?Set a VPS-local preview password}
+    volumes:
+      - payease-lender-controlled-preview-postgres18:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U payease_lender_preview -d payease_lender_preview",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  lender-wallet-service:
+    build:
+      context: ../..
+      dockerfile: lender-wallet-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://payease_lender_preview:${PAYEASE_LENDER_PREVIEW_POSTGRES_PASSWORD:?Set a VPS-local preview password}@postgres:5432/payease_lender_preview
+      HOST: "0.0.0.0"
+      PORT: "3210"
+      PAYEASE_LENDER_DEPLOYMENT_MODE: "controlled-preview"
+      PAYEASE_LENDER_CONTROLLED_MANUAL_OPERATIONS: "true"
+      PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN: ${PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN:?Set the exact HTTPS lender preview origin}
+    ports:
+      - "127.0.0.1:3210:3210"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3210/health/ready').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  payease-lender-controlled-preview-postgres18:

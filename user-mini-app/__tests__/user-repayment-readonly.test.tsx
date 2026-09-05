@@ -13,7 +13,10 @@ import type { ApplicationHistoryEntry, LanguageCode } from "@payease/v1-domain";
 import { formatUsdMinor } from "../src/format-usd-minor.ts";
 
 function pickLanguageCombo(): HTMLElement {
-  const all = screen.queryAllByRole("combobox", { name: "Language" });
+  const languageLabels = ["Language", "语言", "ភាសា"];
+  const all = languageLabels.flatMap((name) =>
+    screen.queryAllByRole("combobox", { name }),
+  );
   if (all.length === 0) {
     const profileTab = [
       USER_SKELETON_COPY.km.tabs.profile,
@@ -23,7 +26,9 @@ function pickLanguageCombo(): HTMLElement {
       .flatMap((name) => screen.queryAllByRole("tab", { name }))
       .find(Boolean);
     if (profileTab) fireEvent.click(profileTab);
-    return screen.getAllByRole("combobox", { name: "Language" })[0];
+    return languageLabels
+      .flatMap((name) => screen.queryAllByRole("combobox", { name }))
+      .at(0)!;
   }
   const shell = all.find((el) => !el.closest(".kx-shell"));
   return shell ?? all[0];

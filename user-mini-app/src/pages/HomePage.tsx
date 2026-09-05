@@ -355,6 +355,68 @@ export function HomePage({
       km: "ចំនួន ថ្លៃ និងល័ក្ខខ័ណ្ឌកិច្ចសន្យា ត្រូវបានពិនិត្យដោយស្ថាប័នហិរញ្ញវត្ថុមានអាជ្ញាប័ណ្ណ ហើយបង្ហាញមុនការបញ្ជាក់។ សូមខ្ចីឲ្យសមស្រប និងសងទាន់ពេល។",
     }),
   };
+  const accessibility = {
+    primaryNavigation: pick<string>(language, {
+      "zh-CN": "主导航",
+      en: "Primary",
+      km: "ការរុករកចម្បង",
+    }),
+    languageChooser: pick<string>(language, {
+      "zh-CN": "选择语言",
+      en: "Choose your language",
+      km: "ជ្រើសរើសភាសារបស់អ្នក",
+    }),
+    selectKhmer: pick<string>(language, {
+      "zh-CN": "选择高棉语",
+      en: "Select Khmer language",
+      km: "ជ្រើសរើសភាសាខ្មែរ",
+    }),
+    selectEnglish: pick<string>(language, {
+      "zh-CN": "选择英语",
+      en: "Select English language",
+      km: "ជ្រើសរើសភាសាអង់គ្លេស",
+    }),
+    selectChinese: pick<string>(language, {
+      "zh-CN": "选择中文",
+      en: "Select Chinese language",
+      km: "ជ្រើសរើសភាសាចិន",
+    }),
+    creditApplication: pick<string>(language, {
+      "zh-CN": "从额度卡开始申请",
+      en: "Start loan application from credit card",
+      km: "ចាប់ផ្តើមពាក្យសុំពីកាតឥណទាន",
+    }),
+    coreFeatures: pick<string>(language, {
+      "zh-CN": "核心功能",
+      en: "Core features",
+      km: "មុខងារសំខាន់ៗ",
+    }),
+    productApplication: pick<string>(language, {
+      "zh-CN": "从产品卡开始申请",
+      en: "Start loan application from product card",
+      km: "ចាប់ផ្តើមពាក្យសុំពីកាតផលិតផល",
+    }),
+    helpCenter: pick<string>(language, {
+      "zh-CN": "帮助中心",
+      en: "Help center",
+      km: "មជ្ឈមណ្ឌលជំនួយ",
+    }),
+    languagePreferences: pick<string>(language, {
+      "zh-CN": "语言偏好",
+      en: "Language preferences",
+      km: "ចំណូលចិត្តភាសា",
+    }),
+    language: pick<string>(language, {
+      "zh-CN": "语言",
+      en: "Language",
+      km: "ភាសា",
+    }),
+    primaryTabs: pick<string>(language, {
+      "zh-CN": "主标签页",
+      en: "Primary tabs",
+      km: "ផ្ទាំងមេ",
+    }),
+  };
 
   const activeTab: Exclude<
     UserTab,
@@ -389,7 +451,7 @@ export function HomePage({
       {/* Module 1: Top Nav */}
       <nav
         className="kx-topnav"
-        aria-label="Primary"
+        aria-label={accessibility.primaryNavigation}
         data-telegram-padding="true"
       >
         <div className="kx-topnav__brand">
@@ -485,7 +547,7 @@ export function HomePage({
           typeof onLanguageChange === "function" ? (
             <section
               className="kx-initial-language"
-              aria-label="Choose your language"
+              aria-label={accessibility.languageChooser}
             >
               <div>
                 <strong>សូមជ្រើសរើសភាសា</strong>
@@ -495,21 +557,21 @@ export function HomePage({
                 <button
                   type="button"
                   onClick={() => onLanguageChange("km")}
-                  aria-label="Select Khmer language"
+                  aria-label={accessibility.selectKhmer}
                 >
                   ខ្មែរ
                 </button>
                 <button
                   type="button"
                   onClick={() => onLanguageChange("en")}
-                  aria-label="Select English language"
+                  aria-label={accessibility.selectEnglish}
                 >
                   English
                 </button>
                 <button
                   type="button"
                   onClick={() => onLanguageChange("zh-CN")}
-                  aria-label="Select Chinese language"
+                  aria-label={accessibility.selectChinese}
                 >
                   中文
                 </button>
@@ -533,7 +595,7 @@ export function HomePage({
               className="kx-credit__cta"
               onClick={openBorrowEntry}
               disabled={borrowEntryDisabled}
-              aria-label="Start loan application from credit card"
+              aria-label={accessibility.creditApplication}
             >
               {borrowEntryText}
             </button>
@@ -541,7 +603,7 @@ export function HomePage({
           </section>
 
           {/* Module 3: Four-grid shortcuts */}
-          <section className="kx-grid" aria-label="Core features">
+          <section className="kx-grid" aria-label={accessibility.coreFeatures}>
             <button
               type="button"
               className="kx-grid__item"
@@ -596,7 +658,7 @@ export function HomePage({
               className="kx-product__cta"
               onClick={openBorrowEntry}
               disabled={borrowEntryDisabled}
-              aria-label="Start loan application from product card"
+              aria-label={accessibility.productApplication}
             >
               {borrowEntryText}
             </button>
@@ -604,7 +666,7 @@ export function HomePage({
           </section>
 
           {/* Module 5: Help links */}
-          <section className="kx-help" aria-label="Help center">
+          <section className="kx-help" aria-label={accessibility.helpCenter}>
             <button
               type="button"
               className="kx-help__link"
@@ -661,7 +723,7 @@ export function HomePage({
             current === "profile" ? (
               <section
                 className="kx-page-language"
-                aria-label="Language preferences"
+                aria-label={accessibility.languagePreferences}
               >
                 <label
                   className="kx-page-language__label"
@@ -675,7 +737,7 @@ export function HomePage({
                 </label>
                 <select
                   id="page-language"
-                  aria-label="Language"
+                  aria-label={accessibility.language}
                   value={language}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                     onLanguageChange(event.target.value as LanguageCode)
@@ -691,7 +753,7 @@ export function HomePage({
                 <label htmlFor="page-language-sync">Language</label>
                 <select
                   id="page-language-sync"
-                  aria-label="Language"
+                  aria-label={accessibility.language}
                   value={language}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                     onLanguageChange(event.target.value as LanguageCode)
@@ -708,7 +770,11 @@ export function HomePage({
       )}
 
       {/* Module 7: Bottom tabs */}
-      <nav className="kx-tabs" aria-label="Primary tabs" role="tablist">
+      <nav
+        className="kx-tabs"
+        aria-label={accessibility.primaryTabs}
+        role="tablist"
+      >
         <div className="kx-tabs__inner">
           {TAB_ORDER.map((tab) => {
             const active = activeTab === tab;

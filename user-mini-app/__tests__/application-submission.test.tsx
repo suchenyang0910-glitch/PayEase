@@ -103,13 +103,18 @@ function toggleConsentCheckbox(): void {
 }
 
 function pickLanguage(): HTMLElement {
-  const all = screen.queryAllByRole("combobox", { name: "Language" });
+  const languageLabels = ["Language", "语言", "ភាសា"];
+  const all = languageLabels.flatMap((name) =>
+    screen.queryAllByRole("combobox", { name }),
+  );
   if (all.length === 0) {
     const profileTab = ["Me", "我的", "របស់ខ្ញុំ"]
       .flatMap((name) => screen.queryAllByRole("tab", { name }))
       .find(Boolean);
     if (profileTab) fireEvent.click(profileTab);
-    return screen.getAllByRole("combobox", { name: "Language" })[0];
+    return languageLabels
+      .flatMap((name) => screen.queryAllByRole("combobox", { name }))
+      .at(0)!;
   }
   return all.find((el) => !el.closest(".kx-shell")) ?? all[0];
 }

@@ -11,7 +11,10 @@ import { App } from "../src/App.tsx";
 import { USER_SKELETON_COPY } from "../src/copy/user-copy.ts";
 
 function pickLanguageCombo(): HTMLElement {
-  const all = screen.queryAllByRole("combobox", { name: "Language" });
+  const languageLabels = ["Language", "语言", "ភាសា"];
+  const all = languageLabels.flatMap((name) =>
+    screen.queryAllByRole("combobox", { name }),
+  );
   if (all.length === 0) {
     const profileTab = [
       USER_SKELETON_COPY.km.tabs.profile,
@@ -21,7 +24,9 @@ function pickLanguageCombo(): HTMLElement {
       .flatMap((name) => screen.queryAllByRole("tab", { name }))
       .find(Boolean);
     if (profileTab) fireEvent.click(profileTab);
-    return screen.getAllByRole("combobox", { name: "Language" })[0];
+    return languageLabels
+      .flatMap((name) => screen.queryAllByRole("combobox", { name }))
+      .at(0)!;
   }
   const shell = all.find((el) => !el.closest(".kx-shell"));
   return shell ?? all[0];
@@ -97,11 +102,11 @@ describe("user-mini-app P0 skeleton navigation", () => {
     render(<App />);
 
     expect(
-      screen.getByRole("button", { name: "Select English language" }),
+      screen.getByRole("button", { name: "ជ្រើសរើសភាសាអង់គ្លេស" }),
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Select English language" }),
+      screen.getByRole("button", { name: "ជ្រើសរើសភាសាអង់គ្លេស" }),
     );
 
     expect(
@@ -110,6 +115,35 @@ describe("user-mini-app P0 skeleton navigation", () => {
     expect(
       screen.getByRole("tab", { name: USER_SKELETON_COPY.en.tabs.home }),
     ).toBeInTheDocument();
+  });
+
+  it("localizes Chinese Home accessibility labels instead of retaining English labels", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "ជ្រើសរើសភាសាចិន" }));
+
+    expect(
+      screen.getByRole("navigation", { name: "主导航" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "从额度卡开始申请" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "从产品卡开始申请" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "核心功能" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "帮助中心" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tablist", { name: "主标签页" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "Start loan application from credit card",
+      }),
+    ).toBeNull();
   });
 
   it("can navigate Orders → Repayment → Profile and render each page heading", async () => {

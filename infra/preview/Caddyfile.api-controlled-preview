@@ -21,6 +21,7 @@ payease-api.khmerx.org {
 	header {
 		-Server
 		Cache-Control "no-store"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
 		X-Robots-Tag "noindex, nofollow, noarchive"

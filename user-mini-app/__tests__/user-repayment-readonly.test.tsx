@@ -370,6 +370,26 @@ describe("user-mini-app P0 step 2: Repayment readonly boundary", () => {
     }
   });
 
+  it("Repayment guidance uses the controlled wallet authorization path, not manual repayment", async () => {
+    for (const language of ["en", "zh-CN", "km"] as const) {
+      cleanup();
+      await renderToRepayment(language, "empty-no-summary");
+      expect(
+        screen.getByText(
+          USER_SKELETON_COPY[language].repayment.authorizationNotice,
+        ),
+      ).toBeInTheDocument();
+      const body = document.body.textContent ?? "";
+      for (const re of [
+        /manual repayment guidance/i,
+        /人工还款指引/,
+        /ការណែនាំសម្រាប់ការសងដោយដៃ/,
+      ]) {
+        expect(body).not.toMatch(re);
+      }
+    }
+  });
+
   it("Repayment Contact support button navigates to Profile tab", async () => {
     await renderToRepayment("en", "has-repayment");
     const supportLabel = USER_SKELETON_COPY.en.repayment.support;

@@ -22,7 +22,7 @@ export function RepaymentPage({
         <h2 id="repayment-title" className="page__title">
           {copy.title}
         </h2>
-        <p className="page__hint">{copy.manualNotice}</p>
+        <p className="page__hint">{copy.authorizationNotice}</p>
       </header>
       <div className="page__body" data-page-anchor="repayment">
         {children ??

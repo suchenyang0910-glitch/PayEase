@@ -70,7 +70,7 @@ export type UserSkeletonCopy = Readonly<{
     empty: string;
     summary: string;
     installmentList: string;
-    manualNotice: string;
+    authorizationNotice: string;
     support: string;
   }>;
   profile: Readonly<{
@@ -138,7 +138,8 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       empty: "尚未生成账单；放款成功后将在此显示还款计划。",
       summary: "已还、未还与下一期概要",
       installmentList: "每期详情",
-      manualNotice: "人工还款指引：请以最终确认结果为准，如需协助请联系客服。",
+      authorizationNotice:
+        "请通过持牌机构的受控钱包页面完成还款授权；账单仅在验签回调后更新。如需协助请联系客服。",
       support: "联系客服",
     },
     profile: {
@@ -202,8 +203,8 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
         "No repayment schedule yet. It will appear after the licensed lender records disbursement.",
       summary: "Paid, unpaid and next-installment overview",
       installmentList: "Installment details",
-      manualNotice:
-        "Manual repayment guidance: the licensed lender carries final responsibility. Contact support if you need assistance.",
+      authorizationNotice:
+        "Complete repayment authorization in the licensed lender's controlled wallet page. Your bill updates only after the signed callback returns. Contact support if you need assistance.",
       support: "Contact support",
     },
     profile: {
@@ -267,8 +268,8 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
         "មិនទាន់មានតារាងសងប្រាក់។ វានឹងបង្ហាញនៅទីនេះ បន្ទាប់ពីស្ថាប័នមានអាជ្ញាប័ណ្ណបានកត់ត្រាការបើកប្រាក់។",
       summary: "សេចក្តីសង្ខេបនៃចំនួនដែលបានសង មិនទាន់សង និងការសងបន្ទាប់",
       installmentList: "លម្អិតនីមួយវគ្គ",
-      manualNotice:
-        "ការណែនាំសម្រាប់ការសងដោយដៃ៖ ស្ថាប័នមានអាជ្ញាប័ណ្ណជាអ្នកទទួលខុសត្រូវចុងក្រោយ។ សូមទាក់ទងសេវាកម្មប្រសិនបើត្រូវការជំនួយ។",
+      authorizationNotice:
+        "សូមបំពេញការអនុញ្ញាតសងប្រាក់នៅក្នុងទំព័រ wallet ដែលគ្រប់គ្រងដោយស្ថាប័នមានអាជ្ញាប័ណ្ណ។ វិក្កយបត្រនឹងអាប់ដេតតែបន្ទាប់ពីការហៅត្រឡប់ដែលបានផ្ទៀងផ្ទាត់។ សូមទាក់ទងសេវាកម្ម ប្រសិនបើត្រូវការជំនួយ។",
       support: "ទាក់ទងសេវាកម្ម",
     },
     profile: {

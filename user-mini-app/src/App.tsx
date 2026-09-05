@@ -5522,10 +5522,10 @@ export function App(): JSX.Element {
                   ? `${verifiedProfile.activeBill.status} · ${verifiedProfile.activeBill.referenceMasked ?? "—"}`
                   : `${verifiedProfile.activeBill.status} · ${verifiedProfile.activeBill.referenceMasked ?? "—"}`
               : language === "en"
-                ? "No active bill"
+                ? "No active wallet"
                 : language === "zh-CN"
-                  ? "暂无待处理账单"
-                  : "មិនមានវិក្កយបត្រកំពុងដំណើរការ";
+                  ? "暂无待处理钱包记录"
+                  : "មិនមានកំណត់ត្រាកាបូបកំពុងដំណើរការ";
             const kycLocationLabel =
               language === "en"
                 ? "Location check"

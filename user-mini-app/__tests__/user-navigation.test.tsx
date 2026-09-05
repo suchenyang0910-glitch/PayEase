@@ -158,6 +158,13 @@ describe("user-mini-app P0 skeleton navigation", () => {
     expect(
       screen.queryByRole("region", { name: "Telegram profile" }),
     ).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "借款" }));
+    expect(
+      screen.getByRole("region", { name: "借款工作区" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("语言")).toBeInTheDocument();
+    expect(screen.queryByText("Language", { selector: "label" })).toBeNull();
   });
 
   it("can navigate Orders → Repayment → Profile and render each page heading", async () => {

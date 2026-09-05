@@ -181,6 +181,18 @@ function reassessmentAvailability(language: LanguageCode): string {
   return "Reassessment becomes available only after the current case is closed, settled, or formally declined.";
 }
 
+function workspaceLabel(language: LanguageCode): string {
+  if (language === "zh-CN") return "借款工作区";
+  if (language === "km") return "ផ្ទាំងខ្ចីប្រាក់";
+  return "Borrow workspace";
+}
+
+function recordFiltersLabel(language: LanguageCode): string {
+  if (language === "zh-CN") return "借款记录筛选";
+  if (language === "km") return "តម្រងប្រវត្តិប្រាក់កម្ចី";
+  return "Record filters";
+}
+
 export function OrdersWorkspace({
   language,
   empty,
@@ -229,7 +241,10 @@ export function OrdersWorkspace({
         </div>
       </section>
 
-      <section className="orders-view-switch" aria-label="Borrow workspace">
+      <section
+        className="orders-view-switch"
+        aria-label={workspaceLabel(language)}
+      >
         {(["borrow", "records", "reassessment"] as const).map((view) => (
           <button
             key={view}
@@ -245,7 +260,7 @@ export function OrdersWorkspace({
       {ordersView === "borrow" ? (
         pageBody
       ) : ordersView === "records" ? (
-        <section className="records-board" aria-label="Loan records">
+        <section className="records-board" aria-label={recordsTitle(language)}>
           <div className="records-board__header">
             <div className="progress-title">
               <span>{recordsTitle(language)}</span>
@@ -257,7 +272,7 @@ export function OrdersWorkspace({
           </div>
           <section
             className="records-board__filters"
-            aria-label="Record filters"
+            aria-label={recordFiltersLabel(language)}
           >
             <strong className="records-board__section-title">
               {recordFilterTitle(language)}

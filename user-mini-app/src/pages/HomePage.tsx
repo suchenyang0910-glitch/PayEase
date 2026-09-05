@@ -750,7 +750,9 @@ export function HomePage({
               </section>
             ) : (
               <div className="kx-language-sync">
-                <label htmlFor="page-language-sync">Language</label>
+                <label htmlFor="page-language-sync">
+                  {accessibility.language}
+                </label>
                 <select
                   id="page-language-sync"
                   aria-label={accessibility.language}

@@ -26,6 +26,12 @@ export function OrdersPage({
   onEntryAction,
 }: Props): JSX.Element {
   const copy = USER_SKELETON_COPY[language].orders;
+  const borrowEntryLabel =
+    language === "zh-CN"
+      ? "借款申请入口"
+      : language === "km"
+        ? "ច្រកចូលដាក់ពាក្យខ្ចីប្រាក់"
+        : "Borrow entry";
   return (
     <section className="page page--orders" aria-labelledby="orders-title">
       <header className="page__header">
@@ -36,7 +42,7 @@ export function OrdersPage({
       </header>
       <div className="page__body" data-page-anchor="orders">
         {entryTitle ? (
-          <section className="borrow-entry-card" aria-label="Borrow entry">
+          <section className="borrow-entry-card" aria-label={borrowEntryLabel}>
             {entryStatusLabel ? (
               <p className="borrow-entry-card__status">{entryStatusLabel}</p>
             ) : null}

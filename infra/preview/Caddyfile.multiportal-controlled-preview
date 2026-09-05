@@ -1,0 +1,36 @@
+# Controlled-preview routes for the S0.5 HR and Finance demonstrations.
+# These portals use synthetic data only and are intentionally noindex/no-store.
+
+(payease_controlled_demo_headers) {
+	header {
+		-Server
+		Cache-Control "no-store, max-age=0"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+		X-Frame-Options "DENY"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+	}
+}
+
+payease-hr-demo.khmerx.org {
+	root * /var/www/payease-v1/hr/current
+	try_files {path} /index.html
+	file_server
+	import payease_controlled_demo_headers
+}
+
+payease-finance-demo.khmerx.org {
+	root * /var/www/payease-v1/finance/current
+	try_files {path} /index.html
+	file_server
+	import payease_controlled_demo_headers
+}
+
+# The actual Enterprise portal is not implemented. Return an explicit, non-cacheable
+# response instead of serving a misleading demo or a TLS failure.
+payease-employer.khmerx.org {
+	respond "KhmerX Enterprise controlled preview is not enabled.\n" 503
+	import payease_controlled_demo_headers
+}

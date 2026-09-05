@@ -45,6 +45,16 @@ import {
   type ManualOperationEventType,
   type ManualOperationStatus,
 } from "./manual-operations.js";
+import {
+  LENDER_CASE_ACTIONS,
+  LENDER_OPERATOR_ROLES,
+  canReadLenderCases,
+  lenderCaseActionPolicy,
+  nextLenderCaseState,
+  type LenderCaseAction,
+  type LenderCaseStage,
+  type LenderCaseStatus,
+} from "./lender-case-workflow.js";
 import { WalletSessionStore, type WalletSession } from "./wallet-sessions.js";
 
 const app = Fastify({ logger: true });
@@ -137,6 +147,20 @@ type WalletOperationResultOutboxRow = Readonly<{
     settledAmountMinor: string | null;
     currency: "USD";
   };
+}>;
+
+type LenderCaseQueueRow = Readonly<{
+  case_id: string;
+  case_ref: string;
+  external_application_ref: string;
+  case_type: "LOAN" | "COMPLAINT";
+  stage: LenderCaseStage;
+  status: LenderCaseStatus;
+  applicant_evidence_ref: string;
+  contract_maker_ref: string | null;
+  disbursement_maker_ref: string | null;
+  created_at: string;
+  updated_at: string;
 }>;
 
 function env(name: string): string {
@@ -1469,11 +1493,32 @@ app.post(
   },
 );
 
-const lenderOperatorRoleSchema = z.enum([
-  "LENDER_WALLET_MAKER",
-  "LENDER_WALLET_CHECKER",
-  "LENDER_WALLET_ADMIN",
+const lenderOperatorRoleSchema = z.enum(LENDER_OPERATOR_ROLES);
+const lenderCaseActionSchema = z.enum(LENDER_CASE_ACTIONS);
+const lenderWorkflowStageSchema = z.enum([
+  "KYC_AML_REVIEW",
+  "CREDIT_REVIEW",
+  "CREDIT_APPROVAL",
+  "CONTRACT_MAKER",
+  "CONTRACT_CHECKER",
+  "DISBURSEMENT_MAKER",
+  "DISBURSEMENT_CHECKER",
+  "SERVICING",
+  "COMPLAINT",
 ]);
+const lenderWorkflowStageRole: Readonly<
+  Record<z.infer<typeof lenderWorkflowStageSchema>, string>
+> = {
+  KYC_AML_REVIEW: "LENDER_KYC_AML_REVIEWER",
+  CREDIT_REVIEW: "LENDER_CREDIT_REVIEWER",
+  CREDIT_APPROVAL: "LENDER_CREDIT_APPROVER",
+  CONTRACT_MAKER: "LENDER_CONTRACT_MAKER",
+  CONTRACT_CHECKER: "LENDER_CONTRACT_CHECKER",
+  DISBURSEMENT_MAKER: "LENDER_DISBURSEMENT_MAKER",
+  DISBURSEMENT_CHECKER: "LENDER_DISBURSEMENT_CHECKER",
+  SERVICING: "LENDER_SERVICING_ACCOUNTING",
+  COMPLAINT: "LENDER_COMPLAINT_OFFICER",
+};
 
 async function requireLenderOperatorAdmin(
   request: FastifyRequest,
@@ -1534,7 +1579,7 @@ app.post(
         loginName: z.string().regex(/^[a-z0-9._-]{3,64}$/),
         password: z.string().min(12).max(256),
         preferredLanguage: z.enum(["zh-CN", "en", "km"]).default("en"),
-        roles: z.array(lenderOperatorRoleSchema).min(1).max(3),
+        roles: z.array(lenderOperatorRoleSchema).min(1).max(13),
       })
       .strict()
       .parse(request.body);
@@ -1595,7 +1640,7 @@ app.patch(
       .object({
         isActive: z.boolean().optional(),
         preferredLanguage: z.enum(["zh-CN", "en", "km"]).optional(),
-        roles: z.array(lenderOperatorRoleSchema).min(1).max(3).optional(),
+        roles: z.array(lenderOperatorRoleSchema).min(1).max(13).optional(),
       })
       .strict()
       .refine((value) => Object.keys(value).length > 0)
@@ -1671,6 +1716,576 @@ app.patch(
       );
       await client.query("COMMIT");
       return reply.code(204).send();
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get(
+  "/v1/lender-operator/admin/field-visibility",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorRole(request, reply, [
+      "LENDER_WALLET_ADMIN",
+    ]);
+    if (!identity) return;
+    const result = await assertPool().query<{
+      role_code: string;
+      resource_code: string;
+      field_code: string;
+      is_visible: boolean;
+      updated_at: string;
+    }>(
+      `SELECT role_code, resource_code, field_code, is_visible, updated_at::text
+         FROM lender_role_field_visibility
+        ORDER BY role_code, resource_code, field_code`,
+    );
+    return {
+      rules: result.rows.map((row) => ({
+        roleCode: row.role_code,
+        resourceCode: row.resource_code,
+        fieldCode: row.field_code,
+        isVisible: row.is_visible,
+        updatedAt: row.updated_at,
+      })),
+    };
+  },
+);
+
+app.put(
+  "/v1/lender-operator/admin/field-visibility",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    const input = z
+      .object({
+        roleCode: lenderOperatorRoleSchema,
+        resourceCode: z.enum([
+          "CASE_SUMMARY",
+          "KYC_EVIDENCE",
+          "CREDIT_DECISION",
+          "CONTRACT_EVIDENCE",
+          "DISBURSEMENT",
+          "SERVICING",
+          "COMPLAINT",
+          "AUDIT",
+        ]),
+        fieldCode: z.string().regex(/^[A-Z0-9_]{2,80}$/),
+        isVisible: z.boolean(),
+      })
+      .strict()
+      .parse(request.body);
+    await assertPool().query(
+      `INSERT INTO lender_role_field_visibility
+        (role_code, resource_code, field_code, is_visible, updated_by_ref)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (role_code, resource_code, field_code)
+       DO UPDATE SET is_visible = EXCLUDED.is_visible,
+                     updated_by_ref = EXCLUDED.updated_by_ref,
+                     updated_at = now()`,
+      [
+        input.roleCode,
+        input.resourceCode,
+        input.fieldCode,
+        input.isVisible,
+        `operator:${identity.accountId}`,
+      ],
+    );
+    await assertPool().query(
+      `INSERT INTO lender_operator_auth_audit_events
+        (actor_ref, event_name, subject_ref, details)
+       VALUES ($1, 'LENDER_FIELD_VISIBILITY_UPDATED', $2, $3::jsonb)`,
+      [
+        `operator:${identity.accountId}`,
+        `${input.roleCode}:${input.resourceCode}:${input.fieldCode}`,
+        JSON.stringify(input),
+      ],
+    );
+    return reply.code(204).send();
+  },
+);
+
+app.get(
+  "/v1/lender-operator/admin/organization",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorRole(request, reply, [
+      "LENDER_WALLET_ADMIN",
+    ]);
+    if (!identity) return;
+    const result = await assertPool().query<{
+      organization_id: string;
+      organization_ref: string;
+      organization_name: string;
+      organization_active: boolean;
+      unit_id: string | null;
+      unit_ref: string | null;
+      unit_name: string | null;
+      unit_active: boolean | null;
+    }>(
+      `SELECT organization.id AS organization_id, organization.organization_ref,
+              organization.display_name AS organization_name, organization.is_active AS organization_active,
+              unit.id AS unit_id, unit.unit_ref, unit.display_name AS unit_name, unit.is_active AS unit_active
+         FROM lender_organizations organization
+         LEFT JOIN lender_organization_units unit ON unit.organization_id = organization.id
+        ORDER BY organization.created_at ASC, unit.created_at ASC`,
+    );
+    return {
+      organizations: result.rows.map((row) => ({
+        organizationId: row.organization_id,
+        organizationRef: row.organization_ref,
+        displayName: row.organization_name,
+        isActive: row.organization_active,
+        ...(row.unit_id
+          ? {
+              units: [
+                {
+                  unitId: row.unit_id,
+                  unitRef: row.unit_ref,
+                  displayName: row.unit_name,
+                  isActive: row.unit_active,
+                },
+              ],
+            }
+          : { units: [] }),
+      })),
+    };
+  },
+);
+
+app.post(
+  "/v1/lender-operator/admin/organization",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    const input = z
+      .object({
+        organizationRef: z.string().regex(/^lorg_[A-Za-z0-9_-]{8,96}$/),
+        displayName: z.string().trim().min(2).max(160),
+      })
+      .strict()
+      .parse(request.body);
+    const created = await assertPool().query<{ id: string }>(
+      `INSERT INTO lender_organizations (organization_ref, display_name) VALUES ($1, $2) RETURNING id`,
+      [input.organizationRef, input.displayName],
+    );
+    await assertPool().query(
+      `INSERT INTO lender_operator_auth_audit_events (actor_ref, event_name, subject_ref, details)
+       VALUES ($1, 'LENDER_ORGANIZATION_CREATED', $2, $3::jsonb)`,
+      [
+        `operator:${identity.accountId}`,
+        `organization:${created.rows[0]!.id}`,
+        JSON.stringify(input),
+      ],
+    );
+    return reply.code(201).send({ organizationId: created.rows[0]!.id });
+  },
+);
+
+app.post(
+  "/v1/lender-operator/admin/organization/:organizationId/units",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    const params = z
+      .object({ organizationId: z.string().uuid() })
+      .parse(request.params);
+    const input = z
+      .object({
+        unitRef: z.string().regex(/^lunit_[A-Za-z0-9_-]{8,96}$/),
+        displayName: z.string().trim().min(2).max(160),
+      })
+      .strict()
+      .parse(request.body);
+    const created = await assertPool().query<{ id: string }>(
+      `INSERT INTO lender_organization_units (organization_id, unit_ref, display_name)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [params.organizationId, input.unitRef, input.displayName],
+    );
+    await assertPool().query(
+      `INSERT INTO lender_operator_auth_audit_events (actor_ref, event_name, subject_ref, details)
+       VALUES ($1, 'LENDER_ORGANIZATION_UNIT_CREATED', $2, $3::jsonb)`,
+      [
+        `operator:${identity.accountId}`,
+        `organization-unit:${created.rows[0]!.id}`,
+        JSON.stringify(input),
+      ],
+    );
+    return reply.code(201).send({ unitId: created.rows[0]!.id });
+  },
+);
+
+app.get(
+  "/v1/lender-operator/admin/workflow-assignments",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorRole(request, reply, [
+      "LENDER_WALLET_ADMIN",
+    ]);
+    if (!identity) return;
+    const result = await assertPool().query<{
+      stage: string;
+      primary_account_id: string | null;
+      backup_account_id: string | null;
+      updated_at: string;
+    }>(
+      `SELECT stage, primary_account_id, backup_account_id, updated_at::text FROM lender_workflow_stage_assignments ORDER BY stage`,
+    );
+    return {
+      assignments: result.rows.map((row) => ({
+        stage: row.stage,
+        primaryAccountId: row.primary_account_id,
+        backupAccountId: row.backup_account_id,
+        updatedAt: row.updated_at,
+      })),
+    };
+  },
+);
+
+app.put(
+  "/v1/lender-operator/admin/workflow-assignments/:stage",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    const params = z
+      .object({ stage: lenderWorkflowStageSchema })
+      .parse(request.params);
+    const input = z
+      .object({
+        primaryAccountId: z.string().uuid().nullable(),
+        backupAccountId: z.string().uuid().nullable(),
+      })
+      .strict()
+      .parse(request.body);
+    if (
+      input.primaryAccountId &&
+      input.primaryAccountId === input.backupAccountId
+    ) {
+      return reply
+        .code(422)
+        .send({ code: "LENDER_WORKFLOW_PRIMARY_BACKUP_MUST_DIFFER" });
+    }
+    const requiredRole = lenderWorkflowStageRole[params.stage];
+    for (const accountId of [
+      input.primaryAccountId,
+      input.backupAccountId,
+    ].filter((value): value is string => Boolean(value))) {
+      const eligible = await assertPool().query(
+        `SELECT 1 FROM lender_operator_accounts account
+          JOIN lender_operator_account_roles membership ON membership.account_id = account.id
+         WHERE account.id = $1 AND account.is_active = true AND membership.role_code = $2`,
+        [accountId, requiredRole],
+      );
+      if (!eligible.rowCount)
+        return reply
+          .code(422)
+          .send({ code: "LENDER_WORKFLOW_ASSIGNEE_ROLE_INVALID" });
+    }
+    await assertPool().query(
+      `INSERT INTO lender_workflow_stage_assignments (stage, primary_account_id, backup_account_id, updated_by_ref)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (stage) DO UPDATE SET primary_account_id = EXCLUDED.primary_account_id,
+         backup_account_id = EXCLUDED.backup_account_id, updated_by_ref = EXCLUDED.updated_by_ref, updated_at = now()`,
+      [
+        params.stage,
+        input.primaryAccountId,
+        input.backupAccountId,
+        `operator:${identity.accountId}`,
+      ],
+    );
+    return reply.code(204).send();
+  },
+);
+
+app.post(
+  "/v1/lender-operator/cases/controlled-preview",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await requireLenderOperatorAdmin(request, reply);
+    if (!identity) return;
+    if (!isControlledPreviewMode) {
+      return reply.code(404).send({ code: "LENDER_CASE_INGEST_NOT_EXPOSED" });
+    }
+    const input = z
+      .object({
+        caseRef: z.string().regex(/^lcase_[A-Za-z0-9_-]{8,96}$/),
+        externalApplicationRef: z.string().regex(/^[A-Za-z0-9._:-]{4,128}$/),
+        applicantEvidenceRef: z
+          .string()
+          .regex(/^vault:\/\/lender\/[A-Za-z0-9._/-]{3,512}$/),
+      })
+      .strict()
+      .parse(request.body);
+    const client = await assertPool().connect();
+    try {
+      await client.query("BEGIN");
+      const created = await client.query<LenderCaseQueueRow>(
+        `INSERT INTO lender_cases
+          (case_ref, external_application_ref, case_type, stage, status, applicant_evidence_ref)
+         VALUES ($1, $2, 'LOAN', 'KYC_AML_REVIEW', 'OPEN', $3)
+         RETURNING id AS case_id, case_ref, external_application_ref, case_type,
+                   stage, status, applicant_evidence_ref, contract_maker_ref,
+                   disbursement_maker_ref, created_at::text, updated_at::text`,
+        [
+          input.caseRef,
+          input.externalApplicationRef,
+          input.applicantEvidenceRef,
+        ],
+      );
+      const row = created.rows[0]!;
+      await client.query(
+        `INSERT INTO lender_case_events
+          (case_id, event_ref, event_type, actor_ref, actor_role, source_domain, evidence_reference, details)
+         VALUES ($1, $2, 'CASE_CREATED', $3, 'LENDER_WALLET_ADMIN', 'LENDER', $4, $5::jsonb)`,
+        [
+          row.case_id,
+          `lcaseevt_created_${randomUUID().replaceAll("-", "")}`,
+          `operator:${identity.accountId}`,
+          input.applicantEvidenceRef,
+          JSON.stringify({ controlledPreview: true }),
+        ],
+      );
+      await addAuditEvent(client, {
+        actorRef: `operator:${identity.accountId}`,
+        eventName: "LENDER_CONTROLLED_PREVIEW_CASE_CREATED",
+        subjectRef: row.case_ref,
+        details: { externalApplicationRef: input.externalApplicationRef },
+      });
+      await client.query("COMMIT");
+      return reply
+        .code(201)
+        .send({ caseId: row.case_id, caseRef: row.case_ref });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+);
+
+app.get(
+  "/v1/lender-operator/cases/open",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await currentLenderOperatorIdentity(
+      request.headers.cookie,
+    );
+    if (!identity) {
+      return reply.code(401).send({ code: "LENDER_OPERATOR_UNAUTHENTICATED" });
+    }
+    if (!canReadLenderCases(identity.roles)) {
+      return reply.code(403).send({ code: "LENDER_OPERATOR_ROLE_FORBIDDEN" });
+    }
+    const result = await assertPool().query<LenderCaseQueueRow>(
+      `SELECT id AS case_id, case_ref, external_application_ref, case_type, stage, status,
+              applicant_evidence_ref, contract_maker_ref, disbursement_maker_ref,
+              created_at::text, updated_at::text
+         FROM lender_cases
+        ORDER BY created_at ASC
+        LIMIT 100`,
+    );
+    return {
+      cases: result.rows.map((row) => ({
+        caseId: row.case_id,
+        caseRef: row.case_ref,
+        externalApplicationRef: row.external_application_ref,
+        caseType: row.case_type,
+        stage: row.stage,
+        status: row.status,
+        applicantEvidenceRef: row.applicant_evidence_ref,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+    };
+  },
+);
+
+app.get(
+  "/v1/lender-operator/cases/:caseId/audit",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    const identity = await currentLenderOperatorIdentity(
+      request.headers.cookie,
+    );
+    if (!identity)
+      return reply.code(401).send({ code: "LENDER_OPERATOR_UNAUTHENTICATED" });
+    if (!canReadLenderCases(identity.roles))
+      return reply.code(403).send({ code: "LENDER_OPERATOR_ROLE_FORBIDDEN" });
+    const params = z
+      .object({ caseId: z.string().uuid() })
+      .parse(request.params);
+    const result = await assertPool().query<{
+      event_ref: string;
+      event_type: string;
+      actor_role: string;
+      evidence_reference: string;
+      reason_code: string | null;
+      created_at: string;
+    }>(
+      `SELECT event_ref, event_type, actor_role, evidence_reference, reason_code, created_at::text
+         FROM lender_case_events WHERE case_id = $1 ORDER BY created_at ASC`,
+      [params.caseId],
+    );
+    if (!result.rowCount)
+      return reply.code(404).send({ code: "LENDER_CASE_NOT_FOUND" });
+    return {
+      caseId: params.caseId,
+      events: result.rows.map((row) => ({
+        eventRef: row.event_ref,
+        eventType: row.event_type,
+        actorRole: row.actor_role,
+        evidenceReference: row.evidence_reference,
+        reasonCode: row.reason_code,
+        occurredAt: row.created_at,
+      })),
+    };
+  },
+);
+
+app.post(
+  "/v1/lender-operator/cases/:caseId/actions",
+  async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!requireTrustedLenderOperatorOrigin(request, reply)) return;
+    if (!requireLenderOperatorCsrf(request, reply)) return;
+    const params = z
+      .object({ caseId: z.string().uuid() })
+      .parse(request.params);
+    const input = z
+      .object({
+        action: lenderCaseActionSchema,
+        evidenceReference: z
+          .string()
+          .regex(/^vault:\/\/lender\/[A-Za-z0-9._/-]{3,512}$/),
+        reasonCode: z
+          .string()
+          .regex(/^[A-Z0-9_]{2,80}$/)
+          .optional(),
+        decision: z
+          .object({
+            approvedAmountMinor: z.string().regex(/^\d+$/),
+            termDays: z.union([z.literal(15), z.literal(30)]),
+            pricingRuleRef: z.string().max(128),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .parse(request.body);
+    const action = input.action as LenderCaseAction;
+    const policy = lenderCaseActionPolicy(action);
+    const identity = await requireLenderOperatorRole(request, reply, [
+      policy.role,
+    ]);
+    if (!identity) return;
+    if (action === "CREDIT_APPROVED" && !input.decision) {
+      return reply.code(422).send({ code: "LENDER_CREDIT_DECISION_REQUIRED" });
+    }
+    const client = await assertPool().connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<LenderCaseQueueRow>(
+        `SELECT id AS case_id, case_ref, external_application_ref, case_type, stage, status,
+                applicant_evidence_ref, contract_maker_ref, disbursement_maker_ref,
+                created_at::text, updated_at::text
+           FROM lender_cases WHERE id = $1 FOR UPDATE`,
+        [params.caseId],
+      );
+      const row = current.rows[0];
+      if (!row) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ code: "LENDER_CASE_NOT_FOUND" });
+      }
+      const actorRef = `operator:${identity.accountId}`;
+      let target: Readonly<{
+        stage: LenderCaseStage;
+        status: LenderCaseStatus;
+      }>;
+      try {
+        target = nextLenderCaseState({
+          action,
+          stage: row.stage,
+          status: row.status,
+          roles: identity.roles,
+          evidenceReference: input.evidenceReference,
+          contractMakerRef: row.contract_maker_ref,
+          disbursementMakerRef: row.disbursement_maker_ref,
+          actorRef,
+        });
+      } catch (error) {
+        const code =
+          error instanceof Error ? error.message : "LENDER_CASE_ACTION_DENIED";
+        await client.query("ROLLBACK");
+        return reply.code(409).send({ code });
+      }
+      // Only the expected current stage may emit an action. This keeps a role
+      // from advancing a case that has not reached its lender-owned queue.
+      const expectedStage: Record<LenderCaseAction, LenderCaseStage[]> = {
+        KYC_AML_PASSED: ["KYC_AML_REVIEW"],
+        KYC_AML_MORE_INFO_REQUIRED: ["KYC_AML_REVIEW"],
+        KYC_AML_REJECTED: ["KYC_AML_REVIEW"],
+        CREDIT_REVIEW_PASSED: ["CREDIT_REVIEW"],
+        CREDIT_MORE_INFO_REQUIRED: ["CREDIT_REVIEW"],
+        CREDIT_APPROVED: ["CREDIT_APPROVAL"],
+        CREDIT_REJECTED: ["CREDIT_APPROVAL"],
+        CONTRACT_DRAFTED: ["CONTRACT_MAKER"],
+        CONTRACT_APPROVED: ["CONTRACT_CHECKER"],
+        CONTRACT_REJECTED: ["CONTRACT_CHECKER"],
+        DISBURSEMENT_PREPARED: ["DISBURSEMENT_MAKER"],
+        DISBURSEMENT_APPROVED: ["DISBURSEMENT_CHECKER"],
+        DISBURSEMENT_FAILED: ["DISBURSEMENT_CHECKER"],
+        REPAYMENT_RECORDED: ["SERVICING"],
+        LOAN_SETTLED: ["SERVICING"],
+        SERVICING_EXCEPTION: ["SERVICING"],
+        COMPLAINT_ACKNOWLEDGED: ["COMPLAINT"],
+        COMPLAINT_RESOLVED: ["COMPLAINT"],
+        COMPLAINT_CLOSED: ["COMPLAINT"],
+      };
+      if (!expectedStage[action].includes(row.stage)) {
+        await client.query("ROLLBACK");
+        return reply
+          .code(409)
+          .send({ code: "LENDER_CASE_INVALID_STATE_TRANSITION" });
+      }
+      await client.query(
+        `INSERT INTO lender_case_events
+          (case_id, event_ref, event_type, actor_ref, actor_role, source_domain, evidence_reference, reason_code, details)
+         VALUES ($1, $2, $3, $4, $5, 'LENDER', $6, $7, $8::jsonb)`,
+        [
+          row.case_id,
+          `lcaseevt_${action.toLowerCase()}_${randomUUID().replaceAll("-", "")}`,
+          action,
+          actorRef,
+          policy.role,
+          input.evidenceReference,
+          input.reasonCode ?? null,
+          JSON.stringify({ decision: input.decision ?? null }),
+        ],
+      );
+      await client.query(
+        "SELECT set_config('payease.allow_lender_case_projection_update', 'on', true)",
+      );
+      await client.query(
+        `UPDATE lender_cases SET stage = $2, status = $3,
+            contract_maker_ref = CASE WHEN $4 = 'CONTRACT_DRAFTED' THEN $5 ELSE contract_maker_ref END,
+            disbursement_maker_ref = CASE WHEN $4 = 'DISBURSEMENT_PREPARED' THEN $5 ELSE disbursement_maker_ref END,
+            updated_at = now() WHERE id = $1`,
+        [row.case_id, target.stage, target.status, action, actorRef],
+      );
+      await addAuditEvent(client, {
+        actorRef,
+        eventName: `LENDER_CASE_${action}`,
+        subjectRef: row.case_ref,
+        details: {
+          stage: target.stage,
+          status: target.status,
+          evidenceReference: input.evidenceReference,
+        },
+      });
+      await client.query("COMMIT");
+      return {
+        caseId: row.case_id,
+        stage: target.stage,
+        status: target.status,
+      };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;

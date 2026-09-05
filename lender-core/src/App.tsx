@@ -38,6 +38,190 @@ type OperatorAccount = Readonly<{
   roles: string[];
   createdAt: string;
 }>;
+type LenderCase = Readonly<{
+  caseId: string;
+  caseRef: string;
+  externalApplicationRef: string;
+  caseType: "LOAN" | "COMPLAINT";
+  stage: string;
+  status: string;
+  applicantEvidenceRef: string;
+  createdAt: string;
+}>;
+type CaseAuditEvent = Readonly<{
+  eventRef: string;
+  eventType: string;
+  actorRole: string;
+  evidenceReference: string;
+  reasonCode: string | null;
+  occurredAt: string;
+}>;
+type FieldVisibilityRule = Readonly<{
+  roleCode: string;
+  resourceCode: string;
+  fieldCode: string;
+  isVisible: boolean;
+}>;
+type WorkflowAssignment = Readonly<{
+  stage: string;
+  primaryAccountId: string | null;
+  backupAccountId: string | null;
+}>;
+type LenderOrganization = Readonly<{
+  organizationId: string;
+  organizationRef: string;
+  displayName: string;
+  isActive: boolean;
+  units: Array<
+    Readonly<{ unitId: string; unitRef: string; displayName: string }>
+  >;
+}>;
+
+const LENDER_ROLE_OPTIONS = [
+  "LENDER_KYC_AML_REVIEWER",
+  "LENDER_CREDIT_REVIEWER",
+  "LENDER_CREDIT_APPROVER",
+  "LENDER_CONTRACT_MAKER",
+  "LENDER_CONTRACT_CHECKER",
+  "LENDER_DISBURSEMENT_MAKER",
+  "LENDER_DISBURSEMENT_CHECKER",
+  "LENDER_SERVICING_ACCOUNTING",
+  "LENDER_COMPLAINT_OFFICER",
+  "LENDER_AUDITOR",
+  "LENDER_WALLET_MAKER",
+  "LENDER_WALLET_CHECKER",
+  "LENDER_WALLET_ADMIN",
+] as const;
+
+const CASE_ACTIONS_BY_STAGE: Record<
+  string,
+  Readonly<{ action: string; role: string; label: string }[]>
+> = {
+  KYC_AML_REVIEW: [
+    {
+      action: "KYC_AML_PASSED",
+      role: "LENDER_KYC_AML_REVIEWER",
+      label: "KYC/AML 通过",
+    },
+    {
+      action: "KYC_AML_MORE_INFO_REQUIRED",
+      role: "LENDER_KYC_AML_REVIEWER",
+      label: "要求补件",
+    },
+    {
+      action: "KYC_AML_REJECTED",
+      role: "LENDER_KYC_AML_REVIEWER",
+      label: "拒绝",
+    },
+  ],
+  CREDIT_REVIEW: [
+    {
+      action: "CREDIT_REVIEW_PASSED",
+      role: "LENDER_CREDIT_REVIEWER",
+      label: "初审通过",
+    },
+    {
+      action: "CREDIT_MORE_INFO_REQUIRED",
+      role: "LENDER_CREDIT_REVIEWER",
+      label: "要求补件",
+    },
+  ],
+  CREDIT_APPROVAL: [
+    {
+      action: "CREDIT_APPROVED",
+      role: "LENDER_CREDIT_APPROVER",
+      label: "最终批准",
+    },
+    {
+      action: "CREDIT_REJECTED",
+      role: "LENDER_CREDIT_APPROVER",
+      label: "最终拒绝",
+    },
+  ],
+  CONTRACT_MAKER: [
+    {
+      action: "CONTRACT_DRAFTED",
+      role: "LENDER_CONTRACT_MAKER",
+      label: "提交合同证据包",
+    },
+  ],
+  CONTRACT_CHECKER: [
+    {
+      action: "CONTRACT_APPROVED",
+      role: "LENDER_CONTRACT_CHECKER",
+      label: "验收合同证据",
+    },
+    {
+      action: "CONTRACT_REJECTED",
+      role: "LENDER_CONTRACT_CHECKER",
+      label: "退回合同",
+    },
+  ],
+  DISBURSEMENT_MAKER: [
+    {
+      action: "DISBURSEMENT_PREPARED",
+      role: "LENDER_DISBURSEMENT_MAKER",
+      label: "核验收款账户",
+    },
+  ],
+  DISBURSEMENT_CHECKER: [
+    {
+      action: "DISBURSEMENT_APPROVED",
+      role: "LENDER_DISBURSEMENT_CHECKER",
+      label: "复核放款准备",
+    },
+    {
+      action: "DISBURSEMENT_FAILED",
+      role: "LENDER_DISBURSEMENT_CHECKER",
+      label: "放款异常",
+    },
+  ],
+  SERVICING: [
+    {
+      action: "REPAYMENT_RECORDED",
+      role: "LENDER_SERVICING_ACCOUNTING",
+      label: "记录还款",
+    },
+    {
+      action: "LOAN_SETTLED",
+      role: "LENDER_SERVICING_ACCOUNTING",
+      label: "确认结清",
+    },
+    {
+      action: "SERVICING_EXCEPTION",
+      role: "LENDER_SERVICING_ACCOUNTING",
+      label: "账务异常",
+    },
+  ],
+  COMPLAINT: [
+    {
+      action: "COMPLAINT_ACKNOWLEDGED",
+      role: "LENDER_COMPLAINT_OFFICER",
+      label: "受理投诉",
+    },
+    {
+      action: "COMPLAINT_RESOLVED",
+      role: "LENDER_COMPLAINT_OFFICER",
+      label: "给出处理结论",
+    },
+    {
+      action: "COMPLAINT_CLOSED",
+      role: "LENDER_COMPLAINT_OFFICER",
+      label: "关闭投诉",
+    },
+  ],
+};
+const WORKFLOW_STAGES = [
+  ["KYC_AML_REVIEW", "LENDER_KYC_AML_REVIEWER"],
+  ["CREDIT_REVIEW", "LENDER_CREDIT_REVIEWER"],
+  ["CREDIT_APPROVAL", "LENDER_CREDIT_APPROVER"],
+  ["CONTRACT_MAKER", "LENDER_CONTRACT_MAKER"],
+  ["CONTRACT_CHECKER", "LENDER_CONTRACT_CHECKER"],
+  ["DISBURSEMENT_MAKER", "LENDER_DISBURSEMENT_MAKER"],
+  ["DISBURSEMENT_CHECKER", "LENDER_DISBURSEMENT_CHECKER"],
+  ["SERVICING", "LENDER_SERVICING_ACCOUNTING"],
+  ["COMPLAINT", "LENDER_COMPLAINT_OFFICER"],
+] as const;
 
 const apiBase = (import.meta.env.VITE_LENDER_WALLET_API_BASE ?? "/api").replace(
   /\/$/,
@@ -226,6 +410,14 @@ export function App(): JSX.Element {
   const [signingIn, setSigningIn] = useState(false);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [cases, setCases] = useState<LenderCase[]>([]);
+  const [caseAudit, setCaseAudit] = useState<CaseAuditEvent[]>([]);
+  const [selectedCase, setSelectedCase] = useState("");
+  const [fieldRules, setFieldRules] = useState<FieldVisibilityRule[]>([]);
+  const [workflowAssignments, setWorkflowAssignments] = useState<
+    WorkflowAssignment[]
+  >([]);
+  const [organizations, setOrganizations] = useState<LenderOrganization[]>([]);
   const [accounts, setAccounts] = useState<OperatorAccount[]>([]);
   const [newAccountLogin, setNewAccountLogin] = useState("");
   const [newAccountPassword, setNewAccountPassword] = useState("");
@@ -233,6 +425,14 @@ export function App(): JSX.Element {
     "LENDER_WALLET_MAKER",
   ]);
   const [selected, setSelected] = useState("");
+  const [newOrganizationRef, setNewOrganizationRef] = useState("");
+  const [newOrganizationName, setNewOrganizationName] = useState("");
+  const [visibilityRole, setVisibilityRole] = useState<string>(
+    "LENDER_KYC_AML_REVIEWER",
+  );
+  const [visibilityResource, setVisibilityResource] = useState("CASE_SUMMARY");
+  const [visibilityField, setVisibilityField] = useState("CASE_REFERENCE");
+  const [visibilityEnabled, setVisibilityEnabled] = useState(true);
   const [evidence, setEvidence] = useState("");
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
@@ -262,6 +462,49 @@ export function App(): JSX.Element {
       ((await response.json()) as { accounts: OperatorAccount[] }).accounts,
     );
   };
+  const loadAdminConfiguration = async () => {
+    const [fieldResponse, workflowResponse, organizationResponse] =
+      await Promise.all([
+        api("/v1/lender-operator/admin/field-visibility"),
+        api("/v1/lender-operator/admin/workflow-assignments"),
+        api("/v1/lender-operator/admin/organization"),
+      ]);
+    if (!fieldResponse.ok || !workflowResponse.ok || !organizationResponse.ok)
+      throw new Error("admin-configuration");
+    setFieldRules(
+      ((await fieldResponse.json()) as { rules: FieldVisibilityRule[] }).rules,
+    );
+    setWorkflowAssignments(
+      (
+        (await workflowResponse.json()) as {
+          assignments: WorkflowAssignment[];
+        }
+      ).assignments,
+    );
+    setOrganizations(
+      (
+        (await organizationResponse.json()) as {
+          organizations: LenderOrganization[];
+        }
+      ).organizations,
+    );
+  };
+  const loadCases = async () => {
+    const response = await api("/v1/lender-operator/cases/open");
+    if (response.status === 401) throw new Error("unauthenticated");
+    if (!response.ok) throw new Error("cases");
+    setCases(((await response.json()) as { cases: LenderCase[] }).cases);
+  };
+  const loadCaseAudit = async (caseId: string) => {
+    const response = await api(
+      `/v1/lender-operator/cases/${encodeURIComponent(caseId)}/audit`,
+    );
+    if (!response.ok) throw new Error("case-audit");
+    setSelectedCase(caseId);
+    setCaseAudit(
+      ((await response.json()) as { events: CaseAuditEvent[] }).events,
+    );
+  };
   useEffect(() => {
     api("/v1/lender-operator/auth/me")
       .then(async (response) => {
@@ -276,8 +519,14 @@ export function App(): JSX.Element {
     if (identity) void loadQueue().catch(() => setNotice(text("actionFailed")));
   }, [identity?.loginName]);
   useEffect(() => {
+    if (identity) void loadCases().catch(() => undefined);
+  }, [identity?.loginName]);
+  useEffect(() => {
     if (identity?.roles.includes("LENDER_WALLET_ADMIN")) {
       void loadAccounts().catch(() => setNotice(text("actionFailed")));
+      void loadAdminConfiguration().catch(() =>
+        setNotice(text("actionFailed")),
+      );
     }
   }, [identity?.loginName]);
   const signIn = async (event: FormEvent) => {
@@ -337,6 +586,35 @@ export function App(): JSX.Element {
     setOperations([]);
     setAudit([]);
     setAccounts([]);
+    setFieldRules([]);
+    setWorkflowAssignments([]);
+    setOrganizations([]);
+    setCases([]);
+    setCaseAudit([]);
+  };
+  const caseAction = async (caseItem: LenderCase, actionName: string) => {
+    if (!evidence.trim()) return setNotice(text("evidenceRequired"));
+    const body: Record<string, unknown> = {
+      action: actionName,
+      evidenceReference: evidence.trim(),
+    };
+    if (actionName === "CREDIT_APPROVED") {
+      body.decision = {
+        approvedAmountMinor: "5000",
+        termDays: 15,
+        pricingRuleRef: "controlled-preview-rule",
+      };
+    }
+    const response = await api(
+      `/v1/lender-operator/cases/${encodeURIComponent(caseItem.caseId)}/actions`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    if (response.status === 401) return setIdentity(undefined);
+    if (response.status === 403) return setNotice(text("noAccess"));
+    if (!response.ok) return setNotice(text("actionFailed"));
+    setEvidence("");
+    await loadCases();
+    await loadCaseAudit(caseItem.caseId);
   };
   const createAccount = async (event: FormEvent) => {
     event.preventDefault();
@@ -372,6 +650,61 @@ export function App(): JSX.Element {
     );
     if (!response.ok) return setNotice(text("actionFailed"));
     await loadAccounts();
+  };
+  const createOrganization = async (event: FormEvent) => {
+    event.preventDefault();
+    const response = await api("/v1/lender-operator/admin/organization", {
+      method: "POST",
+      body: JSON.stringify({
+        organizationRef: newOrganizationRef,
+        displayName: newOrganizationName,
+      }),
+    });
+    if (!response.ok) return setNotice(text("actionFailed"));
+    setNewOrganizationRef("");
+    setNewOrganizationName("");
+    await loadAdminConfiguration();
+  };
+  const updateVisibility = async (event: FormEvent) => {
+    event.preventDefault();
+    const response = await api("/v1/lender-operator/admin/field-visibility", {
+      method: "PUT",
+      body: JSON.stringify({
+        roleCode: visibilityRole,
+        resourceCode: visibilityResource,
+        fieldCode: visibilityField,
+        isVisible: visibilityEnabled,
+      }),
+    });
+    if (!response.ok) return setNotice(text("actionFailed"));
+    await loadAdminConfiguration();
+  };
+  const assignWorkflowOperator = async (
+    stage: string,
+    slot: "primaryAccountId" | "backupAccountId",
+    accountId: string | null,
+  ) => {
+    const current = workflowAssignments.find(
+      (assignment) => assignment.stage === stage,
+    );
+    const response = await api(
+      `/v1/lender-operator/admin/workflow-assignments/${encodeURIComponent(stage)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          primaryAccountId:
+            slot === "primaryAccountId"
+              ? accountId
+              : (current?.primaryAccountId ?? null),
+          backupAccountId:
+            slot === "backupAccountId"
+              ? accountId
+              : (current?.backupAccountId ?? null),
+        }),
+      },
+    );
+    if (!response.ok) return setNotice(text("actionFailed"));
+    await loadAdminConfiguration();
   };
   if (!identity)
     return (
@@ -440,6 +773,50 @@ export function App(): JSX.Element {
           {notice}
         </p>
       ) : null}
+      <section className="lender-card">
+        <div className="section-heading">
+          <h2>持牌案件审批队列</h2>
+          <button onClick={() => void loadCases()}>刷新</button>
+        </div>
+        <p>
+          仅展示持牌域案件引用与证据库引用；此受控预览不连接真实征信、身份或资金渠道。
+        </p>
+        {cases.length === 0 ? (
+          <p>当前没有持牌审批案件。</p>
+        ) : (
+          cases.map((caseItem) => {
+            const available = (
+              CASE_ACTIONS_BY_STAGE[caseItem.stage] ?? []
+            ).filter((candidate) => identity.roles.includes(candidate.role));
+            return (
+              <article className="operation" key={caseItem.caseId}>
+                <div>
+                  <strong>
+                    {caseItem.caseRef} · {caseItem.stage} · {caseItem.status}
+                  </strong>
+                  <p>申请引用：{caseItem.externalApplicationRef}</p>
+                  <p>证据引用：{caseItem.applicantEvidenceRef}</p>
+                </div>
+                <div className="operation-actions">
+                  <button onClick={() => void loadCaseAudit(caseItem.caseId)}>
+                    查看案件审计
+                  </button>
+                  {available.map((candidate) => (
+                    <button
+                      key={candidate.action}
+                      onClick={() =>
+                        void caseAction(caseItem, candidate.action)
+                      }
+                    >
+                      {candidate.label}
+                    </button>
+                  ))}
+                </div>
+              </article>
+            );
+          })
+        )}
+      </section>
       <section className="lender-card">
         <div className="section-heading">
           <h2>{c.queue}</h2>
@@ -549,11 +926,11 @@ export function App(): JSX.Element {
                   )
                 }
               >
-                <option value="LENDER_WALLET_MAKER">LENDER_WALLET_MAKER</option>
-                <option value="LENDER_WALLET_CHECKER">
-                  LENDER_WALLET_CHECKER
-                </option>
-                <option value="LENDER_WALLET_ADMIN">LENDER_WALLET_ADMIN</option>
+                {LENDER_ROLE_OPTIONS.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
               </select>
             </label>
             <button type="submit">{adminCopy.create}</button>
@@ -583,15 +960,11 @@ export function App(): JSX.Element {
                   }
                   disabled={account.accountId === identity.accountId}
                 >
-                  <option value="LENDER_WALLET_MAKER">
-                    LENDER_WALLET_MAKER
-                  </option>
-                  <option value="LENDER_WALLET_CHECKER">
-                    LENDER_WALLET_CHECKER
-                  </option>
-                  <option value="LENDER_WALLET_ADMIN">
-                    LENDER_WALLET_ADMIN
-                  </option>
+                  {LENDER_ROLE_OPTIONS.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
                 </select>
                 {account.isActive &&
                 account.accountId !== identity.accountId ? (
@@ -613,6 +986,156 @@ export function App(): JSX.Element {
               </div>
             </article>
           ))}
+          <hr />
+          <h3>组织与部门</h3>
+          <form
+            className="admin-form"
+            onSubmit={(event) => void createOrganization(event)}
+          >
+            <label>
+              组织引用
+              <input
+                value={newOrganizationRef}
+                onChange={(event) => setNewOrganizationRef(event.target.value)}
+                placeholder="lorg_lender001"
+                pattern="lorg_[A-Za-z0-9_-]{8,96}"
+                required
+              />
+            </label>
+            <label>
+              组织名称
+              <input
+                value={newOrganizationName}
+                onChange={(event) => setNewOrganizationName(event.target.value)}
+                required
+              />
+            </label>
+            <button type="submit">创建组织</button>
+          </form>
+          {organizations.map((organization) => (
+            <p key={organization.organizationId}>
+              <strong>{organization.displayName}</strong> ·{" "}
+              {organization.organizationRef}
+              {organization.units.length
+                ? ` · ${organization.units.map((unit) => unit.displayName).join(", ")}`
+                : " · 暂无部门"}
+            </p>
+          ))}
+          <hr />
+          <h3>审批阶段主办与备办</h3>
+          <p>分配不会覆盖角色权限；账号仍必须拥有该阶段对应角色。</p>
+          {WORKFLOW_STAGES.map(([stage, role]) => {
+            const assignment = workflowAssignments.find(
+              (item) => item.stage === stage,
+            );
+            const eligible = accounts.filter(
+              (account) => account.isActive && account.roles.includes(role),
+            );
+            return (
+              <div className="operation" key={stage}>
+                <strong>{stage}</strong>
+                <div className="operation-actions">
+                  <select
+                    aria-label={`${stage} primary`}
+                    value={assignment?.primaryAccountId ?? ""}
+                    onChange={(event) =>
+                      void assignWorkflowOperator(
+                        stage,
+                        "primaryAccountId",
+                        event.target.value || null,
+                      )
+                    }
+                  >
+                    <option value="">未分配主办</option>
+                    {eligible.map((account) => (
+                      <option key={account.accountId} value={account.accountId}>
+                        {account.loginName}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label={`${stage} backup`}
+                    value={assignment?.backupAccountId ?? ""}
+                    onChange={(event) =>
+                      void assignWorkflowOperator(
+                        stage,
+                        "backupAccountId",
+                        event.target.value || null,
+                      )
+                    }
+                  >
+                    <option value="">未分配备办</option>
+                    {eligible.map((account) => (
+                      <option key={account.accountId} value={account.accountId}>
+                        {account.loginName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            );
+          })}
+          <hr />
+          <h3>字段可见范围</h3>
+          <form
+            className="admin-form"
+            onSubmit={(event) => void updateVisibility(event)}
+          >
+            <select
+              value={visibilityRole}
+              onChange={(event) => setVisibilityRole(event.target.value)}
+            >
+              {LENDER_ROLE_OPTIONS.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+            <select
+              value={visibilityResource}
+              onChange={(event) => setVisibilityResource(event.target.value)}
+            >
+              {[
+                "CASE_SUMMARY",
+                "KYC_EVIDENCE",
+                "CREDIT_DECISION",
+                "CONTRACT_EVIDENCE",
+                "DISBURSEMENT",
+                "SERVICING",
+                "COMPLAINT",
+                "AUDIT",
+              ].map((resource) => (
+                <option key={resource} value={resource}>
+                  {resource}
+                </option>
+              ))}
+            </select>
+            <input
+              value={visibilityField}
+              onChange={(event) => setVisibilityField(event.target.value)}
+              pattern="[A-Z0-9_]{2,80}"
+              required
+            />
+            <label>
+              <input
+                type="checkbox"
+                checked={visibilityEnabled}
+                onChange={(event) => setVisibilityEnabled(event.target.checked)}
+              />
+              可见
+            </label>
+            <button type="submit">保存字段规则</button>
+          </form>
+          <ol>
+            {fieldRules.map((rule) => (
+              <li
+                key={`${rule.roleCode}:${rule.resourceCode}:${rule.fieldCode}`}
+              >
+                {rule.roleCode} · {rule.resourceCode} · {rule.fieldCode} ·{" "}
+                {rule.isVisible ? "可见" : "隐藏"}
+              </li>
+            ))}
+          </ol>
         </section>
       ) : null}
       <section className="lender-card">
@@ -624,6 +1147,20 @@ export function App(): JSX.Element {
               <strong>{event.eventType}</strong> · {event.actorRole} ·{" "}
               {event.occurredAt}
               {event.evidenceReference ? ` · ${event.evidenceReference}` : ""}
+              {event.reasonCode ? ` · ${event.reasonCode}` : ""}
+            </li>
+          ))}
+        </ol>
+      </section>
+      <section className="lender-card">
+        <h2>案件审计记录（只读）</h2>
+        {selectedCase ? <p>{selectedCase}</p> : null}
+        <ol>
+          {caseAudit.map((event) => (
+            <li key={event.eventRef}>
+              <strong>{event.eventType}</strong> · {event.actorRole} ·{" "}
+              {event.occurredAt}
+              {` · ${event.evidenceReference}`}
               {event.reasonCode ? ` · ${event.reasonCode}` : ""}
             </li>
           ))}

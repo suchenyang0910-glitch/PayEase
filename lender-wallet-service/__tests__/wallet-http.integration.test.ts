@@ -47,8 +47,7 @@ function cookieFromSetCookie(
 async function loginOperator(args: {
   loginName: string;
   password: string;
-  roleCode:
-    "LENDER_WALLET_MAKER" | "LENDER_WALLET_CHECKER" | "LENDER_WALLET_ADMIN";
+  roleCode: string;
 }): Promise<Readonly<{ cookieHeader: string; csrfToken: string }>> {
   const passwordHash = await hashLenderOperatorPassword(args.password);
   const created = await adminClient.query<{ id: string }>(
@@ -116,6 +115,7 @@ integration("lender-wallet-service HTTP integration", () => {
     process.env.PAYEASE_LENDER_OPERATOR_PUBLIC_ORIGIN = lenderOperatorOrigin;
     process.env.PAYEASE_LENDER_WALLET_INTERNAL_TOKEN =
       "internal-wallet-test-token-123456";
+    process.env.PAYEASE_LENDER_DEPLOYMENT_MODE = "controlled-preview";
 
     vi.resetModules();
     serverModule = await import("../src/server.js");
@@ -727,5 +727,186 @@ integration("lender-wallet-service HTTP integration", () => {
       },
     });
     expect(newCheckerLogin.statusCode).toBe(401);
+  });
+
+  it("enforces lender case role separation and keeps the auditor read-only", async () => {
+    const admin = await loginOperator({
+      loginName: "lender.case.admin",
+      password: "controlled-case-admin-password",
+      roleCode: "LENDER_WALLET_ADMIN",
+    });
+    const kyc = await loginOperator({
+      loginName: "lender.case.kyc",
+      password: "controlled-case-kyc-password",
+      roleCode: "LENDER_KYC_AML_REVIEWER",
+    });
+    const auditor = await loginOperator({
+      loginName: "lender.case.auditor",
+      password: "controlled-case-auditor-password",
+      roleCode: "LENDER_AUDITOR",
+    });
+    const created = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/cases/controlled-preview",
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: admin.cookieHeader,
+        "x-csrf-token": admin.csrfToken,
+      },
+      payload: {
+        caseRef: "lcase_testcase0001",
+        externalApplicationRef: "application:test-case-001",
+        applicantEvidenceRef: "vault://lender/cases/test-case-001",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const caseId = created.json<{ caseId: string }>().caseId;
+
+    const auditorQueue = await serverModule.app.inject({
+      method: "GET",
+      url: "/v1/lender-operator/cases/open",
+      headers: { cookie: auditor.cookieHeader },
+    });
+    expect(auditorQueue.statusCode).toBe(200);
+    const auditorWrite = await serverModule.app.inject({
+      method: "POST",
+      url: `/v1/lender-operator/cases/${caseId}/actions`,
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: auditor.cookieHeader,
+        "x-csrf-token": auditor.csrfToken,
+      },
+      payload: {
+        action: "KYC_AML_PASSED",
+        evidenceReference: "vault://lender/cases/audit-attempt",
+      },
+    });
+    expect(auditorWrite.statusCode).toBe(403);
+
+    const kycPass = await serverModule.app.inject({
+      method: "POST",
+      url: `/v1/lender-operator/cases/${caseId}/actions`,
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: kyc.cookieHeader,
+        "x-csrf-token": kyc.csrfToken,
+      },
+      payload: {
+        action: "KYC_AML_PASSED",
+        evidenceReference: "vault://lender/cases/kyc-pass-001",
+      },
+    });
+    expect(kycPass.statusCode).toBe(200);
+    expect(kycPass.json()).toMatchObject({
+      stage: "CREDIT_REVIEW",
+      status: "OPEN",
+    });
+    const audit = await serverModule.app.inject({
+      method: "GET",
+      url: `/v1/lender-operator/cases/${caseId}/audit`,
+      headers: { cookie: auditor.cookieHeader },
+    });
+    expect(audit.statusCode).toBe(200);
+    expect(
+      audit
+        .json<{ events: Array<{ eventType: string }> }>()
+        .events.map((event) => event.eventType),
+    ).toEqual(["CASE_CREATED", "KYC_AML_PASSED"]);
+  });
+
+  it("requires distinct lender makers and checkers through the persisted workflow", async () => {
+    const admin = await loginOperator({
+      loginName: "lender.flow.admin",
+      password: "controlled-flow-admin-password",
+      roleCode: "LENDER_WALLET_ADMIN",
+    });
+    const kyc = await loginOperator({
+      loginName: "lender.flow.kyc",
+      password: "controlled-flow-kyc-password",
+      roleCode: "LENDER_KYC_AML_REVIEWER",
+    });
+    const reviewer = await loginOperator({
+      loginName: "lender.flow.review",
+      password: "controlled-flow-review-password",
+      roleCode: "LENDER_CREDIT_REVIEWER",
+    });
+    const approver = await loginOperator({
+      loginName: "lender.flow.approve",
+      password: "controlled-flow-approve-password",
+      roleCode: "LENDER_CREDIT_APPROVER",
+    });
+    const maker = await loginOperator({
+      loginName: "lender.flow.contractmaker",
+      password: "controlled-flow-contract-maker-password",
+      roleCode: "LENDER_CONTRACT_MAKER",
+    });
+    const checker = await loginOperator({
+      loginName: "lender.flow.contractchecker",
+      password: "controlled-flow-contract-checker-password",
+      roleCode: "LENDER_CONTRACT_CHECKER",
+    });
+    await adminClient.query(
+      `INSERT INTO lender_operator_account_roles (account_id, role_code)
+       SELECT id, 'LENDER_CONTRACT_CHECKER' FROM lender_operator_accounts
+        WHERE login_name = 'lender.flow.contractmaker'`,
+    );
+    const created = await serverModule.app.inject({
+      method: "POST",
+      url: "/v1/lender-operator/cases/controlled-preview",
+      headers: {
+        origin: lenderOperatorOrigin,
+        cookie: admin.cookieHeader,
+        "x-csrf-token": admin.csrfToken,
+      },
+      payload: {
+        caseRef: "lcase_testcase0002",
+        externalApplicationRef: "application:test-case-002",
+        applicantEvidenceRef: "vault://lender/cases/test-case-002",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const caseId = created.json<{ caseId: string }>().caseId;
+    const act = async (
+      operator: Readonly<{ cookieHeader: string; csrfToken: string }>,
+      action: string,
+      payload?: Record<string, unknown>,
+    ) =>
+      serverModule.app.inject({
+        method: "POST",
+        url: `/v1/lender-operator/cases/${caseId}/actions`,
+        headers: {
+          origin: lenderOperatorOrigin,
+          cookie: operator.cookieHeader,
+          "x-csrf-token": operator.csrfToken,
+        },
+        payload: {
+          action,
+          evidenceReference: `vault://lender/cases/${action.toLowerCase()}`,
+          ...payload,
+        },
+      });
+    expect((await act(kyc, "KYC_AML_PASSED")).statusCode).toBe(200);
+    expect((await act(reviewer, "CREDIT_REVIEW_PASSED")).statusCode).toBe(200);
+    expect(
+      (
+        await act(approver, "CREDIT_APPROVED", {
+          decision: {
+            approvedAmountMinor: "5000",
+            termDays: 15,
+            pricingRuleRef: "rule-001",
+          },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await act(maker, "CONTRACT_DRAFTED")).statusCode).toBe(200);
+
+    const samePersonAttempt = await act(maker, "CONTRACT_APPROVED");
+    expect(samePersonAttempt.statusCode).toBe(409);
+    const accepted = await act(checker, "CONTRACT_APPROVED");
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toMatchObject({
+      stage: "DISBURSEMENT_MAKER",
+      status: "OPEN",
+    });
   });
 });

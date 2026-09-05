@@ -1069,11 +1069,7 @@ function telegramInitData(): string | undefined {
   // rather than permanently falling back to the unauthenticated profile state.
   prepareTelegramWebApp(webApp);
   try {
-    return resolveTelegramInitData(
-      webApp,
-      window.location,
-      window.sessionStorage,
-    );
+    return resolveTelegramInitData(webApp, window.location);
   } catch {
     return webApp?.initData || undefined;
   }

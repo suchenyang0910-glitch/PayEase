@@ -1,22 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   prepareTelegramWebApp,
-  readStoredTelegramInitData,
   resolveTelegramInitData,
   telegramInitDataFromLaunchParams,
 } from "../src/telegram-webapp-init-data.ts";
-
-function memoryStorage(seed?: Record<string, string>) {
-  const data = new Map(Object.entries(seed ?? {}));
-  return {
-    getItem(key: string) {
-      return data.get(key) ?? null;
-    },
-    setItem(key: string, value: string) {
-      data.set(key, value);
-    },
-  };
-}
 
 describe("telegram init data recovery", () => {
   it("signals each Telegram bridge only once while initData is polled", () => {
@@ -41,28 +28,17 @@ describe("telegram init data recovery", () => {
   });
 
   it("falls back to launch params when Telegram bridge is not ready", () => {
-    const storage = memoryStorage();
-
     expect(
-      resolveTelegramInitData(
-        undefined,
-        {
-          search: "?tgWebAppData=query_id%3Dxyz%26user%3D2",
-          hash: "",
-        },
-        storage,
-      ),
+      resolveTelegramInitData(undefined, {
+        search: "?tgWebAppData=query_id%3Dxyz%26user%3D2",
+        hash: "",
+      }),
     ).toBe("query_id=xyz&user=2");
-    expect(readStoredTelegramInitData(storage)).toBe("query_id=xyz&user=2");
   });
 
-  it("reuses cached init data after a same-webview refresh", () => {
-    const storage = memoryStorage({
-      "payease.telegram.initData": "query_id=cached&user=3",
-    });
-
-    expect(resolveTelegramInitData({}, { search: "", hash: "" }, storage)).toBe(
-      "query_id=cached&user=3",
-    );
+  it("does not recover initData from browser storage after a refresh", () => {
+    expect(
+      resolveTelegramInitData({}, { search: "", hash: "" }),
+    ).toBeUndefined();
   });
 });

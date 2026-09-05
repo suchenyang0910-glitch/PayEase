@@ -1,14 +1,11 @@
 type TelegramLaunchLocation = Pick<Location, "search" | "hash">;
 
-type StorageLike = Pick<Storage, "getItem" | "setItem">;
-
 type TelegramWebAppLike = Readonly<{
   initData?: string;
   ready?: () => void;
   expand?: () => void;
 }>;
 
-const TELEGRAM_INIT_DATA_STORAGE_KEY = "payease.telegram.initData";
 const preparedTelegramWebApps = new WeakSet<object>();
 
 /**
@@ -47,37 +44,13 @@ export function telegramInitDataFromLaunchParams(
   return readTelegramInitDataFromParams(new URLSearchParams(hash));
 }
 
-export function readStoredTelegramInitData(
-  storageLike: StorageLike,
-): string | undefined {
-  const stored = storageLike.getItem(TELEGRAM_INIT_DATA_STORAGE_KEY)?.trim();
-  return stored ? stored : undefined;
-}
-
-export function storeTelegramInitData(
-  initData: string,
-  storageLike: StorageLike,
-): void {
-  storageLike.setItem(TELEGRAM_INIT_DATA_STORAGE_KEY, initData);
-}
-
 export function resolveTelegramInitData(
   webApp: TelegramWebAppLike | undefined,
   locationLike: TelegramLaunchLocation,
-  storageLike: StorageLike,
 ): string | undefined {
   const direct = webApp?.initData?.trim();
-  if (direct) {
-    storeTelegramInitData(direct, storageLike);
-    return direct;
-  }
+  if (direct) return direct;
 
   const fromLaunchParams = telegramInitDataFromLaunchParams(locationLike);
-  if (fromLaunchParams) {
-    storeTelegramInitData(fromLaunchParams, storageLike);
-    return fromLaunchParams;
-  }
-
-  if (!webApp) return undefined;
-  return readStoredTelegramInitData(storageLike);
+  return fromLaunchParams;
 }

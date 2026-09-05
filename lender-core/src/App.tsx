@@ -231,6 +231,9 @@ const COPY: Record<Language, Record<string, string>> = {
   "zh-CN": {
     title: "持牌机构资金操作台",
     subtitle: "受控人工操作 · 经办与复核分离",
+    operatorAccountDescription:
+      "请使用持牌机构操作账号登录。浏览器预览访问验证是独立保护步骤。",
+    language: "语言",
     account: "账号",
     password: "密码",
     signIn: "登录",
@@ -258,6 +261,9 @@ const COPY: Record<Language, Record<string, string>> = {
   en: {
     title: "Lender Funds Operations",
     subtitle: "Controlled manual operations · maker/checker separation",
+    operatorAccountDescription:
+      "Use the lender operator account. Browser preview access is a separate protection step.",
+    language: "Language",
     account: "Account",
     password: "Password",
     signIn: "Sign in",
@@ -287,6 +293,9 @@ const COPY: Record<Language, Record<string, string>> = {
     title: "ប្រតិបត្តិការហិរញ្ញវត្ថុស្ថាប័ន",
     subtitle:
       "ប្រតិបត្តិការដោយដៃដែលគ្រប់គ្រង · បំបែកអ្នកធ្វើ និងអ្នកត្រួតពិនិត្យ",
+    operatorAccountDescription:
+      "សូមប្រើគណនីប្រតិបត្តិការរបស់ស្ថាប័នដើម្បីចូលប្រើ។ ការផ្ទៀងផ្ទាត់ចូលប្រើតាមកម្មវិធីរុករកគឺជាជំហានការពារដាច់ដោយឡែក។",
+    language: "ភាសា",
     account: "គណនី",
     password: "ពាក្យសម្ងាត់",
     signIn: "ចូលប្រើ",
@@ -712,10 +721,7 @@ export function App(): JSX.Element {
         <section className="lender-card login-card">
           <h1>{c.title}</h1>
           <p>{c.subtitle}</p>
-          <p>
-            This form uses the lender operator account. Browser preview access
-            is a separate protection step.
-          </p>
+          <p>{c.operatorAccountDescription}</p>
           <form onSubmit={(event) => void signIn(event)}>
             <label>
               {c.account}
@@ -737,7 +743,7 @@ export function App(): JSX.Element {
               />
             </label>
             <label>
-              Language
+              {c.language}
               <select
                 value={language}
                 onChange={(event) =>

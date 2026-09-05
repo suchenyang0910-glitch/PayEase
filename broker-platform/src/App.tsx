@@ -540,6 +540,12 @@ function Login({
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(initialError);
+  const displayedError =
+    error === "loginFailed"
+      ? BROKER_COPY[language].loginFailed
+      : error === "sessionFailed"
+        ? BROKER_COPY[language].sessionFailed
+        : error;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
@@ -548,15 +554,15 @@ function Login({
         method: "POST",
         body: JSON.stringify({ loginName, password }),
       });
-      if (!response.ok) return setError(BROKER_COPY[language].loginFailed);
+      if (!response.ok) return setError("loginFailed");
       const me = await request("/v1/local/auth/me");
-      if (!me.ok) return setError(BROKER_COPY[language].sessionFailed);
+      if (!me.ok) return setError("sessionFailed");
       // The account's saved language wins at sign-in. The login screen's
       // selector remains useful for a first-time operator and error copy, but
       // must never overwrite a returning operator's stored preference.
       onLogin((await me.json()) as Identity);
     } catch {
-      setError(BROKER_COPY[language].sessionFailed);
+      setError("sessionFailed");
     }
   };
   return (
@@ -588,7 +594,13 @@ function Login({
             {BROKER_COPY[language].language}
             <select
               value={language}
-              onChange={(event) => setLanguage(event.target.value as Language)}
+              onChange={(event) => {
+                setLanguage(event.target.value as Language);
+                // Server failures are rendered from a copy key. Clear legacy
+                // session text so a manual language switch never leaves a
+                // mixed-language login page behind.
+                setError("");
+              }}
             >
               {Object.entries(LANGUAGE_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -598,7 +610,7 @@ function Login({
             </select>
           </label>
           <button>{BROKER_COPY[language].signIn}</button>
-          {error ? <p role="alert">{error}</p> : null}
+          {displayedError ? <p role="alert">{displayedError}</p> : null}
         </form>
       </section>
     </main>

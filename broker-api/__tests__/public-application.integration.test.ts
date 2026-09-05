@@ -316,6 +316,17 @@ integration("public applicant access", () => {
        VALUES ('telegram-99112233', 'en') RETURNING id`,
     );
     try {
+      const unsupportedMediaType = await brokerApi.app.inject({
+        method: "POST",
+        url: "/v1/local/internal/telegram-bot-updates/444444444",
+        headers: { "content-type": "application/xml" },
+        payload: "<not-a-telegram-update />",
+      });
+      expect(unsupportedMediaType.statusCode).toBe(415);
+      expect(unsupportedMediaType.json()).toMatchObject({
+        code: "UNSUPPORTED_MEDIA_TYPE",
+      });
+
       const unauthorized = await brokerApi.app.inject({
         method: "POST",
         url: "/v1/local/internal/telegram-bot-updates/444444444",

@@ -364,6 +364,28 @@ app.setErrorHandler((error, request, reply) => {
       request_id: request.traceId ?? currentTraceId(),
     });
   }
+  // Preserve framework-generated client errors (for example an unsupported
+  // webhook content type). Treating these as a 500 turns malformed external
+  // input into a false service-outage signal and obscures caller remediation.
+  const clientStatusCode =
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof error.statusCode === "number" &&
+    Number.isInteger(error.statusCode) &&
+    error.statusCode >= 400 &&
+    error.statusCode < 500
+      ? error.statusCode
+      : undefined;
+  if (clientStatusCode !== undefined) {
+    return reply.code(clientStatusCode).send({
+      code:
+        clientStatusCode === 415
+          ? "UNSUPPORTED_MEDIA_TYPE"
+          : "CLIENT_REQUEST_ERROR",
+      request_id: request.traceId ?? currentTraceId(),
+    });
+  }
   // Internal errors can contain database constraint names, ciphertext parsing
   // details, or other operational context. Log them for operators, but do not
   // expose that detail to an applicant or back-office browser.

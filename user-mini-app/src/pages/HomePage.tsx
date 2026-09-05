@@ -234,6 +234,14 @@ export function HomePage({
 }: Props): JSX.Element {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
+
+    try {
+      const stored = window.localStorage.getItem("payease.theme");
+      if (stored === "light" || stored === "dark") return stored;
+    } catch {
+      /* storage access may be restricted inside Telegram WebView */
+    }
+
     const saved = document.documentElement.getAttribute("data-theme");
     if (saved === "dark" || saved === "light") return saved;
     return window.matchMedia?.("(prefers-color-scheme: dark)").matches
@@ -249,15 +257,6 @@ export function HomePage({
       /* storage access may be restricted inside Telegram WebView */
     }
   }, [theme]);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem("payease.theme");
-      if (stored === "light" || stored === "dark") setTheme(stored);
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   const ui = {
     brand: pick<string>(language, {

@@ -708,4 +708,28 @@ describe("user-mini-app P0 skeleton navigation", () => {
       screen.queryByRole("button", { name: "Toggle theme" }),
     ).not.toBeInTheDocument();
   });
+
+  it("restores a saved theme before the first render can overwrite it", async () => {
+    const storage: Record<string, string> = { "payease.theme": "light" };
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage[key] ?? null,
+        setItem: (key: string, value: string) => {
+          storage[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete storage[key];
+        },
+        clear: () => {
+          for (const key of Object.keys(storage)) delete storage[key];
+        },
+      },
+    });
+    document.documentElement.removeAttribute("data-theme");
+
+    await renderEnglishApp();
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(window.localStorage.getItem("payease.theme")).toBe("light");
+  });
 });

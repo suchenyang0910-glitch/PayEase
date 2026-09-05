@@ -26,7 +26,10 @@ import {
   type SingleKycLocationSnapshot,
 } from "./telegram-location.ts";
 import { requestTelegramPhoneContact } from "./telegram-phone-contact.ts";
-import { resolveTelegramInitData } from "./telegram-webapp-init-data.ts";
+import {
+  prepareTelegramWebApp,
+  resolveTelegramInitData,
+} from "./telegram-webapp-init-data.ts";
 import {
   APPLICATION_FORM_STEPS,
   useApplicationDraft,
@@ -1062,10 +1065,9 @@ function telegramUserRef(): string {
 function telegramInitData(): string | undefined {
   const webApp = telegramWebApp();
   // Telegram's bridge can arrive just after the Vite bundle in an embedded
-  // WebView. Signal readiness and allow the caller to retry briefly rather
-  // than permanently falling back to the unauthenticated profile state.
-  webApp?.ready?.();
-  webApp?.expand?.();
+  // WebView. Signal readiness once and allow the caller to retry briefly
+  // rather than permanently falling back to the unauthenticated profile state.
+  prepareTelegramWebApp(webApp);
   try {
     return resolveTelegramInitData(
       webApp,

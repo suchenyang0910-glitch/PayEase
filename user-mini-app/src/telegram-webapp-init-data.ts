@@ -4,9 +4,26 @@ type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
 type TelegramWebAppLike = Readonly<{
   initData?: string;
+  ready?: () => void;
+  expand?: () => void;
 }>;
 
 const TELEGRAM_INIT_DATA_STORAGE_KEY = "payease.telegram.initData";
+const preparedTelegramWebApps = new WeakSet<object>();
+
+/**
+ * Signal the Telegram bridge exactly once for each bridge instance. Session
+ * recovery polls for late initData, so calling ready/expand from that polling
+ * path would otherwise emit the same WebView event repeatedly.
+ */
+export function prepareTelegramWebApp(
+  webApp: TelegramWebAppLike | undefined,
+): void {
+  if (!webApp || preparedTelegramWebApps.has(webApp)) return;
+  preparedTelegramWebApps.add(webApp);
+  webApp.ready?.();
+  webApp.expand?.();
+}
 
 function readTelegramInitDataFromParams(
   params: URLSearchParams,

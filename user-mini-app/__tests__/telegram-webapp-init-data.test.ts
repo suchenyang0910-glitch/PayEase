@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  prepareTelegramWebApp,
   readStoredTelegramInitData,
   resolveTelegramInitData,
   telegramInitDataFromLaunchParams,
@@ -18,6 +19,18 @@ function memoryStorage(seed?: Record<string, string>) {
 }
 
 describe("telegram init data recovery", () => {
+  it("signals each Telegram bridge only once while initData is polled", () => {
+    const ready = vi.fn();
+    const expand = vi.fn();
+    const webApp = { ready, expand };
+
+    prepareTelegramWebApp(webApp);
+    prepareTelegramWebApp(webApp);
+
+    expect(ready).toHaveBeenCalledTimes(1);
+    expect(expand).toHaveBeenCalledTimes(1);
+  });
+
   it("reads init data from Telegram launch hash params", () => {
     expect(
       telegramInitDataFromLaunchParams({

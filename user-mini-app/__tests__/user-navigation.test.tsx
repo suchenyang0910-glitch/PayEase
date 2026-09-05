@@ -117,7 +117,7 @@ describe("user-mini-app P0 skeleton navigation", () => {
     ).toBeInTheDocument();
   });
 
-  it("localizes Chinese Home accessibility labels instead of retaining English labels", () => {
+  it("localizes Chinese Home and Profile accessibility labels instead of retaining English labels", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "ជ្រើសរើសភាសាចិន" }));
 
@@ -143,6 +143,20 @@ describe("user-mini-app P0 skeleton navigation", () => {
       screen.queryByRole("button", {
         name: "Start loan application from credit card",
       }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "我的" }));
+    expect(
+      screen.getByRole("region", { name: "Telegram 用户资料" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "个人中心安全说明" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "客服与投诉" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Telegram profile" }),
     ).toBeNull();
   });
 

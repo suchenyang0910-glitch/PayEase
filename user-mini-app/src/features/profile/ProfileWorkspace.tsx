@@ -61,10 +61,57 @@ export function ProfileWorkspace({
   serviceCaseLabel,
 }: ProfileWorkspaceProps): JSX.Element {
   const copy = USER_SKELETON_COPY[language].profile;
+  const accessibility = {
+    telegramProfile:
+      language === "en"
+        ? "Telegram profile"
+        : language === "zh-CN"
+          ? "Telegram 用户资料"
+          : "ទិន្នន័យអ្នកប្រើ Telegram",
+    profileOverview:
+      language === "en"
+        ? "Profile overview"
+        : language === "zh-CN"
+          ? "个人资料概览"
+          : "សេចក្តីសង្ខេបគណនី",
+    application:
+      language === "en"
+        ? "My application"
+        : language === "zh-CN"
+          ? "我的申请"
+          : "ពាក្យសុំរបស់ខ្ញុំ",
+    bill:
+      language === "en"
+        ? "My bill"
+        : language === "zh-CN"
+          ? "我的账单"
+          : "វិក្កយបត្ររបស់ខ្ញុំ",
+    privacy:
+      language === "en"
+        ? "Privacy and consent"
+        : language === "zh-CN"
+          ? "隐私与授权"
+          : "ភាពឯកជន និងការអនុញ្ញាត",
+    safety:
+      language === "en"
+        ? "Profile safety note"
+        : language === "zh-CN"
+          ? "个人中心安全说明"
+          : "សេចក្តីជូនដំណឹងសុវត្ថិភាពគណនី",
+    support:
+      language === "en"
+        ? "Customer support and complaints"
+        : language === "zh-CN"
+          ? "客服与投诉"
+          : "សេវាអតិថិជន និងបណ្តឹង",
+  };
 
   return (
     <ProfilePage language={language}>
-      <section className="profile-hero" aria-label="Telegram profile">
+      <section
+        className="profile-hero"
+        aria-label={accessibility.telegramProfile}
+      >
         <div className="profile-hero__avatar" aria-hidden="true">
           {trustedPhotoUrl ? (
             <img src={trustedPhotoUrl} alt="" onError={onProfilePhotoError} />
@@ -83,7 +130,7 @@ export function ProfileWorkspace({
           ) : null}
         </div>
       </section>
-      <dl className="profile-list" aria-label="Profile overview">
+      <dl className="profile-list" aria-label={accessibility.profileOverview}>
         <div>
           <dt>{copy.telegram}</dt>
           <dd aria-label={copy.telegram}>
@@ -103,24 +150,12 @@ export function ProfileWorkspace({
           <dd aria-label={copy.factory}>{currentFactory ?? "—"}</dd>
         </div>
         <div>
-          <dt>
-            {language === "en"
-              ? "My application"
-              : language === "zh-CN"
-                ? "我的申请"
-                : "ពាក្យសុំរបស់ខ្ញុំ"}
-          </dt>
-          <dd aria-label="My application">{applicationSummary}</dd>
+          <dt>{accessibility.application}</dt>
+          <dd aria-label={accessibility.application}>{applicationSummary}</dd>
         </div>
         <div>
-          <dt>
-            {language === "en"
-              ? "My bill"
-              : language === "zh-CN"
-                ? "我的账单"
-                : "វិក្កយបត្ររបស់ខ្ញុំ"}
-          </dt>
-          <dd aria-label="My bill">{billSummary}</dd>
+          <dt>{accessibility.bill}</dt>
+          <dd aria-label={accessibility.bill}>{billSummary}</dd>
         </div>
         <div>
           <dt>{kycLocationLabel}</dt>
@@ -131,14 +166,8 @@ export function ProfileWorkspace({
           <dd aria-label={copy.language}>{languageLabel}</dd>
         </div>
         <div>
-          <dt>
-            {language === "en"
-              ? "Privacy and consent"
-              : language === "zh-CN"
-                ? "隐私与授权"
-                : "ភាពឯកជន និងការអនុញ្ញាត"}
-          </dt>
-          <dd aria-label="Privacy and consent">
+          <dt>{accessibility.privacy}</dt>
+          <dd aria-label={accessibility.privacy}>
             {language === "en"
               ? "View signed service and authorization records"
               : language === "zh-CN"
@@ -151,7 +180,7 @@ export function ProfileWorkspace({
           <dd aria-label={copy.support}>KhmerXBot</dd>
         </div>
       </dl>
-      <section className="next-payment" aria-label="Profile safety note">
+      <section className="next-payment" aria-label={accessibility.safety}>
         <strong>
           {language === "en"
             ? "Safety note"
@@ -167,10 +196,7 @@ export function ProfileWorkspace({
               : "ទំព័រនេះមិនបង្ហាញ Telegram ID លេខទូរស័ព្ទដើម ឯកសារអត្តសញ្ញាណ លេខគណនីពេញលេញ ឬពិន្ទុខាងក្នុងទេ។"}
         </small>
       </section>
-      <section
-        className="support-card"
-        aria-label="Customer support and complaints"
-      >
+      <section className="support-card" aria-label={accessibility.support}>
         <div className="support-card__header">
           <strong>
             {language === "en"

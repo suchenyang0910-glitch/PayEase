@@ -52,11 +52,15 @@ async function canAdoptLegacyBaseline(client: PoolClient): Promise<boolean> {
     adminSessions: string | null;
     immutableInstallments: string | null;
   }>(
-    `SELECT to_regclass('public.applications')::text AS applications,
-            to_regclass('public.telegram_auth_sessions')::text AS sessions,
-            to_regclass('public.repayment_installments')::text AS installments,
-            to_regclass('public.reconciliation_work_items')::text AS reconciliation,
-            to_regclass('public.admin_sessions')::text AS "adminSessions",
+    // Resolve through the active search_path. Production continues to use
+    // public by default, while isolated PostgreSQL integration schemas can
+    // safely exercise the same migration runner without a superuser-owned
+    // public schema.
+    `SELECT to_regclass('applications')::text AS applications,
+            to_regclass('telegram_auth_sessions')::text AS sessions,
+            to_regclass('repayment_installments')::text AS installments,
+            to_regclass('reconciliation_work_items')::text AS reconciliation,
+            to_regclass('admin_sessions')::text AS "adminSessions",
             to_regprocedure('deny_paid_repayment_installment_mutation()')::text AS "immutableInstallments"`,
   );
   const row = result.rows[0];

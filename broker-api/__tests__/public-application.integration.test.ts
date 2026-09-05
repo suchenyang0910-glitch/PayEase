@@ -18,6 +18,7 @@ import { hashPassword } from "../src/passwords.js";
 // DATABASE_URL. CI supplies this explicit, disposable PostgreSQL service.
 const integrationDatabaseUrl = process.env.PAYEASE_TEST_DATABASE_URL;
 const integration = integrationDatabaseUrl ? describe : describe.skip;
+const integrationSchema = `broker_app_${randomUUID().replace(/-/g, "")}`;
 
 type BrokerApi = typeof import("../src/server.js");
 
@@ -41,6 +42,14 @@ function signedInitData(
     createHmac("sha256", secret).update(dataCheckString).digest("hex"),
   );
   return parameters.toString();
+}
+
+function scopedIntegrationDatabaseUrl(): string {
+  if (!integrationDatabaseUrl)
+    throw new Error("PAYEASE_TEST_DATABASE_URL is required");
+  const url = new URL(integrationDatabaseUrl);
+  url.searchParams.set("options", `-c search_path=${integrationSchema},public`);
+  return url.toString();
 }
 
 function signedLenderEventHeaders(
@@ -208,11 +217,19 @@ function day2ApplicationPayload(
 
 integration("public applicant access", () => {
   let database: Pool;
+  let cleanupDatabase: Pool;
   let brokerApi: BrokerApi;
 
   beforeAll(async () => {
-    database = new Pool({ connectionString: integrationDatabaseUrl, max: 1 });
-    await database.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
+    cleanupDatabase = new Pool({
+      connectionString: integrationDatabaseUrl,
+      max: 1,
+    });
+    await cleanupDatabase.query(`CREATE SCHEMA "${integrationSchema}"`);
+    database = new Pool({
+      connectionString: scopedIntegrationDatabaseUrl(),
+      max: 1,
+    });
     await runDatabaseMigrations(database);
     // A production restart must not rerun or mutate an applied migration.
     await runDatabaseMigrations(database);
@@ -223,7 +240,7 @@ integration("public applicant access", () => {
       filename: "V0047__lender_wallet_operation_result_projection.sql",
     });
     process.env.NODE_ENV = "test";
-    process.env.DATABASE_URL = integrationDatabaseUrl;
+    process.env.DATABASE_URL = scopedIntegrationDatabaseUrl();
     process.env.PAYEASE_PII_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString(
       "base64",
     );
@@ -251,6 +268,12 @@ integration("public applicant access", () => {
   afterAll(async () => {
     await brokerApi?.close();
     await database?.end();
+    if (cleanupDatabase) {
+      await cleanupDatabase.query(
+        `DROP SCHEMA IF EXISTS "${integrationSchema}" CASCADE`,
+      );
+      await cleanupDatabase.end();
+    }
   });
 
   it("exposes separate liveness and PostgreSQL readiness probes with trace IDs", async () => {

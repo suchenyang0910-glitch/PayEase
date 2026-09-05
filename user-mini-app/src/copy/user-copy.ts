@@ -99,7 +99,7 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
     tabs: {
       home: "首页",
       orders: "借款",
-      repayment: "账单",
+      repayment: "钱包",
       profile: "我的",
     },
     backToOrders: "返回订单",
@@ -134,12 +134,12 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       empty: "通知不存在或尚未加载。",
     },
     repayment: {
-      title: "账单",
-      empty: "尚未生成账单；放款成功后将在此显示还款计划。",
-      summary: "已还、未还与下一期概要",
+      title: "钱包",
+      empty: "钱包暂未入账；放款成功后将在此显示资金与还款计划。",
+      summary: "钱包资金、已还、未还与下一期概要",
       installmentList: "每期详情",
       authorizationNotice:
-        "请通过持牌机构的受控钱包页面完成还款授权；账单仅在验签回调后更新。如需协助请联系客服。",
+        "请通过持牌机构的受控钱包页面完成提现或还款授权；钱包记录仅在验签回调后更新。如需协助请联系客服。",
       support: "联系客服",
     },
     profile: {
@@ -162,7 +162,7 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
     tabs: {
       home: "Home",
       orders: "Borrow",
-      repayment: "Bill",
+      repayment: "Wallet",
       profile: "Me",
     },
     backToOrders: "Back to orders",
@@ -198,13 +198,13 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       empty: "Notification not found or not loaded yet.",
     },
     repayment: {
-      title: "Repayment",
+      title: "Wallet",
       empty:
-        "No repayment schedule yet. It will appear after the licensed lender records disbursement.",
-      summary: "Paid, unpaid and next-installment overview",
+        "No wallet funds or repayment schedule yet. They will appear after the licensed lender records disbursement.",
+      summary: "Wallet funds, paid, unpaid and next-installment overview",
       installmentList: "Installment details",
       authorizationNotice:
-        "Complete repayment authorization in the licensed lender's controlled wallet page. Your bill updates only after the signed callback returns. Contact support if you need assistance.",
+        "Complete withdrawal or repayment authorization in the licensed lender's controlled wallet page. Wallet records update only after the signed callback returns. Contact support if you need assistance.",
       support: "Contact support",
     },
     profile: {
@@ -227,7 +227,7 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
     tabs: {
       home: "ទំព័រដើម",
       orders: "ខ្ចីប្រាក់",
-      repayment: "វិក្កយបត្រ",
+      repayment: "កាបូប",
       profile: "របស់ខ្ញុំ",
     },
     backToOrders: "ត្រឡប់ទៅបញ្ជីពាក្យ",
@@ -263,13 +263,13 @@ export const USER_SKELETON_COPY: UserSkeletonCopyTable = {
       empty: "រកមិនឃើញសារ​ជូនដំណឹង ឬមិនទាន់បានផ្ទុកឡើង។",
     },
     repayment: {
-      title: "ការសងប្រាក់",
+      title: "កាបូប",
       empty:
-        "មិនទាន់មានតារាងសងប្រាក់។ វានឹងបង្ហាញនៅទីនេះ បន្ទាប់ពីស្ថាប័នមានអាជ្ញាប័ណ្ណបានកត់ត្រាការបើកប្រាក់។",
-      summary: "សេចក្តីសង្ខេបនៃចំនួនដែលបានសង មិនទាន់សង និងការសងបន្ទាប់",
+        "មិនទាន់មានប្រាក់ចូលកាបូប ឬតារាងសងប្រាក់ទេ។ វានឹងបង្ហាញនៅទីនេះ បន្ទាប់ពីស្ថាប័នមានអាជ្ញាប័ណ្ណបានកត់ត្រាការបើកប្រាក់។",
+      summary: "ប្រាក់ក្នុងកាបូប ចំនួនដែលបានសង មិនទាន់សង និងការសងបន្ទាប់",
       installmentList: "លម្អិតនីមួយវគ្គ",
       authorizationNotice:
-        "សូមបំពេញការអនុញ្ញាតសងប្រាក់នៅក្នុងទំព័រ wallet ដែលគ្រប់គ្រងដោយស្ថាប័នមានអាជ្ញាប័ណ្ណ។ វិក្កយបត្រនឹងអាប់ដេតតែបន្ទាប់ពីការហៅត្រឡប់ដែលបានផ្ទៀងផ្ទាត់។ សូមទាក់ទងសេវាកម្ម ប្រសិនបើត្រូវការជំនួយ។",
+        "សូមបំពេញការអនុញ្ញាតដកប្រាក់ ឬសងប្រាក់នៅក្នុងទំព័រ wallet ដែលគ្រប់គ្រងដោយស្ថាប័នមានអាជ្ញាប័ណ្ណ។ កំណត់ត្រាកាបូបនឹងអាប់ដេតតែបន្ទាប់ពីការហៅត្រឡប់ដែលបានផ្ទៀងផ្ទាត់។ សូមទាក់ទងសេវាកម្ម ប្រសិនបើត្រូវការជំនួយ។",
       support: "ទាក់ទងសេវាកម្ម",
     },
     profile: {

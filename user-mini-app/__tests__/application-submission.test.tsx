@@ -133,7 +133,7 @@ function currentTabLabel(
       : label === "orders"
         ? "Borrow"
         : label === "repayment"
-          ? "Bill"
+          ? "Wallet"
           : "Me";
   }
   if (text.includes("首页") || text.includes("借款") || text.includes("我的")) {
@@ -142,7 +142,7 @@ function currentTabLabel(
       : label === "orders"
         ? "借款"
         : label === "repayment"
-          ? "账单"
+          ? "钱包"
           : "我的";
   }
   return label === "home"
@@ -150,7 +150,7 @@ function currentTabLabel(
     : label === "orders"
       ? "ខ្ចីប្រាក់"
       : label === "repayment"
-        ? "វិក្កយបត្រ"
+        ? "កាបូប"
         : "របស់ខ្ញុំ";
 }
 

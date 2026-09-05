@@ -28,7 +28,7 @@ const TAB_LABELS: Readonly<
 > = {
   home: { "zh-CN": "首页", en: "Home", km: "ទំព័រដើម" },
   orders: { "zh-CN": "借款", en: "Borrow", km: "ខ្ចីប្រាក់" },
-  repayment: { "zh-CN": "账单", en: "Bill", km: "វិក្កយបត្រ" },
+  repayment: { "zh-CN": "钱包", en: "Wallet", km: "កាបូប" },
   profile: { "zh-CN": "我的", en: "Me", km: "របស់ខ្ញុំ" },
 };
 

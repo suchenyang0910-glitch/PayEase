@@ -353,10 +353,10 @@ export function notificationDeepLink(
       applicationNo: notification.applicationNo,
       label:
         language === "en"
-          ? "Open repayment"
+          ? "Open wallet"
           : language === "zh-CN"
-            ? "查看账单"
-            : "បើកការសងប្រាក់",
+            ? "查看钱包"
+            : "បើកកាបូប",
     };
   }
   if (notification.category === "REASSESSMENT") {

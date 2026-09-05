@@ -82,10 +82,10 @@ export function ProfileWorkspace({
           : "ពាក្យសុំរបស់ខ្ញុំ",
     bill:
       language === "en"
-        ? "My bill"
+        ? "My wallet"
         : language === "zh-CN"
-          ? "我的账单"
-          : "វិក្កយបត្ររបស់ខ្ញុំ",
+          ? "我的钱包"
+          : "កាបូបរបស់ខ្ញុំ",
     privacy:
       language === "en"
         ? "Privacy and consent"
